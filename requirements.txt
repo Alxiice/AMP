@@ -1,0 +1,5 @@
+yt-dlp
+ytmusicapi
+flask
+flask-cors
+sqlalchemy
