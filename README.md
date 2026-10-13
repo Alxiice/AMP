@@ -4,6 +4,119 @@ Another Music Player: a local music player based on YouTube Music library.
 
 ---
 
+## ✅ Phase 1: Backend Core - COMPLETE
+
+The first phase of the project is now complete! The backend skeleton includes:
+- FastAPI server with Uvicorn
+- SQLAlchemy database models (SQLite)
+- REST API endpoints for search, queues, and playback
+- Comprehensive test suite (20 tests)
+- Configuration management with Pydantic Settings
+- Logging setup
+- **Python virtual environment** for dependency isolation
+
+**Status**: Ready for Phase 2 (YouTube Integration)
+
+---
+
+## 🐍 Virtual Environment Setup
+
+A Python virtual environment (`venv/`) is included in the project for **dependency isolation** and **reproducible environments**.
+
+### Why Use a Virtual Environment?
+- ✅ Isolates project dependencies from system Python
+- ✅ Avoids package conflicts between projects
+- ✅ Makes it easy to replicate the exact development environment
+- ✅ Simplifies dependency management
+
+### Activate the Virtual Environment
+
+**From the project root (`AMP/`):**
+
+#### Windows CMD:
+```cmd
+activate.bat
+```
+
+#### Windows PowerShell:
+```powershell
+./activate.ps1
+```
+
+#### Manual activation:
+```cmd
+venv\Scripts\activate
+```
+
+Your command prompt should now show `(venv)` at the beginning.
+
+### Run Commands in the Virtual Environment
+
+After activating, you can:
+```bash
+# Run the server
+python backend/main.py
+
+# Run tests
+pytest backend/tests/ -v
+
+# Install new packages
+pip install package-name
+```
+
+### Deactivate
+```bash
+deactivate
+```
+
+### Recreate the Virtual Environment
+
+If you need to start fresh or switch Python versions:
+
+```cmd
+# Delete existing venv
+rmdir /s /q venv
+
+# Create new venv
+python -m venv venv
+
+# Activate and install dependencies
+venv\Scripts\activate
+pip install -r backend/requirements.txt
+```
+
+**Note**: The `venv/` directory is in `.gitignore` and should NOT be committed to version control.
+
+---
+
+## 📦 Project Structure
+
+```bash
+AMP/
+├── venv/                     # Python virtual environment
+│   ├── Scripts/             # Executables (activate.bat, python.exe)
+│   ├── Lib/                 # Installed packages
+│   └── README.md            # Venv documentation
+├── backend/
+│   ├── database/
+│   │   ├── models.py        # SQLAlchemy models
+│   │   └── session.py       # Database sessions
+│   ├── api/
+│   │   ├── server.py        # FastAPI app
+│   │   └── endpoints.py     # REST API routes
+│   ├── utils/
+│   │   └── logger.py        # Logging setup
+│   ├── config.py            # Configuration
+│   ├── main.py              # Entry point
+│   ├── requirements.txt     # Dependencies
+│   └── tests/               # Test suite
+├── .gitignore
+├── activate.bat             # Venv activation (CMD)
+└── activate.ps1             # Venv activation (PowerShell)
+```
+
+---
+
 ## Description
 
 **Features**
