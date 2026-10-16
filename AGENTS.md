@@ -20,7 +20,8 @@
 
 **Workflow:**
 ```
-Read AGENTS.md → Implement Feature → Update AGENTS.md → Commit → Ready for next session
+Read AGENTS.md → Implement Feature → Update AGENTS.md → Ready for next session
+Implementing feature should be done in logical steps as a software engineer would do. Each logical step will result in a single commit.
 ```
 
 ---
