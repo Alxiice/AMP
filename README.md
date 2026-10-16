@@ -55,10 +55,10 @@ Your command prompt should now show `(venv)` at the beginning.
 After activating, you can:
 ```bash
 # Run the server
-python backend/main.py
+python amp/backend/main.py
 
 # Run tests
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # Install new packages
 pip install package-name
@@ -82,7 +82,7 @@ python -m venv venv
 
 # Activate and install dependencies
 venv\Scripts\activate
-pip install -r backend/requirements.txt
+pip install -r amp/backend/requirements.txt
 ```
 
 **Note**: The `venv/` directory is in `.gitignore` and should NOT be committed to version control.

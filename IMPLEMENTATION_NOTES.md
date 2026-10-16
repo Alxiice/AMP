@@ -25,7 +25,7 @@ AMP/
 ├── activate.bat                        # Venv activation (CMD)
 ├── activate.ps1                        # Venv activation (PowerShell)
 ├── README.md                           # Main project documentation
-├── backend/
+├── amp/backend/
 │   ├── .env.example                    # Environment template
 │   ├── .gitignore                      # Backend-specific ignores
 │   ├── __init__.py
@@ -270,17 +270,17 @@ GET /api/playback/status
 
 ```bash
 # Run all tests
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # Run with coverage
-pytest backend/tests/ --cov=backend --cov-report=term
+pytest amp/backend/tests/ --cov=backend --cov-report=term
 
 # Run specific category
-pytest backend/tests/test_models.py -v
-pytest backend/tests/test_endpoints.py -v
+pytest amp/backend/tests/test_models.py -v
+pytest amp/backend/tests/test_endpoints.py -v
 
 # Run specific test
-pytest backend/tests/test_endpoints.py::TestHealthEndpoint::test_health_check -v
+pytest amp/backend/tests/test_endpoints.py::TestHealthEndpoint::test_health_check -v
 ```
 
 ### Test Checklist (Phase 1)
@@ -326,14 +326,14 @@ activate.bat
 venv\Scripts\activate
 
 # Install dependencies
-pip install -r backend/requirements.txt
+pip install -r amp/backend/requirements.txt
 ```
 
 ### Run the Server
 
 ```bash
 # From project root
-python backend/main.py
+python amp/backend/main.py
 
 # Server starts at: http://localhost:8000
 # API Docs: http://localhost:8000/docs
@@ -343,7 +343,7 @@ python backend/main.py
 ### Run Tests
 
 ```bash
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 ```
 
 ---
@@ -368,7 +368,7 @@ pytest backend/tests/ -v
 ### Installation
 
 ```bash
-pip install -r backend/requirements.txt
+pip install -r amp/backend/requirements.txt
 ```
 
 ---
@@ -409,8 +409,8 @@ pip install -r backend/requirements.txt
 | File | Description |
 |------|-------------|
 | `README.md` | Main project documentation |
-| `backend/README.md` | Backend-specific guide |
-| `backend/tests/README.md` | Testing instructions |
+| `amp/backend/README.md` | Backend-specific guide |
+| `amp/backend/tests/README.md` | Testing instructions |
 | `venv/README.md` | Virtual environment guide |
 
 ### Quick Links
@@ -459,16 +459,16 @@ pip install -r backend/requirements.txt
 | "Module not found" | Activate venv: `activate.bat` |
 | Port already in use | Kill process: `taskkill /PID <pid> /F` |
 | SQLite lock errors | Close other app instances |
-| Tests failing | Run: `pytest backend/tests/ -v` |
+| Tests failing | Run: `pytest amp/backend/tests/ -v` |
 
 ### Common Commands
 
 ```bash
 # Start server
-python backend/main.py
+python amp/backend/main.py
 
 # Run tests
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # Check installed packages
 pip list
@@ -477,7 +477,7 @@ pip list
 pip install --upgrade package-name
 
 # Freeze requirements
-pip freeze > backend/requirements.txt
+pip freeze > amp/backend/requirements.txt
 ```
 
 ---

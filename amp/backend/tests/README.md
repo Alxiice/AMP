@@ -27,7 +27,7 @@ This directory contains test scripts for the AMP backend. Tests are organized in
 
 2. Ensure the backend is properly configured:
    ```bash
-   cd backend
+   cd amp/backend
    ```
 
 ---
@@ -36,40 +36,40 @@ This directory contains test scripts for the AMP backend. Tests are organized in
 
 ### Run all tests
 ```bash
-pytest backend/tests/
+pytest amp/backend/tests/
 ```
 
 ### Run with coverage
 ```bash
-pytest backend/tests/ --cov=backend --cov-report=term
+pytest amp/backend/tests/ --cov=backend --cov-report=term
 ```
 
 ### Run specific test file
 ```bash
-pytest backend/tests/test_models.py
-pytest backend/tests/test_endpoints.py
+pytest amp/backend/tests/test_models.py
+pytest amp/backend/tests/test_endpoints.py
 ```
 
 ### Run specific test class
 ```bash
-pytest backend/tests/test_models.py::TestSongModel
-pytest backend/tests/test_endpoints.py::TestSearchEndpoint
+pytest amp/backend/tests/test_models.py::TestSongModel
+pytest amp/backend/tests/test_endpoints.py::TestSearchEndpoint
 ```
 
 ### Run specific test function
 ```bash
-pytest backend/tests/test_models.py::TestSongModel::test_create_song
-pytest backend/tests/test_endpoints.py::TestHealthEndpoint::test_health_check
+pytest amp/backend/tests/test_models.py::TestSongModel::test_create_song
+pytest amp/backend/tests/test_endpoints.py::TestHealthEndpoint::test_health_check
 ```
 
 ### Run with verbose output
 ```bash
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 ```
 
 ### Run with fail-fast (stop on first failure)
 ```bash
-pytest backend/tests/ -x
+pytest amp/backend/tests/ -x
 ```
 
 ---
@@ -79,7 +79,7 @@ pytest backend/tests/ -x
 ### After Creating Models (models.py)
 Run model tests to verify database schema:
 ```bash
-pytest backend/tests/test_models.py -v
+pytest amp/backend/tests/test_models.py -v
 ```
 
 **Expected output**:
@@ -88,7 +88,7 @@ pytest backend/tests/test_models.py -v
 ### After Creating Endpoints (endpoints.py)
 Run endpoint tests to verify API functionality:
 ```bash
-pytest backend/tests/test_endpoints.py -v
+pytest amp/backend/tests/test_endpoints.py -v
 ```
 
 **Expected output**:
@@ -141,7 +141,7 @@ For now, endpoints return **mock data** where real implementations are pending. 
 Make sure you're running pytest from the project root:
 ```bash
 cd E:\Documents\TRAVAIL\packages\AMP
-pytest backend/tests/
+pytest amp/backend/tests/
 ```
 
 ### Database lock errors
@@ -152,18 +152,18 @@ If you see SQLite lock errors, ensure:
 ### Import errors
 If you get import errors like `ModuleNotFoundError: No module named 'backend'`:
 1. Make sure you're in the project root directory
-2. Try: `PYTHONPATH=. pytest backend/tests/`
+2. Try: `PYTHONPATH=. pytest amp/backend/tests/`
 
 ---
 
 ## ✅ Test Checklist for Phase 1
 
-- [ ] `pytest backend/tests/test_models.py` - All model tests pass
-- [ ] `pytest backend/tests/test_endpoints.py::TestHealthEndpoint` - Health check works
-- [ ] `pytest backend/tests/test_endpoints.py::TestSearchEndpoint` - Search returns results
-- [ ] `pytest backend/tests/test_endpoints.py::TestSongEndpoint` - Song by ID works
-- [ ] `pytest backend/tests/test_endpoints.py::TestQueueEndpoints` - Queue operations work
-- [ ] `pytest backend/tests/test_endpoints.py::TestPlaybackEndpoints` - Playback controls work
-- [ ] `pytest backend/tests/ -v` - All tests pass
+- [ ] `pytest amp/backend/tests/test_models.py` - All model tests pass
+- [ ] `pytest amp/backend/tests/test_endpoints.py::TestHealthEndpoint` - Health check works
+- [ ] `pytest amp/backend/tests/test_endpoints.py::TestSearchEndpoint` - Search returns results
+- [ ] `pytest amp/backend/tests/test_endpoints.py::TestSongEndpoint` - Song by ID works
+- [ ] `pytest amp/backend/tests/test_endpoints.py::TestQueueEndpoints` - Queue operations work
+- [ ] `pytest amp/backend/tests/test_endpoints.py::TestPlaybackEndpoints` - Playback controls work
+- [ ] `pytest amp/backend/tests/ -v` - All tests pass
 
 **When all checks pass, Phase 1 (Backend Core) is complete!** 🎉

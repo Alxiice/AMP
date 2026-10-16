@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     
     # Directories
-    BASE_DIR: Path = Path(__file__).parent.parent
+    BASE_DIR: Path = Path(__file__).parent.parent.parent
     CACHE_DIR: Path = BASE_DIR / ".amp" / "cache"
     CHUNKS_DIR: Path = CACHE_DIR / "chunks"
     LOGS_DIR: Path = BASE_DIR / ".amp" / "logs"

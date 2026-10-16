@@ -184,7 +184,7 @@ pytest backend/tests/test_endpoints.py -v
 pytest backend/tests/test_endpoints.py::TestHealthEndpoint::test_health_check -v
 ```
 
-See [backend/tests/README.md](tests/README.md) for detailed test instructions.
+See [tests/README.md](tests/README.md) for detailed test instructions.
 
 ---
 

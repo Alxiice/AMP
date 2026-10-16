@@ -1,7 +1,7 @@
 # AMP Roadmap
 
 > **See Also**: For complete project details, refer to [README.md](README.md)  
-> **Current Phase**: Phase 1 (Backend Core) - ✅ COMPLETE
+> **Current Phase**: Phase 2 (YouTube Integration) - ✅ COMPLETE
 
 ---
 
@@ -48,10 +48,10 @@ The AMP project is divided into **10 logical phases** to progressively build a f
 #### Verification
 ```bash
 # Server should start
-python backend/main.py
+python amp/backend/main.py
 
 # All tests should pass
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # API should be accessible
 curl http://localhost:8000/api/health
@@ -59,33 +59,33 @@ curl http://localhost:8000/api/health
 
 ---
 
-### Phase 2: YouTube Integration ⏳ NEXT
+### Phase 2: YouTube Integration ✅ COMPLETE
 
 **Objective**: Integrate YouTube Music API for real data.
 
 #### Tasks
-- [ ] `ytmusicapi` integration for metadata
-  - [ ] Search functionality (songs, artists, albums, playlists)
-  - [ ] Song metadata fetching (title, artist, album, duration, thumbnail)
-  - [ ] Artist info fetching (bio, top tracks, albums)
-  - [ ] Album info fetching (tracks, artwork)
-  - [ ] Playlist info fetching (tracks, owner)
-- [ ] `yt-dlp` integration for audio
-  - [ ] Audio streaming from YouTube
-  - [ ] Chunk downloading (configurable size: 10s by default)
-  - [ ] Quality/format selection (MP3, 192kbps by default)
-- [ ] YouTube OAuth flow
-  - [ ] Authentication with YouTube
-  - [ ] Access to user playlists
-  - [ ] Access to liked songs
-  - [ ] Token storage and refresh
+- ✅ `ytmusicapi` integration for metadata
+  - ✅ Search functionality (songs, artists, albums, playlists)
+  - ✅ Song metadata fetching (title, artist, album, duration, thumbnail)
+  - ✅ Artist info fetching (bio, top tracks, albums)
+  - ✅ Album info fetching (tracks, artwork)
+  - ✅ Playlist info fetching (tracks, owner)
+- ✅ `yt-dlp` integration for audio
+  - ✅ Audio streaming from YouTube
+  - ✅ Chunk downloading (configurable size: 10s by default)
+  - ✅ Quality/format selection (MP3, 192kbps by default)
+- ✅ YouTube OAuth flow
+  - ✅ Authentication with YouTube
+  - ✅ Access to user playlists
+  - ✅ Access to liked songs
+  - ✅ Token storage and refresh
 
 #### Files to Modify
-- `backend/services/youtube.py` (NEW) - YouTube API integration
-- `backend/services/auth.py` (NEW) - OAuth flow
-- `backend/api/endpoints.py` - Replace mock data with real API calls
-- `backend/config.py` - Add YouTube API credentials
-- `backend/.env.example` - Add OAuth configuration
+- `amp/backend/services/youtube.py` (NEW) - YouTube API integration
+- `amp/backend/services/auth.py` (NEW) - OAuth flow
+- `amp/backend/api/endpoints.py` - Replace mock data with real API calls
+- `amp/backend/config.py` - Add YouTube API credentials
+- `amp/backend/.env.example` - Add OAuth configuration
 
 #### Dependencies
 - ytmusicapi (already installed)
@@ -120,10 +120,10 @@ curl http://localhost:8000/api/song/dQw4w9WgXcQ
   - [ ] Playback position tracking
 
 #### Files to Modify
-- `backend/services/streaming.py` (NEW) - Chunk streaming logic
-- `backend/utils/cache.py` (NEW) - Cache management
-- `backend/api/endpoints.py` - Add streaming endpoint
-- `backend/database/models.py` - Ensure `cached_chunks` table is complete
+- `amp/backend/services/streaming.py` (NEW) - Chunk streaming logic
+- `amp/backend/utils/cache.py` (NEW) - Cache management
+- `amp/backend/api/endpoints.py` - Add streaming endpoint
+- `amp/backend/database/models.py` - Ensure `cached_chunks` table is complete
 
 #### Verification
 ```bash
@@ -189,7 +189,7 @@ ls .amp/cache/chunks/
 
 #### Files to Modify
 - `frontend/src/services/audio.js` - Add buffer-ahead logic
-- `backend/api/endpoints.py` - Add buffer status endpoint
+- `amp/backend/api/endpoints.py` - Add buffer status endpoint
 
 #### Verification
 ```bash
@@ -288,7 +288,7 @@ ls .amp/cache/chunks/
 #### Files to Create
 - `tauri.conf.json` (NEW)
 - `frontend/tauri/` (NEW) - Tauri configuration
-- `backend/tauri_server.py` (NEW) - Server lifecycle management
+- `amp/backend/tauri_server.py` (NEW) - Server lifecycle management
 
 #### Verification
 ```bash
@@ -365,7 +365,7 @@ ls .amp/cache/chunks/
 | Phase | Status | Progress |
 |-------|--------|----------|
 | Phase 1: Backend Core | ✅ **COMPLETE** | 100% |
-| Phase 2: YouTube Integration | ⏳ **NEXT** | 0% |
+| Phase 2: YouTube Integration | ✅ **COMPLETE** | 100% |
 | Phase 3: Core Playback System | ⏳ | 0% |
 | Phase 4: Frontend Buffering | ⏳ | 0% |
 | Phase 5: Real-Time Chunk Fetching | ⏳ | 0% |
@@ -375,7 +375,7 @@ ls .amp/cache/chunks/
 | Phase 9: Android Support | ⏳ | 0% |
 | Phase 10: Testing & Polish | ⏳ | 0% |
 
-**Overall Progress**: 10% (1 of 10 phases complete)
+**Overall Progress**: 20% (2 of 10 phases complete)
 
 ---
 
@@ -384,7 +384,7 @@ ls .amp/cache/chunks/
 | Phase | Complexity | Estimated Time |
 |-------|------------|----------------|
 | Phase 1 | ✅ Done | 1 day |
-| Phase 2 | Medium | 1-2 days |
+| Phase 2 | ✅ Done | 1-2 days |
 | Phase 3 | Medium | 1 day |
 | Phase 4 | Medium | 1-2 days |
 | Phase 5 | Low | 0.5 days |
@@ -401,13 +401,13 @@ ls .amp/cache/chunks/
 
 ### MVP 1: Backend + Basic Playback
 - **Phases**: 1, 2, 3, 4
-- **Status**: 10% complete
+- **Status**: 20% complete
 - **Estimated**: 3-5 days
 - **Capabilities**: Backend with real YouTube data + basic playback
 
 ### MVP 2: Full Desktop App
 - **Phases**: 1-8
-- **Status**: 10% complete
+- **Status**: 20% complete
 - **Estimated**: 7-10 days
 - **Capabilities**: Full desktop app with library browsing and playback
 
@@ -429,5 +429,5 @@ ls .amp/cache/chunks/
 
 - [README.md](README.md) - Main project documentation
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) - Phase 1 implementation details
-- [backend/README.md](backend/README.md) - Backend-specific guide
-- [backend/tests/README.md](backend/tests/README.md) - Testing instructions
+- [amp/backend/README.md](amp/backend/README.md) - Backend-specific guide
+- [amp/backend/tests/README.md](amp/backend/tests/README.md) - Testing instructions

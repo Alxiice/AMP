@@ -44,12 +44,12 @@ Implementing feature should be done in logical steps as a software engineer woul
 2. **[ROADMAP.md](ROADMAP.md)** - Complete roadmap with all phases
 3. **[README.md](README.md)** - Main project documentation
 4. **[IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md)** - Phase 1 implementation details
-5. **[backend/README.md](backend/README.md)** - Backend-specific documentation
+5. **[amp/backend/README.md](amp/backend/README.md)** - Backend-specific documentation
 
 **Optional (as needed):**
-- [backend/api/endpoints.py](backend/api/endpoints.py) - API endpoints
-- [backend/database/models.py](backend/database/models.py) - Database models
-- [backend/config.py](backend/config.py) - Configuration
+- [amp/backend/api/endpoints.py](amp/backend/api/endpoints.py) - API endpoints
+- [amp/backend/database/models.py](amp/backend/database/models.py) - Database models
+- [amp/backend/config.py](amp/backend/config.py) - Configuration
 
 ---
 
@@ -59,33 +59,33 @@ Implementing feature should be done in logical steps as a software engineer woul
 
 | Category | Status | Files | Notes |
 |----------|--------|-------|-------|
-| Project Structure | ✅ Done | `backend/` | All directories created |
-| Configuration | ✅ Done | `backend/config.py` | Pydantic Settings |
-| Database Models | ✅ Done | `backend/database/models.py` | 10 tables |
-| Database Sessions | ✅ Done | `backend/database/session.py` | userdb + playdb |
-| Logging | ✅ Done | `backend/utils/logger.py` | File + console |
-| FastAPI Server | ✅ Done | `backend/api/server.py` | CORS enabled |
-| API Endpoints | ✅ Done | `backend/api/endpoints.py` | 12 endpoints |
-| Main Entry | ✅ Done | `backend/main.py` | Run server |
-| Dependencies | ✅ Done | `backend/requirements.txt` | All installed |
+| Project Structure | ✅ Done | `amp/backend/` | All directories created |
+| Configuration | ✅ Done | `amp/backend/config.py` | Pydantic Settings |
+| Database Models | ✅ Done | `amp/backend/database/models.py` | 10 tables |
+| Database Sessions | ✅ Done | `amp/backend/database/session.py` | userdb + playdb |
+| Logging | ✅ Done | `amp/backend/utils/logger.py` | File + console |
+| FastAPI Server | ✅ Done | `amp/backend/api/server.py` | CORS enabled |
+| API Endpoints | ✅ Done | `amp/backend/api/endpoints.py` | 12 endpoints |
+| Main Entry | ✅ Done | `amp/backend/main.py` | Run server |
+| Dependencies | ✅ Done | `amp/backend/requirements.txt` | All installed |
 | Virtual Env | ✅ Done | `venv/` | Pre-configured |
-| Tests | ✅ Done | `backend/tests/` | 20 tests, 100% pass |
+| Tests | ✅ Done | `amp/backend/tests/` | 20 tests, 100% pass |
 | Documentation | ✅ Done | Multiple READMEs | Complete |
 
 ### ✅ Completed (Phase 2: YouTube Integration)
 
 | Category | Status | Files | Notes |
 |----------|--------|-------|-------|
-| YouTube Service | ✅ Done | `backend/services/youtube.py` | YouTubeService class with search, metadata methods |
-| Auth Service | ✅ Done | `backend/services/auth.py` | OAuth flow, token management, cookie handling |
-| Streaming Service | ✅ Done | `backend/services/streaming.py` | Chunk downloading, caching, yt-dlp integration |
-| Services Package | ✅ Done | `backend/services/__init__.py` | Package initialization |
-| YouTube Tests | ✅ Done | `backend/tests/test_youtube.py` | 28 tests for YouTubeService |
-| Auth Tests | ✅ Done | `backend/tests/test_auth.py` | 31 tests for AuthService |
-| Streaming Tests | ✅ Done | `backend/tests/test_streaming.py` | 25 tests for StreamingService |
-| Config Updates | ✅ Done | `backend/config.py` | Added YouTube OAuth credentials |
-| Endpoints Updates | ✅ Done | `backend/api/endpoints.py` | Integrated services with mock fallback |
-| Environment Template | ✅ Done | `backend/.env.example` | OAuth configuration template |
+| YouTube Service | ✅ Done | `amp/backend/services/youtube.py` | YouTubeService class with search, metadata methods |
+| Auth Service | ✅ Done | `amp/backend/services/auth.py` | OAuth flow, token management, cookie handling |
+| Streaming Service | ✅ Done | `amp/backend/services/streaming.py` | Chunk downloading, caching, yt-dlp integration |
+| Services Package | ✅ Done | `amp/backend/services/__init__.py` | Package initialization |
+| YouTube Tests | ✅ Done | `amp/backend/tests/test_youtube.py` | 28 tests for YouTubeService |
+| Auth Tests | ✅ Done | `amp/backend/tests/test_auth.py` | 31 tests for AuthService |
+| Streaming Tests | ✅ Done | `amp/backend/tests/test_streaming.py` | 25 tests for StreamingService |
+| Config Updates | ✅ Done | `amp/backend/config.py` | Added YouTube OAuth credentials |
+| Endpoints Updates | ✅ Done | `amp/backend/api/endpoints.py` | Integrated services with mock fallback |
+| Environment Template | ✅ Done | `amp/backend/.env.example` | OAuth configuration template |
 
 ### ⏳ Pending
 
@@ -111,7 +111,7 @@ Implementing feature should be done in logical steps as a software engineer woul
 ### 📋 Task List for Phase 3
 
 #### Task 1: Implement Chunk Caching System
-- **File to Update**: `backend/services/streaming.py`
+- **File to Update**: `amp/backend/services/streaming.py`
 - **Status**: ⏳ TODO
 - **Description**: Enhance streaming service with robust chunk caching
 - **Actions**:
@@ -122,7 +122,7 @@ Implementing feature should be done in logical steps as a software engineer woul
   - [ ] Handle cache corruption and recovery
 
 #### Task 2: Implement Streaming Endpoints
-- **File to Update**: `backend/api/endpoints.py`
+- **File to Update**: `amp/backend/api/endpoints.py`
 - **Status**: ⏳ TODO
 - **Description**: Add real streaming endpoints
 - **Actions**:
@@ -132,7 +132,7 @@ Implementing feature should be done in logical steps as a software engineer woul
   - [ ] Add bandwidth throttling and quality adaptation
 
 #### Task 3: Add Playback State Management
-- **File to Update**: `backend/services/streaming.py`
+- **File to Update**: `amp/backend/services/streaming.py`
 - **Status**: ⏳ TODO
 - **Description**: Manage playback state across sessions
 - **Actions**:
@@ -142,7 +142,7 @@ Implementing feature should be done in logical steps as a software engineer woul
   - [ ] Add crossfade support
 
 #### Task 4: Add Buffer-Ahead Logic
-- **File to Update**: `backend/services/streaming.py`
+- **File to Update**: `amp/backend/services/streaming.py`
 - **Status**: ⏳ TODO
 - **Description**: Implement intelligent buffer-ahead for smooth playback
 - **Actions**:
@@ -168,21 +168,21 @@ Implementing feature should be done in logical steps as a software engineer woul
 ### New Files
 | File | Purpose | Priority | Status |
 |------|---------|----------|--------|
-| `backend/services/__init__.py` | Services package init | High | ✅ Done |
-| `backend/services/youtube.py` | YouTube Music API integration | 🔥 High | ✅ Done |
-| `backend/services/auth.py` | YouTube OAuth flow | 🔥 High | ✅ Done |
-| `backend/services/streaming.py` | Audio streaming with yt-dlp | High | ✅ Done |
-| `backend/tests/test_youtube.py` | Tests for YouTube integration | Medium | ✅ Done |
-| `backend/tests/test_auth.py` | Tests for Auth service | Medium | ✅ Done |
-| `backend/tests/test_streaming.py` | Tests for Streaming service | Medium | ✅ Done |
+| `amp/backend/services/__init__.py` | Services package init | High | ✅ Done |
+| `amp/backend/services/youtube.py` | YouTube Music API integration | 🔥 High | ✅ Done |
+| `amp/backend/services/auth.py` | YouTube OAuth flow | 🔥 High | ✅ Done |
+| `amp/backend/services/streaming.py` | Audio streaming with yt-dlp | High | ✅ Done |
+| `amp/backend/tests/test_youtube.py` | Tests for YouTube integration | Medium | ✅ Done |
+| `amp/backend/tests/test_auth.py` | Tests for Auth service | Medium | ✅ Done |
+| `amp/backend/tests/test_streaming.py` | Tests for Streaming service | Medium | ✅ Done |
 
 ### Modified Files
 | File | Changes | Priority | Status |
 |------|---------|----------|--------|
-| `backend/config.py` | Add YouTube API credentials | High | ✅ Done |
-| `backend/api/endpoints.py` | Replace mock data with real API calls | 🔥 High | ✅ Done |
-| `backend/database/models.py` | Minor updates if needed | Low | ⏳ Pending |
-| `backend/.env.example` | Add OAuth config | Medium | ✅ Done |
+| `amp/backend/config.py` | Add YouTube API credentials | High | ✅ Done |
+| `amp/backend/api/endpoints.py` | Replace mock data with real API calls | 🔥 High | ✅ Done |
+| `amp/backend/database/models.py` | Minor updates if needed | Low | ⏳ Pending |
+| `amp/backend/.env.example` | Add OAuth config | Medium | ✅ Done |
 | `AGENTS.md` | Update after completion | 🔥 High | ✅ Done |
 
 ---
@@ -198,16 +198,16 @@ activate.bat
 pip install package-name
 
 # Update requirements
-pip freeze > backend/requirements.txt
+pip freeze > amp/backend/requirements.txt
 
 # Run server
-python backend/main.py
+python amp/backend/main.py
 
 # Run tests
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # Run specific test
-pytest backend/tests/test_endpoints.py::TestSearchEndpoint -v
+pytest amp/backend/tests/test_endpoints.py::TestSearchEndpoint -v
 ```
 
 ### Git
@@ -278,7 +278,7 @@ AMP/
 ```
 
 ### Key Configuration Values
-From `backend/config.py`:
+From `amp/backend/config.py`:
 ```python
 CACHE_DIR = BASE_DIR / ".amp" / "cache"
 CHUNKS_DIR = CACHE_DIR / "chunks"
@@ -289,12 +289,12 @@ CACHE_MAX_SIZE_MB = 500  # Max cache size in MB
 ```
 
 ### API Endpoint Structure
-All endpoints are in `backend/api/endpoints.py` with prefix `/api`.
+All endpoints are in `amp/backend/api/endpoints.py` with prefix `/api`.
 Endpoints now use real YouTube API calls via services, with mock data fallback for testing.
 
 ### Database Access Pattern
 ```python
-from backend.database.session import get_userdb_session, get_playdb_session
+from amp.backend.database.session import get_userdb_session, get_playdb_session
 
 db = next(get_userdb_session())
 # Use db.query(...)
@@ -308,7 +308,7 @@ db.close()  # Automatic with context manager
 **You are here**: Phase 3, Task 1 - Implement Chunk Caching System
 
 ### Immediate Next Actions
-1. Enhance `backend/services/streaming.py` with chunk cache eviction
+1. Enhance `amp/backend/services/streaming.py` with chunk cache eviction
 2. Add cache size monitoring and cleanup
 3. Implement parallel chunk downloading
 4. Add chunk pre-fetching for smooth playback
@@ -341,11 +341,11 @@ Move to Phase 4: Frontend Buffering (Web Audio API implementation)
 ## 💡 Tips for Agents
 
 ### Understanding the Codebase
-1. Start with `backend/config.py` - understand the configuration
-2. Read `backend/database/models.py` - understand the data structures
-3. Read `backend/api/endpoints.py` - understand the API surface
-4. Check `backend/tests/` - understand expected behavior
-5. Review `backend/services/` - understand service layer patterns
+1. Start with `amp/backend/config.py` - understand the configuration
+2. Read `amp/backend/database/models.py` - understand the data structures
+3. Read `amp/backend/api/endpoints.py` - understand the API surface
+4. Check `amp/backend/tests/` - understand expected behavior
+5. Review `amp/backend/services/` - understand service layer patterns
 
 ### Common Pitfalls
 1. **Database Sessions**: Always use the session context manager or close sessions manually
@@ -357,7 +357,7 @@ Move to Phase 4: Frontend Buffering (Web Audio API implementation)
 
 ### Debugging Tips
 1. **Check logs**: `.amp/logs/app.log` for application logs
-2. **Run in debug mode**: `python backend/main.py --debug`
+2. **Run in debug mode**: `python amp/backend/main.py --debug`
 3. **Test endpoints**: Use `curl` or browser to test API endpoints
 4. **Check database**: Use SQLite browser to inspect `userdb.sqlite`
 
@@ -377,13 +377,13 @@ Move to Phase 4: Frontend Buffering (Web Audio API implementation)
 A: Check the "Next Steps" section above. Currently: Phase 3, Task 1 (Chunk Caching System)
 
 **Q: Where are the API endpoints?**  
-A: `backend/api/endpoints.py`
+A: `amp/backend/api/endpoints.py`
 
 **Q: How do I test my changes?**  
-A: `pytest backend/tests/ -v`
+A: `pytest amp/backend/tests/ -v`
 
 **Q: How do I run the server?**  
-A: `python backend/main.py`
+A: `python amp/backend/main.py`
 
 **Q: What files should I read first?**  
 A: See the "Essential Reading" section above. For Phase 3, also review the streaming service.
@@ -407,7 +407,7 @@ Before ending your session, ensure you've:
    - [ ] AGENTS.md is included in the commit
 
 3. **Tested**:
-   - [x] All existing tests pass (`pytest backend/tests/ -v`)
+   - [x] All existing tests pass (`pytest amp/backend/tests/ -v`)
    - [x] New functionality works as expected
    - [x] No regressions introduced
 
@@ -425,7 +425,7 @@ Before ending your session, ensure you've:
 # (Create/modify files)
 
 # 3. Test
-pytest backend/tests/ -v
+pytest amp/backend/tests/ -v
 
 # 4. Update AGENTS.md
 # (Mark tasks complete, set next steps)
