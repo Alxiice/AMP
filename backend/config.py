@@ -50,6 +50,12 @@ class Settings(BaseSettings):
     YOUTUBE_API_KEY: Optional[str] = None
     YTMUSICAPI_COOKIES: Optional[str] = None  # Path to cookies file for ytmusicapi
     
+    # OAuth credentials for YouTube
+    YOUTUBE_CLIENT_ID: Optional[str] = None
+    YOUTUBE_CLIENT_SECRET: Optional[str] = None
+    YOUTUBE_REDIRECT_URI: str = "http://localhost:8000/api/auth/callback"
+    YOUTUBE_OAUTH_SCOPES: str = "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/userinfo.profile"
+    
     # Logging
     LOG_LEVEL: str = "INFO"
     LOG_FILE: Path = LOGS_DIR / "app.log"
@@ -83,5 +89,9 @@ AUDIO_FORMAT = settings.AUDIO_FORMAT
 AUDIO_BITRATE = settings.AUDIO_BITRATE
 YOUTUBE_API_KEY = settings.YOUTUBE_API_KEY
 YTMUSICAPI_COOKIES = settings.YTMUSICAPI_COOKIES
+YOUTUBE_CLIENT_ID = settings.YOUTUBE_CLIENT_ID
+YOUTUBE_CLIENT_SECRET = settings.YOUTUBE_CLIENT_SECRET
+YOUTUBE_REDIRECT_URI = settings.YOUTUBE_REDIRECT_URI
+YOUTUBE_OAUTH_SCOPES = settings.YOUTUBE_OAUTH_SCOPES
 LOG_LEVEL = settings.LOG_LEVEL
 LOG_FILE = settings.LOG_FILE
