@@ -333,7 +333,7 @@ async def search_songs(
         return _get_mock_search_results(q, limit)
 
 
-async def _cache_song(song: SongResponse) -> None:
+def _cache_song(song: SongResponse) -> None:
     """Cache a song in the database."""
     try:
         db = next(get_userdb_session())

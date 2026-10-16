@@ -173,6 +173,9 @@ class YouTubeService:
         self._cookies_file = self._get_cookies_file()
         self._authenticated_ytmusic = None
         self._initialize()
+        # Automatically authenticate if cookies are available
+        if self._cookies_file:
+            self.authenticate()
     
     def _get_cookies_file(self) -> Optional[Path]:
         """Get the path to the cookies file."""
@@ -356,6 +359,14 @@ class YouTubeService:
             else:
                 results = ytmusic.search(query, **params)
             
+            # Log raw results for debugging
+            logger.debug(f"Raw search results type: {type(results)}, length: {len(results) if isinstance(results, list) else 'N/A'}")
+            
+            # Handle None results
+            if results is None:
+                logger.warning("ytmusic.search() returned None")
+                results = []
+            
             # Parse results
             parsed_results = self._parse_search_results(results, limit)
             
@@ -384,8 +395,17 @@ class YouTubeService:
         """Parse search results into metadata objects."""
         parsed = []
         
+        # Ensure results is a list
+        if not isinstance(results, list):
+            logger.warning(f"Expected list of results, got {type(results)}")
+            return parsed
+        
         for item in results[:limit]:
-            category = item.get("category", "").lower()
+            # Skip None or non-dict items
+            if item is None or not isinstance(item, dict):
+                continue
+            category = item.get("category") or ""
+            category = category.lower() if category else ""
             
             try:
                 if category == "songs" or "videoId" in item:
