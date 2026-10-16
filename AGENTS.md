@@ -259,20 +259,21 @@ type .amp\logs\app.log | more
 ### Important Paths
 ```
 AMP/
-├── backend/
-│   ├── api/              # REST API endpoints
-│   │   └── endpoints.py  # Main endpoint file to update
-│   ├── database/        # Database models and sessions
-│   │   ├── models.py    # SQLAlchemy models
-│   │   └── session.py   # Database sessions
-│   ├── services/        # Service layer (CREATED FOR PHASE 2)
-│   │   ├── __init__.py  # Package init
-│   │   ├── youtube.py   # YouTube API (Phase 2 - COMPLETE)
-│   │   ├── auth.py      # OAuth flow (Phase 2 - COMPLETE)
-│   │   └── streaming.py # Audio streaming (Phase 2 - COMPLETE)
-│   ├── config.py        # Configuration
-│   ├── main.py          # Server entry point
-│   └── tests/           # Test suite
+├── amp/
+│   └── backend/
+│       ├── api/              # REST API endpoints
+│       │   └── endpoints.py  # Main endpoint file to update
+│       ├── database/        # Database models and sessions
+│       │   │   ├── models.py    # SQLAlchemy models
+│       │   └── session.py   # Database sessions
+│       ├── services/        # Service layer (CREATED FOR PHASE 2)
+│       │   ├── __init__.py  # Package init
+│       │   ├── youtube.py   # YouTube API (Phase 2 - COMPLETE)
+│       │   ├── auth.py      # OAuth flow (Phase 2 - COMPLETE)
+│       │   └── streaming.py # Audio streaming (Phase 2 - COMPLETE)
+│       ├── config.py        # Configuration
+│       ├── main.py          # Server entry point
+│       └── tests/           # Test suite
 └── venv/               # Virtual environment
 ```
 
