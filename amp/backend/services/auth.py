@@ -24,6 +24,9 @@ from backend.config import (
     CACHE_DIR,
     YOUTUBE_API_KEY,
     YTMUSICAPI_COOKIES,
+    YOUTUBE_REDIRECT_URI,
+    YOUTUBE_REDIRECT_URI,
+    YOUTUBE_REDIRECT_URI,
     DEBUG,
 )
 from backend.utils.logger import get_logger
@@ -149,6 +152,9 @@ class AuthService:
     # Client ID and secret (can be configured via environment)
     CLIENT_ID: Optional[str] = None
     CLIENT_SECRET: Optional[str] = None
+    REDIRECT_URI: Optional[str] = None
+    REDIRECT_URI: Optional[str] = None
+    REDIRECT_URI: Optional[str] = None
     
     def __init__(self):
         """Initialize the AuthService."""
@@ -176,6 +182,27 @@ class AuthService:
             self.CLIENT_ID = client_id
         if client_secret:
             self.CLIENT_SECRET = client_secret
+        # Load redirect URI from environment or use default
+        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
+        if redirect_uri:
+            self.REDIRECT_URI = redirect_uri
+        elif not self.REDIRECT_URI:
+            from backend.config import YOUTUBE_REDIRECT_URI
+            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
+        # Load redirect URI from environment or use default
+        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
+        if redirect_uri:
+            self.REDIRECT_URI = redirect_uri
+        elif not self.REDIRECT_URI:
+            from backend.config import YOUTUBE_REDIRECT_URI
+            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
+        # Load redirect URI from environment or use default
+        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
+        if redirect_uri:
+            self.REDIRECT_URI = redirect_uri
+        elif not self.REDIRECT_URI:
+            from backend.config import YOUTUBE_REDIRECT_URI
+            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
         
         # Also check if there's a config file
         config_file = BASE_DIR / "youtube_oauth.json"
@@ -187,6 +214,12 @@ class AuthService:
                         self.CLIENT_ID = config["client_id"]
                     if "client_secret" in config:
                         self.CLIENT_SECRET = config["client_secret"]
+                    if "redirect_uri" in config:
+                        self.REDIRECT_URI = config["redirect_uri"]
+                    if "redirect_uri" in config:
+                        self.REDIRECT_URI = config["redirect_uri"]
+                    if "redirect_uri" in config:
+                        self.REDIRECT_URI = config["redirect_uri"]
             except Exception as e:
                 logger.warning(f"Failed to load OAuth config: {e}")
     

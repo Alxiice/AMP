@@ -8,8 +8,8 @@ import os
 import sys
 
 # Add backend to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+BACKEND_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(BACKEND_FOLDER))
 
 def test_imports():
     """Test that all modules can be imported."""

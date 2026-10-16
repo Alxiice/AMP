@@ -132,3 +132,52 @@ class TestPlaybackEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert "message" in data
+
+
+class TestAuthEndpoints:
+    """Tests for authentication endpoints."""
+    
+    def test_auth_login_endpoint(self, client):
+        """Test POST /auth/login returns auth_url with default redirect_uri."""
+        response = client.post("/api/auth/login", json={})
+        assert response.status_code == 200
+        data = response.json()
+        assert "auth_url" in data
+        assert "https://accounts.google.com/o/oauth2" in data["auth_url"]
+        # Should use default redirect_uri from config
+        assert "redirect_uri=" in data["auth_url"]
+    
+    def test_auth_login_endpoint_custom_redirect(self, client):
+        """Test POST /auth/login with custom redirect_uri."""
+        custom_uri = "http://custom:8080/callback"
+        response = client.post("/api/auth/login", json={"redirect_uri": custom_uri})
+        assert response.status_code == 200
+        data = response.json()
+        assert "auth_url" in data
+        assert custom_uri in data["auth_url"]
+    
+    def test_auth_status_endpoint(self, client):
+        """Test GET /auth/status returns status."""
+        response = client.get("/api/auth/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "is_authenticated" in data
+        assert "has_tokens" in data
+        assert data["is_authenticated"] == False
+    
+    def test_auth_logout_endpoint(self, client):
+        """Test POST /auth/logout returns success."""
+        response = client.post("/api/auth/logout")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "logged_out"
+    
+    def test_auth_callback_endpoint_invalid_state(self, client):
+        """Test POST /auth/callback with invalid state returns 400."""
+        response = client.post("/api/auth/callback", json={
+            "code": "test_code",
+            "state": "invalid_state"
+        })
+        assert response.status_code == 400
+        data = response.json()
+        assert "Invalid code or state" in data["detail"]

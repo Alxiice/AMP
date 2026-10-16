@@ -13,7 +13,8 @@ from datetime import datetime
 import sys
 
 # Add backend to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BACKEND_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(BACKEND_FOLDER))
 
 from backend.services.streaming import (
     StreamingService,

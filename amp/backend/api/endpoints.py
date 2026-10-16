@@ -146,7 +146,7 @@ async def auth_login(request: AuthLoginRequest):
     logger.info("Initiating OAuth login")
     
     try:
-        redirect_uri = request.redirect_uri or auth_service.YOUTUBE_REDIRECT_URI
+        redirect_uri = request.redirect_uri or auth_service.REDIRECT_URI
         auth_url = auth_service.get_auth_url(redirect_uri=redirect_uri)
         
         if not auth_url:
@@ -176,32 +176,30 @@ async def auth_callback(request: AuthCallbackRequest):
     This endpoint receives the authorization code and exchanges it for tokens.
     """
     logger.info(f"Handling OAuth callback: state={request.state[:8]}...")
-    
+
+    redirect_uri = request.redirect_uri or auth_service.REDIRECT_URI
+
     try:
-        redirect_uri = request.redirect_uri or auth_service.YOUTUBE_REDIRECT_URI
         success = auth_service.handle_oauth_callback(
             code=request.code,
             state=request.state,
             redirect_uri=redirect_uri,
         )
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OAuth callback failed. Invalid code or state.",
-            )
-        
-        logger.info("OAuth callback handled successfully")
-        return {
-            "status": "authenticated",
-            "message": "Authentication successful",
-        }
     except Exception as e:
-        logger.error(f"Auth callback failed: {e}")
+        logger.exception("Auth callback failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to handle OAuth callback: {str(e)}",
+            detail="Failed to handle OAuth callback.",
         )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth callback failed. Invalid code or state.",
+        )
+
+    logger.info("OAuth callback handled successfully")
+    return {"status": "authenticated", "message": "Authentication successful"}
 
 
 @router.get("/auth/status", tags=["auth"])

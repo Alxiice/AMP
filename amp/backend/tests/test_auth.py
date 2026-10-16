@@ -13,7 +13,8 @@ from datetime import datetime, timedelta
 import sys
 
 # Add backend to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+BACKEND_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(BACKEND_FOLDER))
 
 from backend.services.auth import (
     AuthService,
@@ -255,10 +256,17 @@ class TestAuthFlow:
     
     def test_get_auth_url_no_client_id(self):
         """Test generating auth URL without client ID."""
-        service = AuthService()
-        
-        with pytest.raises(ValueError):
-            service.get_auth_url()
+        import os
+        old_client_id = os.environ.get("YOUTUBE_CLIENT_ID")
+        try:
+            os.environ.pop("YOUTUBE_CLIENT_ID", None)
+            service = AuthService()
+            
+            with pytest.raises(ValueError):
+                service.get_auth_url()
+        finally:
+            if old_client_id:
+                os.environ["YOUTUBE_CLIENT_ID"] = old_client_id
     
     def test_handle_oauth_callback(self):
         """Test handling OAuth callback."""
