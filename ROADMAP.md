@@ -1,19 +1,22 @@
 # AMP Roadmap
 
 > **See Also**: For complete project details, refer to [README.md](README.md)  
-> **Current Phase**: Phase 2 (YouTube Integration) - ✅ COMPLETE
+> **Current Phase**: Phase 2.6 (Web Interface Foundation) - ✅ COMPLETE  
+> **Next Phase**: Phase 3 (Core Playback System) - ⏳ READY TO START
 
 ---
 
 ## 🎯 Phases Overview
 
-The AMP project is divided into **10 logical phases** to progressively build a fully-featured music player.
+The AMP project is divided into **12 logical phases** to progressively build a fully-featured music player.
 
 | Phase | Name | Status | Description |
 |-------|------|--------|-------------|
 | 1 | Backend Core | ✅ **DONE** | FastAPI server, database schema, basic endpoints |
-| 2 | YouTube Integration | ⏳ **NEXT** | yt-dlp/ytmusicapi integration, authentication |
-| 3 | Core Playback System | ⏳ | Chunk cache, streaming endpoint, basic player |
+| 2 | YouTube Integration | ✅ **DONE** | ytmusicapi integration, streaming service |
+| 2.5 | Authentication Overhaul | ✅ **DONE** | Cookie-based auth system (replaced broken OAuth) |
+| 2.6 | Web Interface Foundation | ✅ **DONE** | React frontend with auth UI, web-based testing |
+| 3 | Core Playback System | ⏳ **NEXT** | Chunk cache, streaming endpoint, basic player |
 | 4 | Frontend Buffering | ⏳ | Web Audio API integration, playback controls |
 | 5 | Real-Time Chunk Fetching | ⏳ | Automatic chunk fetching during playback |
 | 6 | Playback Frontend | ⏳ | React UI for playback controls |
@@ -74,22 +77,14 @@ curl http://localhost:8000/api/health
   - ✅ Audio streaming from YouTube
   - ✅ Chunk downloading (configurable size: 10s by default)
   - ✅ Quality/format selection (MP3, 192kbps by default)
-- ✅ YouTube OAuth flow
-  - ✅ Authentication with YouTube
-  - ✅ Access to user playlists
-  - ✅ Access to liked songs
-  - ✅ Token storage and refresh
+- ✅ YouTubeService class with 28 tests
+- ✅ StreamingService class with 25 tests
 
-#### Files to Modify
-- `amp/backend/services/youtube.py` (NEW) - YouTube API integration
-- `amp/backend/services/auth.py` (NEW) - OAuth flow
-- `amp/backend/api/endpoints.py` - Replace mock data with real API calls
-- `amp/backend/config.py` - Add YouTube API credentials
-- `amp/backend/.env.example` - Add OAuth configuration
-
-#### Dependencies
-- ytmusicapi (already installed)
-- yt-dlp (already installed)
+#### Files Created
+- `amp/backend/services/youtube.py` - YouTube API integration
+- `amp/backend/services/streaming.py` - Audio streaming with yt-dlp
+- `amp/backend/tests/test_youtube.py` - 28 tests
+- `amp/backend/tests/test_streaming.py` - 25 tests
 
 #### Verification
 ```bash
@@ -102,7 +97,118 @@ curl http://localhost:8000/api/song/dQw4w9WgXcQ
 
 ---
 
-### Phase 3: Core Playback System ⏳
+### Phase 2.5: Authentication Overhaul ✅ COMPLETE (2026-10-17)
+
+**Objective**: Replace the broken OAuth-based authentication with a working cookie-based system.
+
+**Background**: YouTube Music's private endpoints stopped accepting OAuth tokens in ~September 2025. The previous OAuth flow was completely broken.
+
+#### Tasks
+- ✅ New cookie-based `AuthService` (replaced `auth.py`)
+  - ✅ Single source of truth for auth state
+  - ✅ Cookie validation against YouTube
+  - ✅ Secure session persistence (0600 permissions)
+  - ✅ Session expiration detection (`guard()` context manager)
+- ✅ New auth API routes (`auth_routes.py`)
+  - ✅ `GET /api/auth/status` - Check auth status
+  - ✅ `POST /api/auth/cookies` - Receive cookies from Tauri
+  - ✅ `POST /api/auth/import-browser` - Import from installed browser
+  - ✅ `POST /api/auth/logout` - Clear session
+- ✅ Updated `YouTubeService` to use centralized auth
+- ✅ Fixed broken ytmusicapi method calls
+  - ✅ `get_liked_songs()` now handles dict return
+  - ✅ `get_user_playlists()` uses `get_library_playlists()`
+  - ✅ `get_user_info()` returns `auth.account`
+- ✅ New Tauri command (`youtube_login.rs`)
+  - ✅ Opens Google sign-in window
+  - ✅ Captures cookies from webview
+  - ✅ Returns cookies to frontend
+- ✅ New React hook (`useYouTubeAuth.ts`)
+- ✅ 11 new tests for auth service
+- ✅ Removed OAuth credentials from config
+- ✅ Deleted broken files (`extract_cookies.py`, old tests)
+
+#### Files Created/Modified
+- **Created**: `amp/backend/api/auth_routes.py`
+- **Replaced**: `amp/backend/services/auth.py` (complete rewrite)
+- **Modified**: `amp/backend/services/youtube.py`
+- **Modified**: `amp/backend/api/endpoints.py`
+- **Modified**: `amp/backend/config.py`
+- **Created**: `app/src-tauri/src/youtube_login.rs`
+- **Created**: `app/src/useYouTubeAuth.ts`
+- **Modified**: `app/src/App.tsx`
+- **Modified**: `app/src-tauri/main.rs`
+- **Modified**: `app/Cargo.toml`
+- **Created**: `amp/backend/tests/test_ytm_auth.py`
+- **Deleted**: `amp/backend/tests/test_auth.py`
+- **Deleted**: `app/scripts/extract_cookies.py`
+
+#### Verification
+```bash
+# All tests pass (92 total)
+cd amp/backend && python -m pytest tests/ -v
+
+# Auth status endpoint works
+curl http://localhost:8000/api/auth/status
+# → {"state": "signed_out", "is_authenticated": false, "account": null}
+```
+
+---
+
+### Phase 2.6: Web Interface Foundation ✅ COMPLETE (2026-10-17)
+
+**Objective**: Create a working web interface for testing the backend and authentication.
+
+#### Tasks
+- ✅ React frontend with Vite dev server
+- ✅ `useYouTubeAuth` React hook for auth state management
+- ✅ Updated `App.tsx` with auth UI
+  - ✅ "Connect YouTube Music" button
+  - ✅ Auth status display
+  - ✅ Liked songs display
+  - ✅ Logout functionality
+  - ✅ Expired session handling
+- ✅ Web-based testing capability (no Rust/Tauri required)
+- ✅ Dev server proxy configuration
+- ✅ Fixed project structure for Tauri 2.x
+  - ✅ Moved `Cargo.toml` to `src-tauri/`
+  - ✅ Moved `tauri.conf.json` to `src-tauri/`
+  - ✅ Created `build.rs`
+  - ✅ Fixed Vite port configuration
+- ✅ Updated CSS styling
+
+#### Files Created/Modified
+- **Created**: `app/src/useYouTubeAuth.ts` - React auth hook
+- **Modified**: `app/src/App.tsx` - Simplified auth UI
+- **Modified**: `app/vite.config.ts` - Fixed port to 1420
+- **Modified**: `app/src-tauri/tauri.conf.json` - Tauri 2.x config
+- **Modified**: `app/src-tauri/Cargo.toml` - Fixed dependencies
+- **Created**: `app/src-tauri/build.rs` - Tauri build script
+- **Modified**: `app/src-tauri/src/main.rs` - Simplified for new auth
+
+#### How to Test (Web Interface)
+```bash
+# Terminal 1: Start backend
+cd amp/backend
+python main.py
+
+# Terminal 2: Start frontend
+cd app
+npm run dev
+```
+
+Then open **http://localhost:1420** in your browser.
+
+#### Verification
+- ✅ Frontend loads at http://localhost:1420
+- ✅ "Connect YouTube Music" button appears
+- ✅ Auth status polling works
+- ✅ Backend API integration works
+- ✅ All 92 tests pass
+
+---
+
+### Phase 3: Core Playback System ⏳ NEXT
 
 **Objective**: Implement audio chunk caching and basic playback.
 
@@ -120,7 +226,7 @@ curl http://localhost:8000/api/song/dQw4w9WgXcQ
   - [ ] Playback position tracking
 
 #### Files to Modify
-- `amp/backend/services/streaming.py` (NEW) - Chunk streaming logic
+- `amp/backend/services/streaming.py` - Enhance with cache management
 - `amp/backend/utils/cache.py` (NEW) - Cache management
 - `amp/backend/api/endpoints.py` - Add streaming endpoint
 - `amp/backend/database/models.py` - Ensure `cached_chunks` table is complete
@@ -156,9 +262,9 @@ ls .amp/cache/chunks/
   - [ ] Update playback position via `/api/playback/position`
 
 #### Files to Create
-- `frontend/src/services/audio.js` (NEW) - Web Audio API wrapper
-- `frontend/src/hooks/usePlayback.js` (NEW) - Playback state hook
-- `frontend/src/hooks/useQueue.js` (NEW) - Queue management hook
+- `app/src/services/audio.ts` (NEW) - Web Audio API wrapper
+- `app/src/hooks/usePlayback.ts` (NEW) - Playback state hook
+- `app/src/hooks/useQueue.ts` (NEW) - Queue management hook
 
 #### Verification
 ```bash
@@ -188,7 +294,7 @@ ls .amp/cache/chunks/
   - [ ] Pause if buffer is exhausted
 
 #### Files to Modify
-- `frontend/src/services/audio.js` - Add buffer-ahead logic
+- `app/src/services/audio.ts` - Add buffer-ahead logic
 - `amp/backend/api/endpoints.py` - Add buffer status endpoint
 
 #### Verification
@@ -216,10 +322,10 @@ ls .amp/cache/chunks/
   - [ ] Click to select track
 
 #### Files to Create
-- `frontend/src/components/PlaybackControls.jsx` (NEW)
-- `frontend/src/components/ProgressBar.jsx` (NEW)
-- `frontend/src/components/NowPlaying.jsx` (NEW)
-- `frontend/src/components/QueueView.jsx` (NEW)
+- `app/src/components/PlaybackControls.tsx` (NEW)
+- `app/src/components/ProgressBar.tsx` (NEW)
+- `app/src/components/NowPlaying.tsx` (NEW)
+- `app/src/components/QueueView.tsx` (NEW)
 
 #### Verification
 ```bash
@@ -241,22 +347,17 @@ ls .amp/cache/chunks/
   - [ ] Search bar
   - [ ] Results display (songs, artists, albums, playlists)
   - [ ] Detail pages for each item type
-- [ ] Authentication UI
-  - [ ] YouTube OAuth button
-  - [ ] Token management
-  - [ ] User profile display
 - [ ] Queue building
   - [ ] Click song to add to queue
   - [ ] Click playlist to load queue
   - [ ] Drag-and-drop queue management
 
 #### Files to Create
-- `frontend/src/components/SearchBar.jsx` (NEW)
-- `frontend/src/components/SearchResults.jsx` (NEW)
-- `frontend/src/components/ArtistView.jsx` (NEW)
-- `frontend/src/components/AlbumView.jsx` (NEW)
-- `frontend/src/components/PlaylistView.jsx` (NEW)
-- `frontend/src/components/AuthButton.jsx` (NEW)
+- `app/src/components/SearchBar.tsx` (NEW)
+- `app/src/components/SearchResults.tsx` (NEW)
+- `app/src/components/ArtistView.tsx` (NEW)
+- `app/src/components/AlbumView.tsx` (NEW)
+- `app/src/components/PlaylistView.tsx` (NEW)
 
 #### Verification
 ```bash
@@ -264,8 +365,7 @@ ls .amp/cache/chunks/
 # 1. Search the library
 # 2. Browse results
 # 3. View item details
-# 4. Authenticate with YouTube
-# 5. Add items to queue
+# 4. Add items to queue
 ```
 
 ---
@@ -275,20 +375,22 @@ ls .amp/cache/chunks/
 **Objective**: Package the app as a desktop application.
 
 #### Tasks
-- [ ] Tauri configuration
-  - [ ] `tauri.conf.json` setup
-  - [ ] Backend + frontend bundling
+- [ ] Tauri configuration (partially done in Phase 2.6)
 - [ ] Auto-start backend
   - [ ] Start FastAPI server on app launch
   - [ ] Manage server lifecycle
 - [ ] Desktop integration
   - [ ] System tray icon
   - [ ] Global hotkeys (play/pause, next, previous)
+- [ ] Fix Rust compilation (requires Visual Studio Build Tools)
 
-#### Files to Create
-- `tauri.conf.json` (NEW)
-- `frontend/tauri/` (NEW) - Tauri configuration
-- `amp/backend/tauri_server.py` (NEW) - Server lifecycle management
+#### Prerequisites
+- Visual Studio Build Tools with C++ workload (Windows)
+- Or use WSL2 with GNU toolchain
+
+#### Files to Modify
+- `app/src-tauri/src/main.rs` - Add backend lifecycle management
+- `app/src-tauri/tauri.conf.json` - Desktop configuration
 
 #### Verification
 ```bash
@@ -315,8 +417,8 @@ ls .amp/cache/chunks/
   - [ ] Touch-friendly controls
 
 #### Files to Modify
-- `tauri.conf.json` - Add mobile configuration
-- `frontend/src/styles/` - Mobile-responsive CSS
+- `app/src-tauri/tauri.conf.json` - Add mobile configuration
+- `app/src/styles/` - Mobile-responsive CSS
 
 #### Verification
 ```bash
@@ -366,7 +468,9 @@ ls .amp/cache/chunks/
 |-------|--------|----------|
 | Phase 1: Backend Core | ✅ **COMPLETE** | 100% |
 | Phase 2: YouTube Integration | ✅ **COMPLETE** | 100% |
-| Phase 3: Core Playback System | ⏳ | 0% |
+| Phase 2.5: Authentication Overhaul | ✅ **COMPLETE** | 100% |
+| Phase 2.6: Web Interface Foundation | ✅ **COMPLETE** | 100% |
+| Phase 3: Core Playback System | ⏳ **NEXT** | 0% |
 | Phase 4: Frontend Buffering | ⏳ | 0% |
 | Phase 5: Real-Time Chunk Fetching | ⏳ | 0% |
 | Phase 6: Playback Frontend | ⏳ | 0% |
@@ -375,52 +479,54 @@ ls .amp/cache/chunks/
 | Phase 9: Android Support | ⏳ | 0% |
 | Phase 10: Testing & Polish | ⏳ | 0% |
 
-**Overall Progress**: 20% (2 of 10 phases complete)
+**Overall Progress**: 33% (4 of 12 phases complete)
 
 ---
 
 ## 📅 Timeline (Estimated)
 
-| Phase | Complexity | Estimated Time |
-|-------|------------|----------------|
-| Phase 1 | ✅ Done | 1 day |
-| Phase 2 | ✅ Done | 1-2 days |
-| Phase 3 | Medium | 1 day |
-| Phase 4 | Medium | 1-2 days |
-| Phase 5 | Low | 0.5 days |
-| Phase 6 | Medium | 1 day |
-| Phase 7 | Medium | 1-2 days |
-| Phase 8 | Medium | 1 day |
-| Phase 9 | Medium | 1 day |
-| Phase 10 | Low | 0.5-1 days |
-| **Total** | | **8-12 days** |
+| Phase | Complexity | Estimated Time | Status |
+|-------|------------|----------------|--------|
+| Phase 1 | ✅ Done | 1 day | Complete |
+| Phase 2 | ✅ Done | 1-2 days | Complete |
+| Phase 2.5 | ✅ Done | 0.5 days | Complete |
+| Phase 2.6 | ✅ Done | 0.5 days | Complete |
+| Phase 3 | Medium | 1 day | Next |
+| Phase 4 | Medium | 1-2 days | Pending |
+| Phase 5 | Low | 0.5 days | Pending |
+| Phase 6 | Medium | 1 day | Pending |
+| Phase 7 | Medium | 1-2 days | Pending |
+| Phase 8 | Medium | 1 day | Pending |
+| Phase 9 | Medium | 1 day | Pending |
+| Phase 10 | Low | 0.5-1 days | Pending |
+| **Total** | | **8-12 days** | |
 
 ---
 
 ## 🏆 Milestones
 
 ### MVP 1: Backend + Basic Playback
-- **Phases**: 1, 2, 3, 4
-- **Status**: 20% complete
-- **Estimated**: 3-5 days
-- **Capabilities**: Backend with real YouTube data + basic playback
+- **Phases**: 1, 2, 2.5, 2.6, 3, 4
+- **Status**: 67% complete (Phases 1-2.6 done)
+- **Estimated**: 2-3 more days
+- **Capabilities**: Backend with real YouTube data + web interface + basic playback
 
 ### MVP 2: Full Desktop App
 - **Phases**: 1-8
-- **Status**: 20% complete
-- **Estimated**: 7-10 days
+- **Status**: 50% complete
+- **Estimated**: 5-7 more days
 - **Capabilities**: Full desktop app with library browsing and playback
 
 ### MVP 3: Cross-Platform (Desktop + Mobile)
 - **Phases**: 1-9
-- **Status**: 10% complete
-- **Estimated**: 8-11 days
+- **Status**: 42% complete
+- **Estimated**: 6-8 more days
 - **Capabilities**: Desktop + Android app
 
 ### Final: Production Ready
 - **Phases**: 1-10
-- **Status**: 10% complete
-- **Estimated**: 8-12 days
+- **Status**: 33% complete
+- **Estimated**: 8-12 more days
 - **Capabilities**: Full-featured, polished, production-ready app
 
 ---
@@ -428,6 +534,11 @@ ls .amp/cache/chunks/
 ## 📚 See Also
 
 - [README.md](README.md) - Main project documentation
+- [AGENTS.md](AGENTS.md) - Agent instructions and current status
 - [IMPLEMENTATION_NOTES.md](IMPLEMENTATION_NOTES.md) - Phase 1 implementation details
+- [IMPLEMENTATION_NOTES_PHASE_2.5.md](IMPLEMENTATION_NOTES_PHASE_2.5.md) - Auth Overhaul details
+- [IMPLEMENTATION_NOTES_PHASE_2.6.md](IMPLEMENTATION_NOTES_PHASE_2.6.md) - Web Interface details
 - [amp/backend/README.md](amp/backend/README.md) - Backend-specific guide
-- [amp/backend/tests/README.md](amp/backend/tests/README.md) - Testing instructions
+- [app/README.md](app/README.md) - Frontend app guide
+- [QUICK_START.md](QUICK_START.md) - Quick start guide
+- [AUTH_FLOW_GUIDE.md](AUTH_FLOW_GUIDE.md) - Authentication flow guide

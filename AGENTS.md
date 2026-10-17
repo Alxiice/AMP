@@ -31,8 +31,8 @@ Implementing feature should be done in logical steps as a software engineer woul
 **Project**: AMP (Another Music Player)  
 **Description**: Local music player based on YouTube Music library  
 **Tech Stack**: FastAPI, React, Tauri, yt-dlp, ytmusicapi, SQLAlchemy, SQLite  
-**Current Phase**: Phase 2.5 (Authentication Overhaul) - ✅ COMPLETE  
-**Next Phase**: Phase 3 (Core Playback) - ⏳ PENDING  
+**Current Phase**: Phase 2.6 (Web Interface Foundation) - ✅ COMPLETE  
+**Next Phase**: Phase 3 (Core Playback System) - ⏳ READY TO START  
 
 ---
 
@@ -105,7 +105,7 @@ Implementing feature should be done in logical steps as a software engineer woul
 
 | Phase | Priority | Status | Next Action |
 |-------|----------|--------|------------|
-| Phase 3: Core Playback | High | ⏳ | Implement chunk caching |
+| Phase 3: Core Playback | 🔥 High | ⏳ **NEXT** | Implement chunk caching system |
 | Phase 4: Frontend Buffering | High | ⏳ | Implement Web Audio API |
 | Phase 5: Real-Time Fetching | Medium | ⏳ | Add buffer-ahead logic |
 | Phase 6: Playback Frontend | Medium | ⏳ | Build React UI |
@@ -340,17 +340,23 @@ Move to Phase 4: Frontend Buffering (Web Audio API implementation)
 |-------|------------|----------|--------|---------|-------|
 | Phase 1 | 2026-10-12 | 2026-10-12 | ✅ Complete | 8 commits | Backend Core |
 | Phase 2 | 2026-10-16 | 2026-10-16 | ✅ Complete | TBD | YouTube Integration |
-| Phase 2.5 | 2026-10-17 | 2026-10-17 | ✅ Complete | TBD | Tauri Integration & Cookie Auth |
-| Phase 3 | 2026-10-17 | 2026-10-17 | ✅ Complete | TBD | Authentication Overhaul |
-| Phase 4 | - | - | ⏳ | - | Core Playback |
+| Phase 2.5 | 2026-10-17 | 2026-10-17 | ✅ Complete | affa30f | Authentication Overhaul (Cookie-based) |
+| Phase 2.6 | 2026-10-17 | 2026-10-17 | ✅ Complete | - | Web Interface Foundation |
+| Phase 3 | - | - | ⏳ **NEXT** | - | Core Playback System |
 | Phase 4 | - | - | ⏳ | - | Frontend Buffering |
+| Phase 5 | - | - | ⏳ | - | Real-Time Chunk Fetching |
+| Phase 6 | - | - | ⏳ | - | Playback Frontend |
+| Phase 7 | - | - | ⏳ | - | Library Management Frontend |
+| Phase 8 | - | - | ⏳ | - | Tauri Desktop App |
+| Phase 9 | - | - | ⏳ | - | Android Support |
+| Phase 10 | - | - | ⏳ | - | Testing & Polish |
 | ... | - | - | ⏳ | - | |
 
 ### Current Session
-- **Started**: 2026-10-16
-- **Current Task**: Phase 3, Task 1 - Implement Chunk Caching System
-- **Last Updated**: 2026-10-16 (by Mistral Vibe)
-- **Tests Status**: ✅ 107/107 tests passing
+- **Started**: 2026-10-17
+- **Current Task**: Documentation Update - Preparing for Phase 3
+- **Last Updated**: 2026-10-17 (by Mistral Vibe)
+- **Tests Status**: ✅ 92/92 tests passing
 
 ---
 
@@ -472,7 +478,7 @@ This project is **well-structured** and **ready for continuation**. The foundati
 
 ---
 
-## 🆕 Phase 3: Authentication System Overhaul (2026-10-17)
+## 🆕 Phase 2.5: Authentication System Overhaul (2026-10-17)
 
 ### Overview
 **COMPLETED**: Fixed the broken auth flow by implementing a new cookie-based authentication system.
@@ -635,7 +641,121 @@ python -m pytest tests/ -v
 
 ---
 
+## 🆕 Phase 2.6: Web Interface Foundation (2026-10-17)
+
+### Overview
+**COMPLETED**: Created a working web interface for testing the backend and authentication without requiring the Tauri desktop app.
+
+**Objective**: Provide a way to test the full application (backend + auth + frontend) in a web browser while Tauri desktop packaging is pending (requires Visual Studio Build Tools).
+
+### Changes Made
+
+#### Frontend Changes
+1. **`app/src/useYouTubeAuth.ts`** - NEW FILE
+   - React hook for auth state management
+   - Provides: `status`, `busy`, `error`, `login()`, `logout()`, `importFromBrowser()`
+   - Handles: auth state polling, error states, loading states
+   - Auto-checks auth status on app start with `verify=true`
+
+2. **`app/src/App.tsx`** - UPDATED
+   - Simplified to use `useYouTubeAuth()` hook
+   - "Connect YouTube Music" button
+   - Auth status display (signed_out / signed_in / expired)
+   - Liked songs display after authentication
+   - Logout functionality
+   - Expired session handling with re-login prompt
+
+3. **`app/vite.config.ts`** - UPDATED
+   - Changed dev server port from 5173 to 1420
+   - Matches Tauri dev URL configuration
+
+4. **`app/src/index.css`** - EXISTING
+   - Clean, modern styling
+   - Responsive design
+
+#### Tauri Project Structure Fixes
+1. **`app/src-tauri/Cargo.toml`** - MOVED & UPDATED
+   - Moved from `app/Cargo.toml` to `app/src-tauri/Cargo.toml`
+   - Fixed: Removed invalid `shell-open` feature from tauri dependency
+   - Updated: tauri version to `2.4`
+   - Added: tokio with time feature
+
+2. **`app/src-tauri/tauri.conf.json`** - MOVED & UPDATED
+   - Moved from `app/tauri.conf.json` to `app/src-tauri/tauri.conf.json`
+   - Updated to Tauri 2.x schema
+   - Added: `build` section with `devUrl` and `frontendDist`
+   - Added: `app` section with window configuration
+   - Added: `bundle` section with icon configuration
+
+3. **`app/src-tauri/build.rs`** - NEW FILE
+   - Required Tauri build script
+   - Calls `tauri_build::build()`
+
+4. **`app/src-tauri/src/main.rs`** - MOVED & UPDATED
+   - Moved from `app/src-tauri/main.rs` to `app/src-tauri/src/main.rs`
+   - Simplified to use new `youtube_login` module
+   - Removed old custom auth commands
+
+5. **`app/src-tauri/src/youtube_login.rs`** - EXISTING
+   - Tauri command for browser-based sign-in
+   - Opens Google sign-in window
+   - Captures cookies from webview
+   - Returns cookies to frontend
+
+### How to Test (Web Interface)
+
+```bash
+# Terminal 1: Start backend
+cd amp/backend
+python main.py
+
+# Terminal 2: Start frontend dev server
+cd app
+npm run dev
+```
+
+Then open **http://localhost:1420** in your browser.
+
+### What Works in Web Interface
+- ✅ Backend API fully functional
+- ✅ Auth status checking
+- ✅ Liked songs display (after auth via browser import)
+- ✅ Search functionality
+- ✅ All 92 backend tests pass
+
+### What Requires Tauri (Desktop App)
+- ⏳ "Connect YouTube Music" button (uses Tauri `invoke()`)
+- ⏳ Automatic cookie capture from sign-in window
+- ⏳ Native desktop window
+
+### Workaround for Web Testing
+Use the **browser import** feature:
+```bash
+# If logged into YouTube Music in Firefox
+curl -X POST http://localhost:8000/api/auth/import-browser \
+  -H "Content-Type: application/json" \
+  -d '{"browser": "firefox"}'
+```
+
+### Tauri Desktop App Status
+- ⏳ **Blocked**: Requires Visual Studio Build Tools (C++ workload) on Windows
+- ✅ **Ready**: Project structure is correct, just needs C++ compiler
+- 📝 **Fix**: Install Visual Studio Build Tools or use WSL2
+
+### Files Changed
+| File | Change | Lines |
+|------|--------|-------|
+| `app/src/useYouTubeAuth.ts` | New React hook | +85 |
+| `app/src/App.tsx` | Simplified auth UI | ~4717 |
+| `app/vite.config.ts` | Fixed port to 1420 | +1/-1 |
+| `app/src-tauri/Cargo.toml` | Moved & fixed dependencies | ~26 |
+| `app/src-tauri/tauri.conf.json` | Moved & updated to Tauri 2.x | ~745 |
+| `app/src-tauri/build.rs` | New build script | +3 |
+| `app/src-tauri/src/main.rs` | Moved & simplified | ~16 |
+
+---
+
 **Last Updated**: 2026-10-17  
-**Current Status**: ✅ Auth System Fixed - All Tests Passing (92/92)  
+**Current Status**: ✅ Phase 2.6 Complete - Web Interface Ready, All Tests Passing (92/92)  
 **Next Phase**: Phase 3 (Core Playback System) - Ready to Start  
-**New Feature**: Cookie-based authentication with Tauri integration  
+**New Feature**: Web interface for testing without Tauri desktop app  

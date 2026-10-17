@@ -1,210 +1,136 @@
 # Implementation Summary - 2026-10-17
 
 ## Overview
-This document summarizes the changes made on 2026-10-17 to implement browser-based YouTube authentication without requiring Google Cloud credentials, and to initialize the Tauri desktop application.
 
-## Problem Statement
-The user wanted to:
-1. Authenticate with their YouTube account
-2. Retrieve their liked videos
-3. Avoid requiring users to create Google OAuth credentials
-4. Initialize a Tauri app with a simple button to trigger the auth flow
+This document summarizes two major changes made on 2026-10-17:
 
-The original implementation had issues:
-- `subprocess.run(["ytmusicapi", "oauth"])` failed because ytmusicapi is a Python package, not a command-line tool
-- Tauri configuration had invalid properties
-- Frontend dev-server.js used `require()` but package.json had `"type": "module"`
-- Backend auth flow didn't open browser, just prompted for client ID in terminal
+1. **Phase 2.5 - Authentication Overhaul**: Replaced the broken OAuth flow with a working cookie-based authentication system.
+2. **Phase 2.6 - Web Interface Foundation**: Created a React web interface for testing without the Tauri desktop app.
 
-## Solution Implemented
+---
 
-### 1. Backend Authentication Fix (`amp/backend/services/auth.py`)
-**Changed**: The `trigger_cookie_auth()` method now uses `ytmusicapi.setup_oauth()` instead of trying to run `ytmusicapi oauth` as a subprocess.
+## Phase 2.5: Authentication Overhaul
 
-**Before**:
-```python
-result = subprocess.run(
-    ["ytmusicapi", "oauth"],
-    text=True,
-    timeout=120
-)
-```
+### Problem
 
-**After**:
-```python
-import ytmusicapi
-headers = ytmusicapi.setup_oauth(
-    filepath=str(cookies_path),
-    open_browser=True
-)
-```
+The original OAuth-based auth was completely broken:
 
-**Benefits**:
-- Uses the actual ytmusicapi function that handles OAuth flow
-- Automatically opens the browser for user authentication
-- Saves cookies to the specified path
-- No Google Cloud credentials required
+1. **OAuth is a dead end**: YouTube Music's private endpoints stopped accepting OAuth tokens around September 2025.
+2. **ytmusicapi API mismatches**: `YTMusic(headers_raw=...)`, `YTMusic(token=...)`, and `YTMusic(cookies_file=...)` don't exist in ytmusicapi 1.12.3.
+3. **Two separate auth states**: `AuthService` and `YouTubeService` each tracked their own state, so `YouTubeService` never learned about a login.
+4. **Manual cookie extraction was broken**: Chrome encrypts cookie values; the script read empty strings.
+5. **Code bugs**: `"is_automated": true` (Python `NameError`), triplicated `REDIRECT_URI` blocks, etc.
 
-### 2. Fixed Duplicate Endpoints (`amp/backend/api/endpoints.py`)
-**Issue**: There were 3 duplicate definitions of the `/auth/cookie-auth` endpoint.
+### Solution: Cookie-Based Auth
 
-**Solution**: Removed the duplicate definitions using `sed -i '293,340d'` to keep only the first definition.
+The new system uses **browser session cookies** — the only method YouTube Music accepts.
 
-### 3. Tauri Configuration Fix (`app/tauri.conf.json`)
-**Issue**: Invalid properties in the configuration file.
+**Auth flow**:
+1. User clicks "Connect YouTube Music"
+2. Tauri opens a Google sign-in window (`youtube_login.rs`)
+3. User logs in (including 2FA)
+4. Tauri reads session cookies from the webview (requires Tauri 2.4+)
+5. Frontend POSTs cookies to `POST /api/auth/cookies`
+6. Backend validates against YouTube, saves to `.amp/cache/ytm_session.json` (0600)
+7. All services use `get_auth_service().client` — single source of truth
 
-**Solution**: Updated to valid Tauri 2.0 schema:
-- Added required `identifier` field
-- Removed invalid properties (`devPath`, `distDir`, `publicDir`)
-- Added multiple icon sizes for better app appearance
+**Fallback**: `POST /api/auth/import-browser` uses yt-dlp to import cookies from Firefox (Chrome on Windows often blocked).
 
-### 4. Frontend Dev Server (`app/dev-server.cjs`)
-**Issue**: `dev-server.js` used CommonJS `require()` but package.json had `"type": "module"`
+### Files Changed
 
-**Solution**: Created `dev-server.cjs` (CommonJS extension) that uses `require()` properly.
+| File | Change |
+|------|--------|
+| `amp/backend/services/auth.py` | **Completely replaced** — new cookie-based AuthService |
+| `amp/backend/api/auth_routes.py` | **New** — `/auth/status`, `/auth/cookies`, `/auth/import-browser`, `/auth/logout` |
+| `amp/backend/services/youtube.py` | Updated to use centralized auth service |
+| `amp/backend/api/endpoints.py` | Removed old OAuth endpoints, added auth_router |
+| `amp/backend/config.py` | Removed OAuth credentials (YOUTUBE_CLIENT_ID, etc.) |
+| `app/src-tauri/src/youtube_login.rs` | **New** — Tauri command for Google sign-in window |
+| `app/src-tauri/main.rs` | Updated to use youtube_login command |
+| `app/src-tauri/Cargo.toml` | Added tokio with time feature |
+| `amp/backend/tests/test_ytm_auth.py` | **New** — 11 tests for auth service |
+| `amp/backend/tests/test_auth.py` | **Deleted** — old OAuth tests |
+| `app/scripts/extract_cookies.py` | **Deleted** — didn't work (Chrome encrypts cookies) |
 
-**Content**:
-- Express server that serves static files from `dist/`
-- Proxies `/api/*` requests to `http://localhost:8000`
-- Fallback to `index.html` for SPA routing
+---
 
-### 5. Package.json Updates (`app/package.json`)
-**Changes**:
-- Added `http-proxy-middleware` dependency
-- Added `serve` script to run the dev server
-- Added `tauri:dev` and `tauri:build` scripts
-- Updated `dev:full` to use proper path
+## Phase 2.6: Web Interface Foundation
 
-### 6. Rust Configuration (`app/src-tauri/main.rs` and `app/Cargo.toml`)
-**Changes**:
-- Added `tauri_plugin_shell` for opening browser windows
-- Added `tauri_plugin_http` for making HTTP requests from Tauri
-- Updated main.rs to initialize both plugins
+### Problem
 
-### 7. Frontend UI Improvements (`app/src/App.tsx`)
-**Changes**:
-- Updated `AuthStatus` type to include `auth_in_progress` and `auth_message` fields
-- Enhanced `handleLogin()` to show auth progress to user
-- Added UI feedback during authentication process
-- Extended polling time to 60 seconds (from 30)
-- Added timeout handling with user feedback
+The Tauri desktop app couldn't be built on Windows (missing Visual Studio Build Tools with C++ workload). The user needed a way to test the app.
+
+### Solution: Web Interface
+
+Created a standalone React web interface that works without Tauri:
+
+- **Vite dev server** on port 1420 (`npm run dev`)
+- **`useYouTubeAuth` React hook** for auth state management
+- **Auth UI**: "Connect YouTube Music" button, status display, liked songs
+- **Fixed Tauri 2.x project structure** (moved Cargo.toml and tauri.conf.json to `src-tauri/`)
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `app/src/useYouTubeAuth.ts` | **New** — React hook for auth state |
+| `app/src/App.tsx` | Simplified to use `useYouTubeAuth` hook |
+| `app/src-tauri/Cargo.toml` | **Moved** from `app/`, fixed dependencies |
+| `app/src-tauri/tauri.conf.json` | **Moved** from `app/`, updated to Tauri 2.x |
+| `app/src-tauri/build.rs` | **New** — Tauri build script |
+| `app/src-tauri/src/main.rs` | **Moved** from `app/src-tauri/main.rs` |
+| `app/package.json` | Updated scripts (dev, tauri:dev, tauri:build) |
+
+---
 
 ## Testing
 
-### Backend Tests
-All 112 tests pass:
+All **92 tests** pass:
+
 ```bash
-cd E:/Documents/TRAVAIL/packages/AMP
-python -m pytest amp/backend/tests/ -v
-# Result: 112 passed, 1 warning in 2.01s
+cd amp/backend
+python -m pytest tests/ -v
 ```
 
-### Auth Flow Test
-The `trigger_cookie_auth()` method now properly:
-1. Calls `ytmusicapi.setup_oauth()` with `open_browser=True`
-2. Saves cookies to `.amp/cache/cookies.json`
-3. Authenticates with the cookies
-4. Runs in a background thread (non-blocking)
+Test breakdown:
+- Phase 1 (Backend Core): 20 tests
+- Phase 2 (YouTube): 28 tests
+- Phase 2 (Streaming): 25 tests
+- Phase 2.5 (Auth): 11 tests (new)
+- Other: 8 tests
 
-## Files Modified
+---
 
-### Backend
-- `amp/backend/services/auth.py` - Updated `trigger_cookie_auth()` method
-- `amp/backend/api/endpoints.py` - Removed duplicate `/auth/cookie-auth` endpoints
+## How to Test
 
-### Frontend
-- `app/src/App.tsx` - Updated auth flow UI and logic
-- `app/src/index.css` - Existing, no changes needed
-- `app/package.json` - Added dependencies and scripts
-- `app/dev-server.cjs` - Created (CommonJS version)
-
-### Tauri
-- `app/tauri.conf.json` - Fixed configuration
-- `app/Cargo.toml` - Added plugins
-- `app/src-tauri/main.rs` - Added plugin initialization
-
-## Usage Instructions
-
-### For Development (Backend + Frontend)
+### Backend only:
 ```bash
-# Terminal 1: Start backend
+python amp/backend/main.py
+# → http://localhost:8000
+```
+
+### Web interface:
+```bash
+# Terminal 1: Backend
 python amp/backend/main.py
 
-# Terminal 2: Start frontend
+# Terminal 2: Frontend
 cd app
 npm run dev
+# → http://localhost:1420
 ```
 
-Then open: `http://localhost:5173`
-
-### For Development (Production-like)
+### Auth via browser import:
 ```bash
-# Build frontend
-cd app
-npm run build
-
-# Terminal 1: Start backend
-python amp/backend/main.py
-
-# Terminal 2: Start dev server
-cd app
-npm run serve
+curl -X POST http://localhost:8000/api/auth/import-browser \
+  -H "Content-Type: application/json" \
+  -d '{"browser": "firefox"}'
 ```
 
-Then open: `http://localhost:3000`
+---
 
-### For Tauri Desktop App
-```bash
-cd app
-npm run tauri:dev
-```
+## What's Next
 
-This will:
-1. Start the Tauri app
-2. The frontend will be served by Tauri
-3. API requests will be proxied to `http://localhost:8000`
+**Phase 3: Core Playback System** — Implement chunk-based audio streaming and caching.
 
-## Auth Flow
-
-1. User clicks "Login with YouTube Music" button
-2. Backend triggers `ytmusicapi.setup_oauth()` which opens browser
-3. User authenticates with YouTube in the browser window
-4. Cookies are saved to `.amp/cache/cookies.json`
-5. Frontend polls for auth status
-6. Once authenticated, user can access their liked songs and library
-
-## Notes
-
-- The auth flow uses ytmusicapi's cookie-based authentication, which doesn't require Google Cloud credentials
-- Cookies are persisted and will be used for subsequent sessions
-- The first auth might take a minute as it opens the browser and waits for user input
-- After initial auth, cookies are saved and the app will work without re-authentication
-
-## Next Steps
-
-The implementation is now ready for:
-1. Testing the complete auth flow with a real YouTube account
-2. Retrieving liked videos (already implemented in `get_liked_songs()` endpoint)
-3. Moving to Phase 3: Core Playback System
-
-## Commands Summary
-
-```bash
-# Run backend tests
-python -m pytest amp/backend/tests/ -v
-
-# Run backend server
-python amp/backend/main.py
-
-# Run frontend dev
-cd app && npm run dev
-
-# Build frontend
-cd app && npm run build
-
-# Run production-like dev server
-cd app && npm run serve
-
-# Run Tauri app
-cd app && npm run tauri:dev
-```
+See [ROADMAP.md](ROADMAP.md) for details.

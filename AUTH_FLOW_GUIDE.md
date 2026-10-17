@@ -2,237 +2,177 @@
 
 ## Overview
 
-This document explains the YouTube authentication flow implemented in AMP and how to test it.
+AMP uses **cookie-based authentication** with YouTube Music. This is the only method that works, because YouTube Music's private endpoints stopped accepting OAuth tokens in ~September 2025.
 
-## Authentication Methods
+The auth system uses a **single source of truth** (`AuthService`) that all other services share.
 
-AMP supports **two authentication modes**:
+---
 
-### Mode 1: OAuth with Credentials (Recommended for App Developer)
-- Requires: Google OAuth Client ID and Client Secret (created by **you**, the app developer)
-- Opens browser automatically for OAuth flow
-- Best user experience
-- Tokens are saved and refreshed automatically
+## Auth States
 
-### Mode 2: Cookie-Based Auth (No Credentials)
-- No Google OAuth credentials required
-- Opens YouTube Music in browser
-- User must manually copy request headers from browser
-- Headers are saved and reused
+| State | Meaning |
+|-------|---------|
+| `signed_out` | No session, user needs to connect |
+| `signed_in` | Valid session, API calls work |
+| `expired` | Session was valid but YouTube rejected it; user needs to re-login |
 
-## Current Implementation
+---
 
-The `trigger_cookie_auth()` endpoint automatically uses:
-- **Mode 1** if `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` are configured
-- **Mode 2** if credentials are not configured
+## Auth Methods
 
-## Configuration
+### Method 1: Browser Import (Recommended for development)
 
-### Option A: Use OAuth Credentials (Recommended)
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project
-3. Enable "YouTube Data API v3"
-4. Create OAuth 2.0 credentials (Client ID and Client Secret)
-5. Add authorized redirect URI: `http://localhost:8000/api/auth/callback`
-6. Add the credentials to your `.env` file:
+Uses yt-dlp to extract cookies from an installed browser.
 
 ```bash
-YOUTUBE_CLIENT_ID=your_client_id.apps.googleusercontent.com
-YOUTUBE_CLIENT_SECRET=your_client_secret
+curl -X POST http://localhost:8000/api/auth/import-browser \
+  -H "Content-Type: application/json" \
+  -d '{"browser": "firefox"}'
 ```
 
-**Benefits**: 
-- Users don't need to create credentials
-- Browser opens automatically
-- Seamless OAuth flow
+**Supported browsers**: `firefox`, `chrome`, `chromium`, `edge`, `brave`, `opera`, `vivaldi`, `safari`
 
-### Option B: Use Cookie-Based Auth (No Credentials)
+**Notes**:
+- Firefox works best. Chrome on Windows may be blocked by app-bound encryption.
+- The browser must be closed while importing (yt-dlp reads the cookie database).
 
-No configuration needed. The app will:
-1. Open YouTube Music in your browser
-2. Ask you to log in
-3. Prompt you to copy request headers from the browser
+### Method 2: Tauri Sign-in Window (Recommended for production)
 
-**Trade-offs**:
-- Manual step required (copy headers)
-- Less seamless user experience
-- Still works without any credentials
+The Tauri desktop app opens a Google sign-in window. After the user logs in, Tauri reads the session cookies from the webview and sends them to the backend.
 
-## Testing the Auth Flow
+**Flow**:
+1. Frontend calls `invoke("youtube_login")` (Tauri command)
+2. Tauri opens a window to `https://accounts.google.com/v3/signin/...`
+3. User signs in (including 2FA if enabled)
+4. Tauri reads `__Secure-3PAPISID` and other session cookies from the webview
+5. Frontend POSTs cookies to `POST /api/auth/cookies`
+6. Backend validates cookies against YouTube Music
 
-### Step 1: Start the Backend
+**Requirements**:
+- Tauri 2.4+ (for webview cookie API)
+- Rust build tools (Visual Studio Build Tools on Windows)
 
-```bash
-python amp/backend/main.py
-```
+---
 
-### Step 2: Trigger Authentication
+## API Endpoints
 
-Send a POST request to trigger cookie auth:
+### `GET /api/auth/status`
 
-```bash
-curl -X POST http://localhost:8000/api/auth/cookie-auth
-```
-
-Or use the frontend:
-- Open `http://localhost:3000` (if using dev server)
-- Click "Login with YouTube Music" button
-
-### Step 3: Complete Authentication
-
-#### If using OAuth (credentials configured):
-1. A browser window will open to Google's OAuth page
-2. Log in to your Google account
-3. Grant permissions
-4. You'll be redirected back
-5. Tokens are saved automatically
-
-#### If using Cookie-Based Auth (no credentials):
-1. A browser window will open to YouTube Music
-2. Log in to your YouTube account
-3. In the browser:
-   - Open Developer Tools (F12 or Ctrl+Shift+I)
-   - Go to Network tab
-   - Refresh the page (F5)
-   - Find a request to `/browse`
-   - Right-click → Copy → Copy as cURL
-4. In the terminal where you ran the backend:
-   - Paste the copied cURL command
-   - Press Enter, then Ctrl+Z (Windows) or Ctrl+D (Mac/Linux)
-5. Headers are saved automatically
-
-### Step 4: Verify Authentication
-
-Check auth status:
+Get current auth status. Add `?verify=true` to validate against YouTube.
 
 ```bash
 curl http://localhost:8000/api/auth/status
 ```
 
-Expected response:
+Response:
 ```json
 {
-  "is_authenticated": true,
-  "has_tokens": true,
-  "user_info": { ... },
-  "client_configured": false
+  "state": "signed_in",
+  "account": {
+    "name": "Your Name",
+    "channelId": "UC..."
+  }
 }
 ```
 
-### Step 5: Retrieve Liked Songs
+### `POST /api/auth/cookies`
+
+Receive cookies from the Tauri sign-in window.
 
 ```bash
-curl http://localhost:8000/api/user/likes
+curl -X POST http://localhost:8000/api/auth/cookies \
+  -H "Content-Type: application/json" \
+  -d '{
+    "cookies": [
+      {"name": "__Secure-3PAPISID", "value": "...", "domain": ".youtube.com", "path": "/"},
+      {"name": "...", "value": "...", "domain": "...", "path": "/"}
+    ]
+  }'
 ```
 
-This will return your liked songs from YouTube Music.
+### `POST /api/auth/import-browser`
 
-## Files Modified
+Import cookies from an installed browser using yt-dlp.
 
-### Backend (`amp/backend/services/auth.py`)
-- `trigger_cookie_auth()`: Handles both OAuth and cookie-based auth
-- `_authenticate_with_ytmusic_token()`: Authenticates with OAuth token
-- `_authenticate_with_headers()`: Authenticates with browser headers
+```bash
+curl -X POST http://localhost:8000/api/auth/import-browser \
+  -H "Content-Type: application/json" \
+  -d '{"browser": "firefox"}'
+```
 
-### API (`amp/backend/api/endpoints.py`)
-- `/api/auth/cookie-auth`: Endpoint to trigger authentication
-- Removed duplicate endpoint definitions
+### `POST /api/auth/logout`
+
+Clear the auth session.
+
+```bash
+curl -X POST http://localhost:8000/api/auth/logout
+```
+
+---
+
+## Session Persistence
+
+- Sessions are saved to `.amp/cache/ytm_session.json`
+- File permissions: **0600** (owner read/write only)
+- On app launch, the session is restored from disk **without a network call**
+- If YouTube rejects the session later, the state flips to `expired`
+
+---
 
 ## Frontend Integration
 
-The frontend (`app/src/App.tsx`) automatically:
-1. Calls `/api/auth/cookie-auth` when user clicks login
-2. Shows auth progress message
-3. Polls for authentication status every 2 seconds
-4. Updates UI when authenticated
-5. Displays liked songs after authentication
+The React hook `useYouTubeAuth` (`app/src/useYouTubeAuth.ts`) manages auth state:
 
-## Tauri App
+```typescript
+import { useYouTubeAuth } from './useYouTubeAuth';
 
-The Tauri desktop app (`app/`) includes:
-- Proper configuration (`tauri.conf.json`)
-- Shell plugin for opening browser
-- HTTP plugin for API requests
-- Frontend that works with Tauri
+function App() {
+  const { status, busy, error, login, logout, importFromBrowser } = useYouTubeAuth();
 
-To run:
-```bash
-cd app
-npm run tauri:dev
+  // status: 'signed_out' | 'signed_in' | 'expired'
+  // login() - opens Tauri sign-in window
+  // importFromBrowser('firefox') - imports from browser
+  // logout() - clears session
+}
 ```
 
-## Troubleshooting
-
-### Issue: Browser doesn't open
-**Solution**: Check if `webbrowser` module can open your default browser. Try:
-```python
-import webbrowser
-webbrowser.open("https://music.youtube.com")
-```
-
-### Issue: OAuth fails with "client_id not configured"
-**Solution**: Add `YOUTUBE_CLIENT_ID` and `YOUTUBE_CLIENT_SECRET` to your `.env` file
-
-### Issue: Headers not accepted
-**Solution**: Make sure you're copying from a request to `/browse` (not other endpoints). The headers must include `cookie` and `x-goog-authuser`.
-
-### Issue: Authentication succeeds but can't get liked songs
-**Solution**: Check if you're authenticated first:
-```bash
-curl http://localhost:8000/api/auth/status
-```
-If `is_authenticated` is false, try authenticating again.
-
-## Environment Variables
-
-Create a `.env` file in `amp/backend/`:
-
-```bash
-# For OAuth flow (recommended)
-YOUTUBE_CLIENT_ID=your_client_id.apps.googleusercontent.com
-YOUTUBE_CLIENT_SECRET=your_client_secret
-YOUTUBE_REDIRECT_URI=http://localhost:8000/api/auth/callback
-
-# Optional: YouTube API key (for additional features)
-YOUTUBE_API_KEY=your_api_key
-
-# Optional: Path to cookies file
-YTMUSICAPI_COOKIES=.amp/cache/cookies.json
-```
+---
 
 ## Security Notes
 
-1. **Never commit credentials to version control**
-   - Add `.env` to `.gitignore`
-   - Don't commit credentials in source code
+1. **Cookies = Full Account Access**: The saved cookies provide full access to the Google account. Treat them as secrets.
+2. **Never commit sessions**: `.amp/cache/ytm_session.json` is in `.gitignore`
+3. **File permissions**: Session file is created with 0600 permissions
+4. **Unofficial API**: This uses YouTube Music's private endpoints. It can break if Google changes things.
 
-2. **OAuth tokens are saved locally**
-   - Tokens are saved to `.amp/cache/` directory
-   - They're only accessible on the local machine
+---
 
-3. **Headers contain cookies**
-   - Headers copied from browser contain session cookies
-   - They allow access to your YouTube account
-   - Keep them secure
+## Troubleshooting
 
-## Re-authentication
+| Issue | Solution |
+|-------|----------|
+| "This browser or app may not be secure" | Google blocks embedded webviews sometimes. Use browser import instead. |
+| Chrome import returns empty | Chrome on Windows uses app-bound encryption. Use Firefox. |
+| Session expired after a while | Cookies can be revoked. Re-login via browser import or sign-in window. |
+| `state: "expired"` on launch | The session was valid but YouTube rejected it. Re-login. |
+| Offline start shows `signed_out` | This should NOT happen. The session restores from disk without network. If it does, check file permissions on `ytm_session.json`. |
 
-To re-authenticate (e.g., with a different account):
+---
 
-```bash
-# Logout first
-curl -X POST http://localhost:8000/api/auth/logout
+## Architecture
 
-# Then authenticate again
-curl -X POST http://localhost:8000/api/auth/cookie-auth
+```
+┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│   Frontend   │────▶│  AuthService      │────▶│  ytmusicapi      │
+│  (React)     │     │  (single source   │     │  (YTMusic client) │
+│              │◀────│   of truth)       │◀────│                  │
+└─────────────┘     └──────────────────┘     └─────────────────┘
+                            │
+                            ▼
+                    ┌──────────────────┐
+                    │  ytm_session.json │  (.amp/cache/, 0600)
+                    │  (persisted)      │
+                    └──────────────────┘
 ```
 
-## Summary
-
-| Method | Credentials | User Experience | Automatic? |
-|--------|-------------|----------------|------------|
-| OAuth | Required (developer) | ⭐⭐⭐⭐⭐ | ✅ Yes |
-| Cookie-based | Not required | ⭐⭐ | ❌ No (manual copy) |
-
-**Recommendation**: Use OAuth with your own credentials for the best user experience.
+All services (`YouTubeService`, `StreamingService`) use `get_auth_service().client` to get the authenticated YTMusic instance. There is no separate auth state.
