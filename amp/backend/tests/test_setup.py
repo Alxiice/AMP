@@ -8,8 +8,8 @@ import os
 import sys
 
 # Add backend to path
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
+BACKEND_FOLDER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(BACKEND_FOLDER))
 
 def test_imports():
     """Test that all modules can be imported."""
@@ -74,10 +74,10 @@ def test_directory_structure():
     
     # BASE_DIR points to the project root (AMP/)
     expected_dirs = [
-        BASE_DIR / "backend" / "database",
-        BASE_DIR / "backend" / "api",
-        BASE_DIR / "backend" / "utils",
-        BASE_DIR / "backend" / "tests",
+        BASE_DIR / "amp" / "backend" / "database",
+        BASE_DIR / "amp" / "backend" / "api",
+        BASE_DIR / "amp" / "backend" / "utils",
+        BASE_DIR / "amp" / "backend" / "tests",
         CACHE_DIR,
         CHUNKS_DIR,
         LOGS_DIR,
