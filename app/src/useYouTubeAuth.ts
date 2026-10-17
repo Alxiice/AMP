@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+
 import { invoke } from "@tauri-apps/api/core";
 
 const API = "http://127.0.0.1:8000/api";
@@ -19,6 +20,11 @@ interface TauriCookie {
 
 const SIGNED_OUT: AuthStatus = { state: "signed_out", is_authenticated: false, account: null };
 
+/** True when running inside a Tauri webview (window.__TAURI_INTERNALS__ is injected). */
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
     ...init,
@@ -35,6 +41,7 @@ export function useYouTubeAuth() {
   const [status, setStatus] = useState<AuthStatus>(SIGNED_OUT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [inTauri, setInTauri] = useState(isTauri);
 
   // On app start: ask the backend, and have it check with YouTube that the saved session still works.
   useEffect(() => {
@@ -44,6 +51,7 @@ export function useYouTubeAuth() {
   const run = useCallback(async (fn: () => Promise<AuthStatus>) => {
     setBusy(true);
     setError(null);
+
     try {
       setStatus(await fn());
     } catch (e) {
@@ -58,6 +66,11 @@ export function useYouTubeAuth() {
   const login = useCallback(
     () =>
       run(async () => {
+        if (!isTauri()) {
+          throw new Error(
+            "Sign-in window requires the Tauri desktop app. Use browser import instead (see below)."
+          );
+        }
         const cookies = await invoke<TauriCookie[]>("youtube_login");
         return api<AuthStatus>("/auth/cookies", { method: "POST", body: JSON.stringify({ cookies }) });
       }),
@@ -73,13 +86,5 @@ export function useYouTubeAuth() {
 
   const logout = useCallback(() => run(() => api<AuthStatus>("/auth/logout", { method: "POST" })), [run]);
 
-  return { status, busy, error, login, importFromBrowser, logout };
+  return { status, busy, error, login, importFromBrowser, logout, inTauri };
 }
-
-/*
-Usage:
-  const { status, busy, error, login, logout } = useYouTubeAuth();
-  status.state === "signed_out" -> <button onClick={login}>Connect YouTube Music</button>
-  status.state === "expired"    -> "Your session expired" + the same button
-  status.state === "signed_in"  -> show status.account?.accountName + <button onClick={logout}>
-*/

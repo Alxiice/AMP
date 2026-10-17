@@ -16,7 +16,7 @@ type Song = {
 };
 
 function App() {
-  const { status, busy, error: authError, login, logout } = useYouTubeAuth();
+  const { status, busy, error: authError, login, logout, importFromBrowser, inTauri } = useYouTubeAuth();
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,18 +34,18 @@ function App() {
     try {
       setLoading(true);
       setError(null);
-      
+
       const response = await fetch(`${BACKEND_URL}/api/user/likes`);
-      
+
       if (response.status === 401) {
         setLikedSongs([]);
         return;
       }
-      
+
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);
       }
-      
+
       const songs = await response.json();
       setLikedSongs(songs);
     } catch (err) {
@@ -56,71 +56,105 @@ function App() {
     }
   };
 
+  const handleImportFirefox = () => {
+    importFromBrowser('firefox');
+  };
+
   return (
     <div className="container">
       <h1>AMP</h1>
       <p className="powered-by">Powered by YouTube Music</p>
-      
+
       {!status.is_authenticated ? (
         <div>
-          <button 
-            className="button" 
-            onClick={login}
+          {/* Primary: Tauri sign-in window (only in desktop app) */}
+          {inTauri && (
+            <button
+              className="button"
+              onClick={login}
+              disabled={busy || loading}
+            >
+              {busy ? 'Opening sign-in window...' : 'Connect YouTube Music'}
+            </button>
+          )}
+
+          {/* Fallback: Browser import (works in web browser and Tauri) */}
+          <button
+            className="button"
+            onClick={handleImportFirefox}
             disabled={busy || loading}
+            style={{ marginLeft: inTauri ? '0.5rem' : 0 }}
           >
-            {busy ? 'Opening sign-in window...' : loading ? 'Loading...' : 'Connect YouTube Music'}
+            {busy ? 'Importing...' : 'Import from Firefox'}
           </button>
-          
+
+          {!inTauri && (
+            <p style={{ color: '#888', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+              Running in browser mode. Use "Import from Firefox" to connect,
+              or run the Tauri desktop app for one-click sign-in.
+            </p>
+          )}
+
           {authError && status.state !== 'expired' && (
             <p className="error">{authError}</p>
           )}
-          
+
           {status.state === 'expired' && (
             <div className="status" style={{ marginTop: '1rem' }}>
               <p style={{ color: '#ffc107' }}>Your session has expired. Please connect again.</p>
-              <button 
-                className="button" 
-                onClick={login}
+              {inTauri && (
+                <button
+                  className="button"
+                  onClick={login}
+                  disabled={busy}
+                >
+                  {busy ? 'Connecting...' : 'Connect YouTube Music'}
+                </button>
+              )}
+              <button
+                className="button"
+                onClick={handleImportFirefox}
                 disabled={busy}
+                style={{ marginLeft: inTauri ? '0.5rem' : 0 }}
               >
-                {busy ? 'Connecting...' : 'Connect YouTube Music'}
+                {busy ? 'Importing...' : 'Import from Firefox'}
               </button>
             </div>
           )}
         </div>
       ) : (
         <div>
-          <button 
-            className="button" 
+          <button
+            className="button"
             onClick={logout}
             disabled={loading}
           >
             {loading ? 'Logging out...' : 'Logout'}
           </button>
-          
+
           {status.account && (
             <div className="status">
-              <h3>✓ Connected as {status.account.accountName}</h3>
+              <h3>Connected as {status.account.accountName}</h3>
               <p>You can now access your YouTube Music library.</p>
             </div>
           )}
-          
+
           {loading && (
             <p className="loading">Loading your liked songs...</p>
           )}
-          
+
           {error && (
             <p className="error">{error}</p>
           )}
-          
+
           {likedSongs.length > 0 && (
             <div className="songs">
               <h3>Your Liked Songs ({likedSongs.length})</h3>
               {likedSongs.slice(0, 10).map((song) => (
                 <div key={song.id} className="song">
                   {song.thumbnail_url && (
-                    <img 
-                      src={song.thumbnail_url} 
+                    <img
+                      src={song.thumbnail_url}
                       alt={song.title}
                       onError={(e) => {
                         (e.target as HTMLImageElement).style.display = 'none';
@@ -142,15 +176,15 @@ function App() {
           )}
         </div>
       )}
-      
+
       {error && (
         <p className="error">{error}</p>
       )}
-      
+
       {!status.is_authenticated && !busy && !loading && (
         <div className="status">
           <h3>Not connected</h3>
-          <p>Click the button above to authenticate with YouTube Music and access your liked songs.</p>
+          <p>Connect with YouTube Music to access your liked songs.</p>
         </div>
       )}
     </div>
