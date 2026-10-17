@@ -231,8 +231,7 @@ class YouTubeService:
             if self._cookies_file and self._cookies_file.exists():
                 logger.info(f"Authenticating with cookies: {self._cookies_file}")
                 self._authenticated_ytmusic = ytma.YTMusic(
-                    requests_session=True,
-                    cookies_file=str(self._cookies_file)
+                    auth=str(self._cookies_file)
                 )
                 self._is_authenticated = True
                 logger.info("YouTubeService authenticated successfully")

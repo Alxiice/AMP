@@ -265,8 +265,29 @@ async def auth_refresh():
         )
 
 
-# -----------------------------------------------------------------------------
-# Search & Library
+
+@router.post("/auth/cookie-auth", tags=["auth"])
+async def auth_cookie_auth():
+    """
+    Trigger browser-based cookie authentication via ytmusicapi.
+    
+    This opens a browser window for the user to log in to YouTube Music.
+    After authentication, cookies are saved and used for API calls.
+    
+    This is the recommended auth method as it does not require Google Cloud credentials.
+    """
+    logger.info("Triggering cookie-based authentication")
+    
+    try:
+        result = auth_service.trigger_cookie_auth()
+        return result
+    except Exception as e:
+        logger.error(f"Cookie auth failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e),
+        )
+
 # -----------------------------------------------------------------------------
 
 @router.get("/search", response_model=List[SongResponse], tags=["library"])

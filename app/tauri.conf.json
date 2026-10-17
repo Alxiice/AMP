@@ -1,0 +1,17 @@
+{
+  "productName": "AMP",
+  "version": "0.1.0",
+  "tauri": {
+    "allowlist": {
+      "shell": {
+        "open": true
+      },
+      "http": {
+        "request": true
+      }
+    },
+    "bundle": {
+      "identifier": "com.amp.music"
+    }
+  }
+}

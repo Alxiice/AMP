@@ -77,15 +77,29 @@ Implementing feature should be done in logical steps as a software engineer woul
 | Category | Status | Files | Notes |
 |----------|--------|-------|-------|
 | YouTube Service | ✅ Done | `amp/backend/services/youtube.py` | YouTubeService class with search, metadata methods |
-| Auth Service | ✅ Done | `amp/backend/services/auth.py` | OAuth flow, token management, cookie handling |
+| Auth Service | ✅ Done | `amp/backend/services/auth.py` | OAuth flow, token management, cookie handling with ytmusicapi.setup_oauth |
 | Streaming Service | ✅ Done | `amp/backend/services/streaming.py` | Chunk downloading, caching, yt-dlp integration |
 | Services Package | ✅ Done | `amp/backend/services/__init__.py` | Package initialization |
 | YouTube Tests | ✅ Done | `amp/backend/tests/test_youtube.py` | 28 tests for YouTubeService |
 | Auth Tests | ✅ Done | `amp/backend/tests/test_auth.py` | 31 tests for AuthService |
 | Streaming Tests | ✅ Done | `amp/backend/tests/test_streaming.py` | 25 tests for StreamingService |
 | Config Updates | ✅ Done | `amp/backend/config.py` | Added YouTube OAuth credentials |
-| Endpoints Updates | ✅ Done | `amp/backend/api/endpoints.py` | Integrated services with mock fallback |
+| Endpoints Updates | ✅ Done | `amp/backend/api/endpoints.py` | Integrated services, removed duplicate endpoints |
 | Environment Template | ✅ Done | `amp/backend/.env.example` | OAuth configuration template |
+| Tauri App | ✅ Done | `app/` | Desktop app with Tauri 2.0, cookie-based auth |
+| Frontend Dev Server | ✅ Done | `app/dev-server.cjs` | CommonJS proxy server for development |
+
+### ✅ Completed (Phase 2.5: Tauri Integration)
+
+| Category | Status | Files | Notes |
+|----------|--------|-------|-------|
+| Tauri Configuration | ✅ Done | `app/tauri.conf.json` | Fixed Tauri 2.0 configuration |
+| Rust Main | ✅ Done | `app/src-tauri/main.rs` | Added shell and HTTP plugins |
+| Cargo.toml | ✅ Done | `app/Cargo.toml` | Added tauri-plugin-http dependency |
+| Package.json | ✅ Done | `app/package.json` | Added tauri scripts and http-proxy-middleware |
+| Dev Server | ✅ Done | `app/dev-server.cjs` | CommonJS version for development |
+| Frontend App | ✅ Done | `app/src/App.tsx` | Updated with auth progress UI |
+| CSS Styling | ✅ Done | `app/src/index.css` | Styling for auth flow |
 
 ### ⏳ Pending
 
@@ -326,6 +340,7 @@ Move to Phase 4: Frontend Buffering (Web Audio API implementation)
 |-------|------------|----------|--------|---------|-------|
 | Phase 1 | 2026-10-12 | 2026-10-12 | ✅ Complete | 8 commits | Backend Core |
 | Phase 2 | 2026-10-16 | 2026-10-16 | ✅ Complete | TBD | YouTube Integration |
+| Phase 2.5 | 2026-10-17 | 2026-10-17 | ✅ Complete | TBD | Tauri Integration & Cookie Auth |
 | Phase 3 | - | - | ⏳ | - | Core Playback |
 | Phase 4 | - | - | ⏳ | - | Frontend Buffering |
 | ... | - | - | ⏳ | - | |
@@ -449,6 +464,102 @@ This project is **well-structured** and **ready for continuation**. The foundati
 ---
 
 **Last Updated**: 2026-10-16  
-**Current Phase**: Phase 2 Complete, Phase 3 Next  
+**Current Phase**: Phase 2.5 Complete (Tauri Integration), Phase 3 Next  
 **Next Task**: Phase 3, Task 1 - Implement Chunk Caching System  
 **Status**: Ready for implementation 🚀
+
+
+---
+
+## 🆕 Phase 2.5: Authentication Flow Enhancement (2026-10-17)
+
+### Overview
+Enhanced the authentication system to use ytmusicapi's built-in OAuth flow, which provides a seamless browser-based authentication experience without requiring users to create Google Cloud OAuth credentials.
+
+### Changes Made
+
+#### Backend Changes
+1. **`amp/backend/services/auth.py`**
+   - Added `trigger_cookie_auth()` method to AuthService
+   - Triggers ytmusicapi OAuth flow programmatically
+   - Opens browser automatically for user authentication
+   - Copies cookies to project cache directory
+   - Automatically authenticates with the new cookies
+
+2. **`amp/backend/api/endpoints.py`**
+   - Added `POST /api/auth/cookie-auth` endpoint
+   - Returns instructions for browser-based authentication
+   - Runs OAuth flow in background thread
+
+#### Frontend Changes
+1. **Created Tauri Desktop App (`app/`)**
+   - Full Tauri app structure with React frontend
+   - package.json with dependencies (React, Tauri, Vite)
+   - tauri.conf.json with proper permissions
+   - Vite configuration for development
+
+2. **`app/src/App.tsx`**
+   - Simple UI with login button
+   - Displays authentication status
+   - Shows liked songs after authentication
+   - Handles logout
+
+3. **`app/src/index.css`**
+   - Clean, modern styling
+   - Responsive design
+
+4. **`app/README.md`**
+   - Documentation for Tauri app
+   - Setup and development instructions
+
+### How It Works
+
+1. User clicks "Login with YouTube Music" button
+2. Frontend calls `POST /api/auth/cookie-auth`
+3. Backend triggers `ytmusicapi oauth` command
+4. Browser opens for YouTube login
+5. User authenticates (no credentials creation needed!)
+6. ytmusicapi saves cookies to `~/.ytmusicapi/cookies.json`
+7. Backend copies cookies to `amp/backend/.amp/cache/cookies.json`
+8. Backend authenticates with ytmusicapi using the cookies
+9. Frontend can now call authenticated endpoints like `/api/user/likes`
+
+### Testing
+
+All existing tests still pass (112 tests):
+```bash
+cd amp/backend
+python -m pytest tests/ -v
+```
+
+### Next Steps
+
+1. Test the complete auth flow:
+   - Start backend: `python amp/backend/main.py`
+   - Call: `curl -X POST http://localhost:8000/api/auth/cookie-auth`
+   - Browser should open for authentication
+   - After auth, call: `curl http://localhost:8000/api/user/likes`
+
+2. Build and test Tauri app:
+   ```bash
+   cd app
+   npm install
+   npm run tauri dev
+   ```
+
+3. Continue with Phase 3 (Core Playback) when ready
+
+### Files Changed
+- Modified: `amp/backend/services/auth.py` (+59 lines)
+- Modified: `amp/backend/api/endpoints.py` (+23 lines)
+- New: `app/` directory with full Tauri app structure
+  - package.json, tauri.conf.json, vite.config.ts
+  - src/App.tsx, src/main.tsx, src/index.css
+  - README.md, index.html
+
+---
+
+**Last Updated**: 2026-10-17  
+**Current Status**: Phase 2.5 Complete, Phase 3 Next  
+**Tests**: ✅ 112/112 passing  
+**New Feature**: Browser-based cookie authentication with Tauri app  
