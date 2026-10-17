@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useYouTubeAuth } from './useYouTubeAuth';
 
 // Backend API base URL
 const BACKEND_URL = 'http://localhost:8000';
@@ -14,47 +15,20 @@ type Song = {
   year: number | null;
 };
 
-type AuthStatus = {
-  is_authenticated: boolean;
-  has_tokens: boolean;
-  user_info: any;
-  client_configured: boolean;
-  auth_in_progress?: boolean;
-  auth_message?: string;
-  youtube_url?: string;
-  auth_type?: 'oauth' | 'cookies';
-  is_automated?: boolean;
-  warning?: string;
-};
-
 function App() {
-  const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
+  const { status, busy, error: authError, login, logout } = useYouTubeAuth();
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Check auth status on mount
+  // Load liked songs when authenticated
   useEffect(() => {
-    checkAuthStatus();
-  }, []);
-
-  const checkAuthStatus = async () => {
-    try {
-      const response = await fetch(`${BACKEND_URL}/api/auth/status`);
-      if (response.ok) {
-        const data = await response.json();
-        setAuthStatus(data);
-        
-        // If already authenticated, load liked songs
-        if (data.is_authenticated) {
-          await loadLikedSongs();
-        }
-      }
-    } catch (err) {
-      setError('Failed to check authentication status');
-      console.error('Auth status check failed:', err);
+    if (status.is_authenticated) {
+      loadLikedSongs();
+    } else {
+      setLikedSongs([]);
     }
-  };
+  }, [status.is_authenticated]);
 
   const loadLikedSongs = async () => {
     try {
@@ -64,8 +38,6 @@ function App() {
       const response = await fetch(`${BACKEND_URL}/api/user/likes`);
       
       if (response.status === 401) {
-        // Not authenticated
-        setAuthStatus({ ...authStatus, is_authenticated: false });
         setLikedSongs([]);
         return;
       }
@@ -84,195 +56,35 @@ function App() {
     }
   };
 
-  const handleLogin = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      
-      // Try OAuth login first (if credentials are configured)
-      const oauthResponse = await fetch(`${BACKEND_URL}/api/auth/login`, {
-        method: 'POST',
-      });
-      
-      if (oauthResponse.ok) {
-        const oauthData = await oauthResponse.json();
-        
-        // If we got an auth_url, open it in a new window/tab
-        if (oauthData.auth_url) {
-          console.log('OAuth URL:', oauthData.auth_url);
-          
-          // For web: open in new tab
-          // For Tauri: use shell.open
-          if (window.__TAURI__) {
-            // Tauri app - use shell plugin
-            try {
-              const { open } = await import('@tauri-apps/plugin-shell');
-              await open(oauthData.auth_url);
-            } catch (e) {
-              // Fallback to window.open
-              window.open(oauthData.auth_url, '_blank');
-            }
-          } else {
-            // Regular web - open in new tab
-            window.open(oauthData.auth_url, '_blank');
-          }
-          
-          // Show message to user
-          setAuthStatus({
-            ...authStatus,
-            is_authenticated: false,
-            auth_in_progress: true,
-            auth_message: 'Browser opened for authentication. Please complete login and return to this page.'
-          });
-          
-          // Start polling for auth completion
-          const checkInterval = setInterval(async () => {
-            await checkAuthStatus();
-            if (authStatus?.is_authenticated) {
-              clearInterval(checkInterval);
-              setLoading(false);
-            }
-          }, 2000);
-          
-          // Clear interval after 2 minutes
-          setTimeout(() => {
-            clearInterval(checkInterval);
-            if (!authStatus?.is_authenticated) {
-              setAuthStatus({
-                ...authStatus,
-                auth_in_progress: false,
-                auth_message: 'Authentication timed out. Please try again.'
-              });
-              setLoading(false);
-            }
-          }, 120000);
-          
-          return;
-        }
-      }
-      
-      // Fallback to cookie-based auth if OAuth not configured
-      console.log('OAuth not configured, falling back to cookie-based auth');
-      const response = await fetch(`${BACKEND_URL}/api/auth/cookie-auth`, {
-        method: 'POST',
-      });
-      
-      if (!response.ok) {
-        throw new Error('Failed to start authentication');
-      }
-      
-      const data = await response.json();
-      console.log('Auth triggered:', data.message);
-      
-      // Show success message to user
-      setAuthStatus({
-        ...authStatus,
-        is_authenticated: false,
-        auth_in_progress: true,
-        auth_message: data.message,
-        youtube_url: data.youtube_url
-      });
-      
-      // If there's a YouTube URL, open it
-      if (data.youtube_url) {
-        if (window.__TAURI__) {
-          try {
-            const { open } = await import('@tauri-apps/plugin-shell');
-            await open(data.youtube_url);
-          } catch (e) {
-            window.open(data.youtube_url, '_blank');
-          }
-        } else {
-          window.open(data.youtube_url, '_blank');
-        }
-      }
-      
-      // Wait for user to complete manual auth
-      const checkInterval = setInterval(async () => {
-        await checkAuthStatus();
-        if (authStatus?.is_authenticated) {
-          clearInterval(checkInterval);
-          setLoading(false);
-        }
-      }, 2000);
-      
-      // Clear interval after 60 seconds
-      setTimeout(() => {
-        clearInterval(checkInterval);
-        if (!authStatus?.is_authenticated) {
-          setAuthStatus({
-            ...authStatus,
-            auth_in_progress: false,
-            auth_message: 'Authentication timed out. Please try again.'
-          });
-          setLoading(false);
-        }
-      }, 60000);
-      
-    } catch (err) {
-      setError('Failed to start authentication');
-      console.error('Login failed:', err);
-      setLoading(false);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${BACKEND_URL}/api/auth/logout`, {
-        method: 'POST',
-      });
-      
-      if (response.ok) {
-        setAuthStatus({ ...authStatus, is_authenticated: false });
-        setLikedSongs([]);
-      }
-    } catch (err) {
-      console.error('Logout failed:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="container">
       <h1>AMP</h1>
       <p className="powered-by">Powered by YouTube Music</p>
       
-      {!authStatus?.is_authenticated ? (
+      {!status.is_authenticated ? (
         <div>
           <button 
             className="button" 
-            onClick={handleLogin}
-            disabled={loading}
+            onClick={login}
+            disabled={busy || loading}
           >
-            {loading ? 'Opening browser...' : 'Login with YouTube Music'}
+            {busy ? 'Opening sign-in window...' : loading ? 'Loading...' : 'Connect YouTube Music'}
           </button>
-          {authStatus?.auth_in_progress && (
-            <div className="status" style={{ marginTop: '1rem' }}>
-              {authStatus.is_automated ? (
-                <p style={{ color: '#28a745' }}>
-                  ✅ {authStatus.auth_message || 'Please complete authentication in the browser window that opened.'}
-                </p>
-              ) : (
-                <div>
-                  <p style={{ color: '#ffc107' }}>
-                    ⚠️ {authStatus.auth_message || 'Please follow the instructions in the terminal.'}
-                  </p>
-                  <p style={{ color: '#666', fontSize: '0.9rem', marginTop: '0.5rem' }}>
-                    For FULLY AUTOMATED auth (like Spotify):
-                    <br />
-                    <code style={{ background: '#f0f0f0', padding: '2px 6px', borderRadius: '4px' }}>
-                      Create Google OAuth credentials
-                    </code>
-                  </p>
-                </div>
-              )}
-            </div>
+          
+          {authError && status.state !== 'expired' && (
+            <p className="error">{authError}</p>
           )}
-          {!authStatus?.auth_in_progress && authStatus?.warning && (
-            <div className="status" style={{ marginTop: '1rem', color: '#666', fontSize: '0.9rem' }}>
-              <p>{authStatus.warning}</p>
+          
+          {status.state === 'expired' && (
+            <div className="status" style={{ marginTop: '1rem' }}>
+              <p style={{ color: '#ffc107' }}>Your session has expired. Please connect again.</p>
+              <button 
+                className="button" 
+                onClick={login}
+                disabled={busy}
+              >
+                {busy ? 'Connecting...' : 'Connect YouTube Music'}
+              </button>
             </div>
           )}
         </div>
@@ -280,16 +92,18 @@ function App() {
         <div>
           <button 
             className="button" 
-            onClick={handleLogout}
+            onClick={logout}
             disabled={loading}
           >
-            Logout
+            {loading ? 'Logging out...' : 'Logout'}
           </button>
           
-          <div className="status">
-            <h3>✓ Authenticated</h3>
-            <p>You can now access your YouTube Music library.</p>
-          </div>
+          {status.account && (
+            <div className="status">
+              <h3>✓ Connected as {status.account.accountName}</h3>
+              <p>You can now access your YouTube Music library.</p>
+            </div>
+          )}
           
           {loading && (
             <p className="loading">Loading your liked songs...</p>
@@ -333,9 +147,9 @@ function App() {
         <p className="error">{error}</p>
       )}
       
-      {!authStatus?.is_authenticated && !loading && (
+      {!status.is_authenticated && !busy && !loading && (
         <div className="status">
-          <h3>Not logged in</h3>
+          <h3>Not connected</h3>
           <p>Click the button above to authenticate with YouTube Music and access your liked songs.</p>
         </div>
       )}

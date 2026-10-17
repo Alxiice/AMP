@@ -137,47 +137,37 @@ class TestPlaybackEndpoints:
 class TestAuthEndpoints:
     """Tests for authentication endpoints."""
     
-    def test_auth_login_endpoint(self, client):
-        """Test POST /auth/login returns auth_url with default redirect_uri."""
-        response = client.post("/api/auth/login", json={})
-        assert response.status_code == 200
-        data = response.json()
-        assert "auth_url" in data
-        assert "https://accounts.google.com/o/oauth2" in data["auth_url"]
-        # Should use default redirect_uri from config
-        assert "redirect_uri=" in data["auth_url"]
-    
-    def test_auth_login_endpoint_custom_redirect(self, client):
-        """Test POST /auth/login with custom redirect_uri."""
-        custom_uri = "http://custom:8080/callback"
-        response = client.post("/api/auth/login", json={"redirect_uri": custom_uri})
-        assert response.status_code == 200
-        data = response.json()
-        assert "auth_url" in data
-        assert custom_uri in data["auth_url"]
-    
     def test_auth_status_endpoint(self, client):
         """Test GET /auth/status returns status."""
         response = client.get("/api/auth/status")
         assert response.status_code == 200
         data = response.json()
         assert "is_authenticated" in data
-        assert "has_tokens" in data
+        assert "state" in data
         assert data["is_authenticated"] == False
+        assert data["state"] == "signed_out"
+    
+    def test_auth_status_endpoint_with_verify(self, client):
+        """Test GET /auth/status?verify=true."""
+        response = client.get("/api/auth/status?verify=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert "is_authenticated" in data
+        assert "state" in data
     
     def test_auth_logout_endpoint(self, client):
         """Test POST /auth/logout returns success."""
         response = client.post("/api/auth/logout")
         assert response.status_code == 200
         data = response.json()
-        assert data["status"] == "logged_out"
+        assert data["state"] == "signed_out"
+        assert data["is_authenticated"] == False
     
-    def test_auth_callback_endpoint_invalid_state(self, client):
-        """Test POST /auth/callback with invalid state returns 400."""
-        response = client.post("/api/auth/callback", json={
-            "code": "test_code",
-            "state": "invalid_state"
+    def test_auth_cookies_endpoint_invalid_cookies(self, client):
+        """Test POST /auth/cookies with invalid cookies returns 401."""
+        response = client.post("/api/auth/cookies", json={
+            "cookies": [{"name": "SID", "value": "invalid"}]
         })
-        assert response.status_code == 400
+        assert response.status_code == 401
         data = response.json()
-        assert "Invalid code or state" in data["detail"]
+        assert "detail" in data
