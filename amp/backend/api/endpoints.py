@@ -24,8 +24,9 @@ from backend.database.models import (
 
 # Import services
 from backend.services.youtube import YouTubeService, get_youtube_service, SearchType
-from backend.services.auth import AuthService, get_auth_service
+from backend.services.auth import get_auth_service
 from backend.services.streaming import StreamingService, get_streaming_service
+from backend.api.auth_routes import router as auth_router
 
 router = APIRouter(tags=["api"])
 logger = get_logger(__name__)
@@ -34,6 +35,9 @@ logger = get_logger(__name__)
 youtube_service = get_youtube_service()
 auth_service = get_auth_service()
 streaming_service = get_streaming_service()
+
+# Include auth routes
+router.include_router(auth_router)
 
 
 # =============================================================================
@@ -96,16 +100,6 @@ class QueueSelectRequest(BaseModel):
     item_id: str  # ID of the item to select
 
 
-class AuthLoginRequest(BaseModel):
-    """Request to initiate OAuth login."""
-    redirect_uri: Optional[str] = None
-
-
-class AuthCallbackRequest(BaseModel):
-    """Request to handle OAuth callback."""
-    code: str
-    state: str
-    redirect_uri: Optional[str] = None
 
 
 # =============================================================================
@@ -119,7 +113,7 @@ async def health_check():
     # Check service health
     services_health = {
         "youtube_service": youtube_service is not None,
-        "auth_service": auth_service is not None,
+        
         "streaming_service": streaming_service is not None,
     }
     
@@ -134,139 +128,13 @@ async def health_check():
 # Authentication Endpoints
 # -----------------------------------------------------------------------------
 
-@router.post("/auth/login", tags=["auth"])
-async def auth_login(request: AuthLoginRequest):
-    """
-    Initiate OAuth login flow.
-    
-    Returns:
-    - auth_url: URL to redirect user to for authentication
-    - state: State string for verification
-    """
-    logger.info("Initiating OAuth login")
-    
-    try:
-        redirect_uri = request.redirect_uri or auth_service.REDIRECT_URI
-        auth_url = auth_service.get_auth_url(redirect_uri=redirect_uri)
-        
-        if not auth_url:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to generate auth URL. Check OAuth configuration.",
-            )
-        
-        logger.info(f"Generated OAuth URL: {auth_url[:50]}...")
-        return {
-            "auth_url": auth_url,
-            "message": "Redirect user to this URL to authenticate",
-        }
-    except Exception as e:
-        logger.error(f"Auth login failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to initiate OAuth login: {str(e)}",
-        )
 
 
-@router.post("/auth/callback", tags=["auth"])
-async def auth_callback(request: AuthCallbackRequest):
-    """
-    Handle OAuth callback.
-    
-    This endpoint receives the authorization code and exchanges it for tokens.
-    """
-    logger.info(f"Handling OAuth callback: state={request.state[:8]}...")
-
-    redirect_uri = request.redirect_uri or auth_service.REDIRECT_URI
-
-    try:
-        success = auth_service.handle_oauth_callback(
-            code=request.code,
-            state=request.state,
-            redirect_uri=redirect_uri,
-        )
-    except Exception as e:
-        logger.exception("Auth callback failed")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to handle OAuth callback.",
-        )
-
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="OAuth callback failed. Invalid code or state.",
-        )
-
-    logger.info("OAuth callback handled successfully")
-    return {"status": "authenticated", "message": "Authentication successful"}
 
 
-@router.get("/auth/status", tags=["auth"])
-async def auth_status():
-    """
-    Get current authentication status.
-    
-    Returns:
-    - is_authenticated: Whether the user is authenticated
-    - has_tokens: Whether authentication tokens are available
-    - user_info: User information if authenticated
-    """
-    logger.info("Getting auth status")
-    
-    try:
-        status = auth_service.get_auth_status()
-        return status
-    except Exception as e:
-        logger.error(f"Failed to get auth status: {e}")
-        return {
-            "is_authenticated": False,
-            "has_tokens": False,
-            "error": str(e),
-        }
 
 
-@router.post("/auth/logout", tags=["auth"])
-async def auth_logout():
-    """Logout and clear authentication."""
-    logger.info("Logging out")
-    
-    try:
-        auth_service.logout()
-        return {"status": "logged_out", "message": "Logged out successfully"}
-    except Exception as e:
-        logger.error(f"Failed to logout: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to logout: {str(e)}",
-        )
 
-
-@router.post("/auth/refresh", tags=["auth"])
-async def auth_refresh():
-    """Refresh authentication tokens."""
-    logger.info("Refreshing tokens")
-    
-    try:
-        success = auth_service.refresh_tokens()
-        
-        if not success:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Failed to refresh tokens",
-            )
-        
-        return {"status": "refreshed", "message": "Tokens refreshed successfully"}
-    except Exception as e:
-        logger.error(f"Failed to refresh tokens: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to refresh tokens: {str(e)}",
-        )
-
-
-# -----------------------------------------------------------------------------
-# Search & Library
 # -----------------------------------------------------------------------------
 
 @router.get("/search", response_model=List[SongResponse], tags=["library"])

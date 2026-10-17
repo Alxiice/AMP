@@ -15,7 +15,43 @@ The first phase of the project is now complete! The backend skeleton includes:
 - Logging setup
 - **Python virtual environment** for dependency isolation
 
-**Status**: Ready for Phase 2 (YouTube Integration)
+---
+
+## ✅ Phase 2: YouTube Integration - COMPLETE
+
+YouTube Music API integration is complete:
+- ytmusicapi integration for metadata (search, artists, albums, playlists)
+- yt-dlp integration for audio streaming
+- YouTubeService with 28 tests
+- StreamingService with 25 tests
+
+---
+
+## ✅ Phase 2.5: Authentication Overhaul - COMPLETE (2026-10-17)
+
+**NEW**: Cookie-based authentication system (replaced broken OAuth flow).
+
+- YouTube Music stopped accepting OAuth tokens in ~Sept 2025
+- New system uses browser session cookies (the only working method)
+- Tauri opens sign-in window → captures cookies → sends to backend
+- Backend validates and persists cookies securely (0600 permissions)
+- Session expiration detection with automatic re-login prompt
+- 11 new tests for auth service
+
+---
+
+## ✅ Phase 2.6: Web Interface Foundation - COMPLETE (2026-10-17)
+
+**NEW**: Web interface for testing without Tauri desktop app.
+
+- React frontend with Vite dev server (http://localhost:1420)
+- `useYouTubeAuth` React hook for auth state management
+- "Connect YouTube Music" button with auth UI
+- Liked songs display after authentication
+- Fixed Tauri 2.x project structure
+- **Test in browser**: `cd app && npm run dev` → http://localhost:1420
+
+**Status**: Ready for Phase 3 (Core Playback System)
 
 ---
 
@@ -97,19 +133,33 @@ AMP/
 │   ├── Scripts/             # Executables (activate.bat, python.exe)
 │   ├── Lib/                 # Installed packages
 │   └── README.md            # Venv documentation
-├── backend/
-│   ├── database/
-│   │   ├── models.py        # SQLAlchemy models
-│   │   └── session.py       # Database sessions
-│   ├── api/
-│   │   ├── server.py        # FastAPI app
-│   │   └── endpoints.py     # REST API routes
-│   ├── utils/
-│   │   └── logger.py        # Logging setup
-│   ├── config.py            # Configuration
-│   ├── main.py              # Entry point
-│   ├── requirements.txt     # Dependencies
-│   └── tests/               # Test suite
+├── amp/
+│   └── backend/
+│       ├── database/
+│       │   ├── models.py        # SQLAlchemy models
+│       │   └── session.py       # Database sessions
+│       ├── api/
+│       │   ├── server.py        # FastAPI app
+│       │   ├── endpoints.py     # REST API routes
+│       │   └── auth_routes.py   # Auth-specific routes
+│       ├── services/
+│       │   ├── youtube.py       # YouTube Music API
+│       │   ├── auth.py          # Cookie-based auth service
+│       │   └── streaming.py     # Audio streaming
+│       ├── utils/
+│       │   └── logger.py        # Logging setup
+│       ├── config.py            # Configuration
+│       ├── main.py              # Entry point
+│       ├── requirements.txt     # Dependencies
+│       └── tests/               # Test suite (92 tests)
+├── app/                      # Web frontend (React + Vite)
+│   ├── src/
+│   │   ├── App.tsx          # Main app component
+│   │   ├── useYouTubeAuth.ts # Auth React hook
+│   │   └── index.css        # Styles
+│   ├── src-tauri/           # Tauri desktop app (structure ready)
+│   ├── package.json
+│   └── vite.config.ts
 ├── .gitignore
 ├── activate.bat             # Venv activation (CMD)
 └── activate.ps1             # Venv activation (PowerShell)
@@ -138,7 +188,7 @@ AMP/
 - **Manage the sound**: Control the volume, EQ feature (via Web Audio API).
 - **Caching**: Local cache for chunks, metadata, and thumbnails.
 - **Frontend**: React.js web app, with a **Tauri** wrapper for Desktop (Linux, Windows) and future Android support (Tauri 2.0).
-- **Authentication**: YouTube OAuth for liking titles and editing playlists.
+- **Authentication**: Cookie-based YouTube Music authentication (browser session cookies).
 - **Available on**: Linux, Windows (Desktop), and potentially Android (via Tauri 2.0).
 
 ---
@@ -219,44 +269,50 @@ For the frontend (React + Tauri), see [Frontend Setup](#).
 ### Code Structure
 
 ```bash
-amp/
-├── backend/
-│   ├── __init__.py
-│   ├── config.py               # App configuration (cache size, API keys, etc.)
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── models.py           # SQLAlchemy models (songs, playlists, queues, etc.)
-│   │   └── session.py          # Database session management
-│   ├── services/
-│   │   ├── youtube.py          # yt-dlp and ytmusicapi integration
-│   │   ├── library.py          # Library management (search, metadata, etc.)
-│   │   ├── queue.py            # Queue management (build, modify, persist)
-│   │   └── auth.py             # YouTube OAuth flow
-│   ├── utils/
-│   │   ├── cache.py            # Chunk cache management (filesystem)
-│   │   ├── streaming.py        # Chunk streaming logic
-│   │   └── logger.py           # Logging setup
-│   └── api/
+AMP/
+├── amp/
+│   └── backend/
 │       ├── __init__.py
-│       ├── endpoints.py        # FastAPI routes (search, queue, playback, etc.)
-│       └── server.py           # FastAPI app setup
-├── frontend/
-│   ├── public/
+│       ├── config.py               # App configuration (cache size, etc.)
+│       ├── main.py                 # Server entry point
+│       ├── database/
+│       │   ├── __init__.py
+│       │   ├── models.py           # SQLAlchemy models (songs, playlists, queues, etc.)
+│       │   └── session.py          # Database session management
+│       ├── services/
+│       │   ├── __init__.py
+│       │   ├── youtube.py          # ytmusicapi integration
+│       │   ├── auth.py             # Cookie-based auth service
+│       │   └── streaming.py        # yt-dlp audio streaming
+│       ├── utils/
+│       │   ├── __init__.py
+│       │   └── logger.py           # Logging setup
+│       └── api/
+│           ├── __init__.py
+│           ├── server.py           # FastAPI app setup
+│           ├── endpoints.py        # FastAPI routes (search, queue, playback, etc.)
+│           └── auth_routes.py      # Auth routes (status, cookies, import, logout)
+├── app/                            # Web frontend (React + Vite)
 │   ├── src/
-│   │   ├── components/         # React components
-│   │   ├── hooks/              # Custom hooks (e.g., usePlayback, useQueue)
-│   │   ├── services/           # API clients, Web Audio API wrapper
-│   │   ├── styles/             # CSS/SCSS
-│   │   ├── App.jsx
-│   │   └── main.jsx
+│   │   ├── App.tsx                 # Main app component
+│   │   ├── main.tsx                # Entry point
+│   │   ├── useYouTubeAuth.ts       # Auth React hook
+│   │   └── index.css               # Styles
+│   ├── src-tauri/                  # Tauri desktop app (structure ready, needs Rust build tools)
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   └── youtube_login.rs    # Google sign-in window command
+│   │   ├── Cargo.toml
+│   │   └── tauri.conf.json
 │   ├── package.json
-│   └── tauri.conf.json         # Tauri configuration
-├── .amp/                       # Hidden directory for cache and logs
+│   └── vite.config.ts
+├── .amp/                           # Hidden directory for cache and logs
 │   ├── cache/
-│   │   └── chunks/             # Audio chunk files (e.g., {id}_0-10.mp3)
+│   │   ├── chunks/                 # Audio chunk files
+│   │   └── ytm_session.json        # Saved auth session (0600 permissions)
 │   └── logs/
-│       └── app.log             # Application logs
-└── config.json                 # User configuration
+│       └── app.log                 # Application logs
+└── config.json                     # User configuration
 ```
 
 ---
@@ -279,14 +335,16 @@ amp/
 - `GET /api/playback/status`: Get current playback status (time, queue name, track, album, buffer status).
 - `GET /api/stream/{song_id}`: Stream audio chunks for a song (frontend buffers via Web Audio API).
 
+**Authentication (Cookie-based)**:
+- `GET /api/auth/status`: Get auth status (`?verify=true` to check with YouTube).
+- `POST /api/auth/cookies`: Receive cookies from Tauri sign-in window.
+- `POST /api/auth/import-browser`: Import cookies from installed browser (Firefox, Chrome, etc.).
+- `POST /api/auth/logout`: Clear auth session.
+
 **Auth required**:
-- `POST /api/auth/login`: Initiate YouTube OAuth flow.
-- `POST /api/auth/callback`: Handle OAuth callback.
-- `GET /api/user/playlists`: Get user’s YouTube playlists.
-- `POST /api/user/playlists/{id}/add`: Add a song to a user playlist.
-- `POST /api/user/playlists/{id}/remove`: Remove a song from a user playlist.
-- `POST /api/user/likes`: Like/unlike a song.
-- `GET /api/user/likes`: Get user’s liked songs.
+- `GET /api/user/playlists`: Get user's YouTube Music playlists.
+- `GET /api/user/likes`: Get user's liked songs.
+- `POST /api/user/likes?song_id={id}`: Like a song.
 
 ---
 
@@ -421,11 +479,13 @@ CREATE TABLE cached_chunks (
 
 ## Roadmap
 
-### 1. Backend Core
+### 1. Backend Core ✅ COMPLETE
 **Tasks**:
-- [ ] FastAPI server setup with Uvicorn.
-- [ ] SQLite database initialization with SQLAlchemy.
-- [ ] Base models for `songs`, `playlists`, `queues`.
+- [x] FastAPI server setup with Uvicorn.
+- [x] SQLite database initialization with SQLAlchemy.
+- [x] Base models for `songs`, `playlists`, `queues`.
+- [x] 12 REST API endpoints
+- [x] 20 tests passing
 
 **At this point**:
 - A running FastAPI server with basic endpoints (`/api/search`, `/api/song/{id}`).
@@ -433,18 +493,17 @@ CREATE TABLE cached_chunks (
 
 ---
 
-### 2. YouTube Integration
+### 2. YouTube Integration ✅ COMPLETE
 **Tasks**:
-- [ ] `yt-dlp` integration for audio streaming.
-- [ ] `ytmusicapi` integration for metadata (search, artists, albums, playlists).
-- [ ] YouTube OAuth flow for user authentication.
+- [x] `yt-dlp` integration for audio streaming.
+- [x] `ytmusicapi` integration for metadata (search, artists, albums, playlists).
+- [x] YouTubeService with 28 tests
+- [x] StreamingService with 25 tests
 
 **At this point**:
 - Python functions to:
   - Search music, artists, albums, playlists.
   - Get metadata for songs, artists, albums.
-  - Authenticate with YouTube and access user playlists/liked songs.
-  - Update playlists and like/unlike titles.
 - All functionality exposed via REST API.
 - Databases updated for:
   - Listening history.
@@ -453,7 +512,42 @@ CREATE TABLE cached_chunks (
 
 ---
 
-### 3. Core Playback System
+### 2.5. Authentication Overhaul ✅ COMPLETE (2026-10-17)
+**Tasks**:
+- [x] Replace broken OAuth with cookie-based auth
+- [x] New AuthService with single source of truth
+- [x] New auth API routes (`/auth/status`, `/auth/cookies`, `/auth/import-browser`, `/auth/logout`)
+- [x] Tauri sign-in window (`youtube_login.rs`)
+- [x] React auth hook (`useYouTubeAuth.ts`)
+- [x] 11 new tests for auth service
+- [x] Removed OAuth credentials from config
+
+**At this point**:
+- Working authentication with YouTube Music via browser cookies
+- Session persistence with secure storage (0600)
+- Session expiration detection
+- All 92 tests passing
+
+---
+
+### 2.6. Web Interface Foundation ✅ COMPLETE (2026-10-17)
+**Tasks**:
+- [x] React frontend with Vite dev server
+- [x] `useYouTubeAuth` React hook
+- [x] Updated `App.tsx` with auth UI
+- [x] Fixed Tauri 2.x project structure
+- [x] Web-based testing capability
+
+**At this point**:
+- Web interface at http://localhost:1420
+- "Connect YouTube Music" button
+- Auth status display
+- Liked songs display
+- Test without Tauri desktop app
+
+---
+
+### 3. Core Playback System ⏳ NEXT
 **Tasks**:
 - [ ] Chunk cache manager (filesystem-based in `.amp/cache/chunks/`).
 - [ ] FastAPI streaming endpoint (`GET /stream/{song_id}`).
@@ -513,7 +607,7 @@ CREATE TABLE cached_chunks (
 **Tasks**:
 - [ ] Library browsing UI (search bar, results, filters).
 - [ ] Artist/album/song detail pages.
-- [ ] Authentication UI (YouTube OAuth).
+- [ ] Authentication UI (cookie-based YouTube Music auth).
 
 **At this point**:
 - Users can:
@@ -580,13 +674,6 @@ The app uses a `config.json` file for settings:
   "playback": {
     "default_volume": 0.8,
     "eq_enabled": true
-  },
-  "youtube": {
-    "api_key": "",
-    "oauth": {
-      "client_id": "",
-      "client_secret": ""
-    }
   },
   "logging": {
     "level": "info",

@@ -1,697 +1,324 @@
 """
-Authentication Service
-====================
-Service layer for YouTube Music authentication and OAuth flow.
+YouTube Music authentication (replaces services/auth.py)
+========================================================
 
-This service provides:
-- OAuth flow handling
-- Token storage and management
-- Authentication state management
+Why cookies? YouTube Music has no public API. ytmusicapi talks to the same
+private endpoints the web player uses, and the only thing those accept is a
+logged-in browser session (cookies). Google's OAuth tokens, including the
+"TV / device code" flow ytmusicapi used to offer, stopped being accepted by
+YouTube Music in 2025, so there is no OAuth path to build on.
+
+How the user connects (no copy/paste):
+  1. Tauri opens a sign-in window (see youtube_login.rs) and the user logs in
+     normally. Tauri reads the session cookies from that window.
+  2. The frontend POSTs the cookies to /api/auth/cookies  -> connect_with_cookies()
+  3. Optional shortcut: import_from_browser("firefox") reuses an existing login.
+
+This module is the ONLY owner of auth state. YouTubeService must call
+`get_auth_service().client` instead of keeping its own YTMusic instance.
 """
+from __future__ import annotations
 
-import os
-import json
-import uuid
-from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
-from dataclasses import dataclass, asdict
-from datetime import datetime, timedelta
-import secrets
 import hashlib
+import json
+import logging
+import os
+import threading
+import time
+from contextlib import contextmanager
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, Iterator, Mapping, Optional, Union
 
-from backend.config import (
-    BASE_DIR,
-    CACHE_DIR,
-    YOUTUBE_API_KEY,
-    YTMUSICAPI_COOKIES,
-    YOUTUBE_REDIRECT_URI,
-    YOUTUBE_REDIRECT_URI,
-    YOUTUBE_REDIRECT_URI,
-    DEBUG,
+logger = logging.getLogger(__name__)
+
+ORIGIN = "https://music.youtube.com"
+REQUIRED_COOKIE = "__Secure-3PAPISID"  # ytmusicapi derives its Authorization hash from this
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
 )
-from backend.utils.logger import get_logger
 
-logger = get_logger(__name__)
-
-
-# Session storage for OAuth flows
-_oauth_sessions: Dict[str, Dict[str, Any]] = {}
+SIGNED_OUT, SIGNED_IN, EXPIRED = "signed_out", "signed_in", "expired"
 
 
-# Singleton instance
-_auth_service_instance = None
+class AuthError(Exception):
+    """Raised when credentials are missing, incomplete or rejected by YouTube."""
 
 
-def get_auth_service() -> "AuthService":
-    """Get the singleton AuthService instance."""
-    global _auth_service_instance
-    if _auth_service_instance is None:
-        _auth_service_instance = AuthService()
-    return _auth_service_instance
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+CookieInput = Union[Mapping[str, str], Iterable[Mapping[str, Any]]]
 
 
-@dataclass
-class OAuthState:
-    """Represents an OAuth session state."""
-    state: str
-    verifier: str
-    redirect_uri: str
-    created_at: datetime
-    used: bool = False
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        data = asdict(self)
-        # Convert datetime to ISO string
-        if isinstance(data.get("created_at"), datetime):
-            data["created_at"] = self.created_at.isoformat()
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "OAuthState":
-        """Create from dictionary."""
-        created_at = data.get("created_at")
-        if isinstance(created_at, str):
-            try:
-                created_at = datetime.fromisoformat(created_at)
-            except (ValueError, TypeError):
-                # Handle naive datetime strings (without timezone)
-                created_at = datetime.fromisoformat(created_at)
-        elif isinstance(created_at, datetime):
-            pass  # Already a datetime
-        else:
-            created_at = datetime.utcnow()
-        
-        return cls(
-            state=data.get("state"),
-            verifier=data.get("verifier"),
-            redirect_uri=data.get("redirect_uri"),
-            created_at=created_at,
-            used=data.get("used", False),
+def normalize_cookies(cookies: CookieInput) -> Dict[str, str]:
+    """Accept {"name": "value"} or [{"name":..., "value":..., "domain":...}] and return a dict.
+
+    Cookie names are case-sensitive (SAPISID != sapisid), so names are kept as-is.
+    When the same name exists for several domains, a youtube.com one wins.
+    """
+    if isinstance(cookies, Mapping):
+        return {str(k): str(v) for k, v in cookies.items()}
+
+    out: Dict[str, str] = {}
+    from_youtube: set = set()
+    for c in cookies:
+        name, value = c.get("name"), c.get("value")
+        if not name or value is None:
+            continue
+        is_yt = "youtube.com" in (c.get("domain") or "youtube.com")
+        if name in out and name in from_youtube and not is_yt:
+            continue
+        out[name] = value
+        if is_yt:
+            from_youtube.add(name)
+    return out
+
+
+def build_headers(cookies: Mapping[str, str], authuser: str = "0") -> Dict[str, str]:
+    """Build the headers dict ytmusicapi's browser auth expects.
+
+    ytmusicapi (>=1.x) requires `cookie` + `authorization` to be present and
+    recomputes `authorization` for every request, so the value here only has
+    to exist.
+    """
+    sapisid = cookies.get(REQUIRED_COOKIE)
+    if not sapisid:
+        raise AuthError(
+            f"Login incomplete: cookie {REQUIRED_COOKIE} not found. "
+            "Make sure you finished signing in to YouTube Music."
         )
+    ts = int(time.time())
+    digest = hashlib.sha1(f"{ts} {sapisid} {ORIGIN}".encode()).hexdigest()
+    return {
+        "accept": "*/*",
+        "authorization": f"SAPISIDHASH {ts}_{digest}",
+        "content-type": "application/json",
+        "cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
+        "origin": ORIGIN,
+        "x-origin": ORIGIN,
+        "x-goog-authuser": authuser,
+        "user-agent": USER_AGENT,
+    }
 
 
-@dataclass
-class AuthToken:
-    """Represents authentication tokens."""
-    access_token: str
-    refresh_token: Optional[str] = None
-    token_type: str = "Bearer"
-    expires_at: Optional[datetime] = None
-    scopes: Optional[list] = None
-    
-    def is_expired(self) -> bool:
-        """Check if token is expired."""
-        if self.expires_at is None:
-            return False
-        return datetime.utcnow() >= self.expires_at
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert to dictionary."""
-        data = asdict(self)
-        if self.expires_at:
-            data["expires_at"] = self.expires_at.isoformat()
-        return data
-    
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AuthToken":
-        """Create from dictionary."""
-        expires_at = None
-        if "expires_at" in data and data["expires_at"]:
-            try:
-                # Try parsing as ISO format
-                expires_at = datetime.fromisoformat(data["expires_at"])
-            except (ValueError, TypeError, AttributeError):
-                # If it fails, leave as None or try other formats
-                pass
-        return cls(
-            access_token=data.get("access_token"),
-            refresh_token=data.get("refresh_token"),
-            token_type=data.get("token_type", "Bearer"),
-            expires_at=expires_at,
-            scopes=data.get("scopes"),
-        )
+def cookies_from_browser(browser: str, profile: Optional[str] = None) -> Dict[str, str]:
+    """Read YouTube cookies from an installed browser using yt-dlp (already a dependency).
+
+    Works best with Firefox. Chrome/Edge on Windows (v127+) use app-bound
+    encryption that yt-dlp often cannot read, so treat this as a shortcut,
+    not the main path.
+    """
+    try:
+        from yt_dlp.cookies import extract_cookies_from_browser
+
+        jar = extract_cookies_from_browser(browser, profile)
+    except Exception as e:  # yt-dlp raises many different errors
+        raise AuthError(f"Could not read cookies from {browser}: {e}") from e
+
+    cookies = {c.name: c.value for c in jar if c.domain.lstrip(".").endswith("youtube.com") and c.value}
+    if not cookies:
+        raise AuthError(f"No YouTube cookies found in {browser}. Sign in to music.youtube.com there first.")
+    return cookies
 
 
+def _is_auth_failure(exc: Exception) -> bool:
+    """True if the exception means 'credentials rejected' rather than 'network down'."""
+    from ytmusicapi.exceptions import YTMusicServerError, YTMusicUserError
+
+    if isinstance(exc, YTMusicUserError):
+        return True
+    if isinstance(exc, YTMusicServerError):
+        return any(code in str(exc) for code in ("401", "403"))
+    # A logged-out session returns a page without the expected fields.
+    return isinstance(exc, (KeyError, TypeError))
+
+
+# --------------------------------------------------------------------------- #
+# Credential storage
+# --------------------------------------------------------------------------- #
+class CredentialStore:
+    """Stores the headers JSON in one file readable only by the current user.
+
+    (OS keyrings are not used on purpose: Windows Credential Manager caps a
+    secret at ~2.5 KB, and a YouTube cookie header is usually larger.)
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+
+    def read(self) -> Optional[Dict[str, str]]:
+        try:
+            return json.loads(self.path.read_text("utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as e:
+            logger.warning("Ignoring unreadable credential file %s: %s", self.path, e)
+            return None
+
+    def write(self, headers: Mapping[str, str]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(".tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(dict(headers), f)
+        os.replace(tmp, self.path)  # atomic: never leaves a half-written file
+        try:
+            os.chmod(self.path, 0o600)
+        except OSError:
+            pass  # not meaningful on Windows
+
+    def delete(self) -> None:
+        try:
+            self.path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+# --------------------------------------------------------------------------- #
+# Service
+# --------------------------------------------------------------------------- #
 class AuthService:
-    """
-    Service class for handling YouTube Music authentication.
-    
-    Provides OAuth flow, token storage, and authentication state management.
-    """
-    
-    # Token storage file
-    TOKEN_FILE = CACHE_DIR / "auth_tokens.json"
-    
-    # OAuth configuration
-    OAUTH_SCOPES = [
-        "https://www.googleapis.com/auth/youtube.readonly",
-        "https://www.googleapis.com/auth/userinfo.profile",
-    ]
-    
-    # Client ID and secret (can be configured via environment)
-    CLIENT_ID: Optional[str] = None
-    CLIENT_SECRET: Optional[str] = None
-    REDIRECT_URI: Optional[str] = None
-    REDIRECT_URI: Optional[str] = None
-    REDIRECT_URI: Optional[str] = None
-    
-    def __init__(self):
-        """Initialize the AuthService."""
-        self._tokens: Optional[AuthToken] = None
-        self._is_authenticated: bool = False
-        self._user_info: Optional[Dict[str, Any]] = None
-        self._session_id: Optional[str] = None
-        
-        # Load configuration
-        self._load_config()
-        
-        # Load saved tokens
-        self._load_tokens()
-        
-        # Ensure directories exist
-        os.makedirs(CACHE_DIR, exist_ok=True)
-    
-    def _load_config(self) -> None:
-        """Load OAuth configuration from environment or config."""
-        # Try to load from environment variables
-        client_id = os.environ.get("YOUTUBE_CLIENT_ID")
-        client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET")
-        
-        if client_id:
-            self.CLIENT_ID = client_id
-        if client_secret:
-            self.CLIENT_SECRET = client_secret
-        # Load redirect URI from environment or use default
-        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
-        if redirect_uri:
-            self.REDIRECT_URI = redirect_uri
-        elif not self.REDIRECT_URI:
-            from backend.config import YOUTUBE_REDIRECT_URI
-            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
-        # Load redirect URI from environment or use default
-        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
-        if redirect_uri:
-            self.REDIRECT_URI = redirect_uri
-        elif not self.REDIRECT_URI:
-            from backend.config import YOUTUBE_REDIRECT_URI
-            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
-        # Load redirect URI from environment or use default
-        redirect_uri = os.environ.get("YOUTUBE_REDIRECT_URI")
-        if redirect_uri:
-            self.REDIRECT_URI = redirect_uri
-        elif not self.REDIRECT_URI:
-            from backend.config import YOUTUBE_REDIRECT_URI
-            self.REDIRECT_URI = YOUTUBE_REDIRECT_URI
-        
-        # Also check if there's a config file
-        config_file = BASE_DIR / "youtube_oauth.json"
-        if config_file.exists():
-            try:
-                with open(config_file, "r") as f:
-                    config = json.load(f)
-                    if "client_id" in config:
-                        self.CLIENT_ID = config["client_id"]
-                    if "client_secret" in config:
-                        self.CLIENT_SECRET = config["client_secret"]
-                    if "redirect_uri" in config:
-                        self.REDIRECT_URI = config["redirect_uri"]
-                    if "redirect_uri" in config:
-                        self.REDIRECT_URI = config["redirect_uri"]
-                    if "redirect_uri" in config:
-                        self.REDIRECT_URI = config["redirect_uri"]
-            except Exception as e:
-                logger.warning(f"Failed to load OAuth config: {e}")
-    
-    def _load_tokens(self) -> None:
-        """Load saved authentication tokens."""
-        if not self.TOKEN_FILE.exists():
-            logger.debug("No saved tokens found")
-            return
-        
-        try:
-            with open(self.TOKEN_FILE, "r") as f:
-                data = json.load(f)
-            
-            self._tokens = AuthToken.from_dict(data)
-            
-            # Check if token is still valid
-            if self._tokens and not self._tokens.is_expired():
-                self._is_authenticated = True
-                logger.info("Loaded valid authentication tokens")
-            else:
-                self._is_authenticated = False
-                logger.warning("Saved tokens are expired or invalid")
-                
-        except Exception as e:
-            logger.error(f"Failed to load tokens: {e}")
-            self._tokens = None
-            self._is_authenticated = False
-    
-    def _save_tokens(self) -> None:
-        """Save authentication tokens to file."""
-        if not self._tokens:
-            logger.debug("No tokens to save")
-            return
-        
-        try:
-            with open(self.TOKEN_FILE, "w") as f:
-                json.dump(self._tokens.to_dict(), f, indent=2)
-            logger.info(f"Saved tokens to: {self.TOKEN_FILE}")
-        except Exception as e:
-            logger.error(f"Failed to save tokens: {e}")
-    
-    def _clear_tokens(self) -> None:
-        """Clear saved authentication tokens."""
-        self._tokens = None
-        self._is_authenticated = False
-        self._user_info = None
-        
-        # Remove token file
-        if self.TOKEN_FILE.exists():
-            try:
-                os.remove(self.TOKEN_FILE)
-                logger.info(f"Removed token file: {self.TOKEN_FILE}")
-            except Exception as e:
-                logger.error(f"Failed to remove token file: {e}")
-    
-    def _generate_state(self) -> str:
-        """Generate a secure random state string."""
-        return secrets.token_urlsafe(32)
-    
-    def _generate_verifier(self) -> str:
-        """Generate a secure random verifier string."""
-        return secrets.token_urlsafe(64)
-    
-    def _generate_session_id(self) -> str:
-        """Generate a unique session ID."""
-        return str(uuid.uuid4())
-    
+    def __init__(self, store_path: Path, client_factory: Optional[Callable[..., Any]] = None):
+        if client_factory is None:
+            from ytmusicapi import YTMusic as client_factory  # type: ignore[no-redef]
+        self._factory = client_factory
+        self._store = CredentialStore(store_path)
+        self._lock = threading.RLock()
+        self._state = SIGNED_OUT
+        self._headers: Optional[Dict[str, str]] = None
+        self._client: Any = None
+        self._anonymous: Any = None
+        self._account: Optional[Dict[str, Any]] = None
+        self.load()
+
+    # ---- state ------------------------------------------------------------
     @property
     def is_authenticated(self) -> bool:
-        """Check if the user is authenticated."""
-        return self._is_authenticated
-    
+        return self._state == SIGNED_IN
+
     @property
-    def tokens(self) -> Optional[AuthToken]:
-        """Get the current authentication tokens."""
-        return self._tokens
-    
+    def account(self) -> Optional[Dict[str, Any]]:
+        return self._account
+
+    def _ensure_client(self) -> Any:
+        """Build the authenticated client on first use.
+
+        ytmusicapi's constructor makes a network request (visitor id), so this
+        must not happen at import/startup or an offline launch would look like
+        a broken login. Network errors propagate; rejected credentials flip the
+        state to 'expired'.
+        """
+        with self._lock:
+            if self._client is None and self._headers:
+                try:
+                    self._client = self._factory(auth=self._headers)
+                except Exception as e:
+                    if _is_auth_failure(e):
+                        self.mark_expired()
+                    raise
+            return self._client
+
     @property
-    def user_info(self) -> Optional[Dict[str, Any]]:
-        """Get the authenticated user's information."""
-        return self._user_info
-    
-    def get_cookies_path(self) -> Optional[Path]:
-        """Get the path to the cookies file for ytmusicapi."""
-        if YTMUSICAPI_COOKIES:
-            cookies_path = Path(YTMUSICAPI_COOKIES)
-            if cookies_path.exists():
-                return cookies_path
-        
-        # Default location
-        default_cookies = CACHE_DIR / "cookies.json"
-        if default_cookies.exists():
-            return default_cookies
-        
-        return None
-    
-    def create_oauth_state(self, redirect_uri: str = "http://localhost:8000/api/auth/callback") -> Tuple[str, str]:
-        """
-        Create a new OAuth state and verifier.
-        
-        Args:
-            redirect_uri: The redirect URI for OAuth callback
-            
-        Returns:
-            Tuple of (state, verifier)
-        """
-        verifier = self._generate_verifier()
-        state = self._generate_state()
-        
-        # Generate the code challenge (PKCE)
-        code_challenge = self._generate_code_challenge(verifier)
-        
-        # Store the state
-        self._session_id = self._generate_session_id()
-        _oauth_sessions[self._session_id] = OAuthState(
-            state=state,
-            verifier=verifier,
-            redirect_uri=redirect_uri,
-            created_at=datetime.utcnow(),
-            used=False,
-        ).to_dict()
-        
-        logger.info(f"Created OAuth state: {state[:8]}... (session: {self._session_id})")
-        
-        return state, code_challenge
-    
-    def _generate_code_challenge(self, verifier: str) -> str:
-        """Generate PKCE code challenge from verifier."""
-        import hashlib
-        import base64
-        
-        # SHA256 hash of the verifier
-        digest = hashlib.sha256(verifier.encode()).digest()
-        
-        # Base64 URL-safe encoding (no padding)
-        challenge = base64.urlsafe_b64encode(digest).decode().rstrip("=")
-        
-        return challenge
-    
-    def get_oauth_state(self, state: str) -> Optional[OAuthState]:
-        """
-        Get the OAuth state for a given state string.
-        
-        Args:
-            state: The state string
-            
-        Returns:
-            OAuthState object or None if not found
-        """
-        for session_id, session_data in _oauth_sessions.items():
-            if session_data.get("state") == state:
-                return OAuthState.from_dict(session_data)
-        
-        return None
-    
-    def mark_oauth_state_used(self, state: str) -> None:
-        """Mark an OAuth state as used."""
-        for session_id, session_data in _oauth_sessions.items():
-            if session_data.get("state") == state:
-                _oauth_sessions[session_id]["used"] = True
-                logger.info(f"Marked OAuth state as used: {state[:8]}...")
-                return
-        
-        logger.warning(f"OAuth state not found: {state[:8]}...")
-    
-    def get_auth_url(
-        self,
-        redirect_uri: str = "http://localhost:8000/api/auth/callback",
-        scopes: Optional[list] = None,
-        access_type: str = "offline",
-        prompt: str = "consent",
-    ) -> str:
-        """
-        Generate the OAuth 2.0 authorization URL.
-        
-        Args:
-            redirect_uri: The redirect URI for OAuth callback
-            scopes: List of OAuth scopes (defaults to YouTube Music scopes)
-            access_type: "online" or "offline" (use "offline" for refresh tokens)
-            prompt: "none", "consent", or "select_account"
-            
-        Returns:
-            Authorization URL
-        """
-        if not self.CLIENT_ID:
-            raise ValueError("YouTube CLIENT_ID not configured")
-        
-        # Use default scopes if not provided
-        if scopes is None:
-            scopes = self.OAUTH_SCOPES
-        
-        # Create state
-        state, code_challenge = self.create_oauth_state(redirect_uri)
-        
-        # Build authorization URL
-        base_url = "https://accounts.google.com/o/oauth2/v2/auth"
-        
-        # Build query parameters
-        params = {
-            "client_id": self.CLIENT_ID,
-            "redirect_uri": redirect_uri,
-            "response_type": "code",
-            "scope": " ".join(scopes),
-            "state": state,
-            "access_type": access_type,
-            "prompt": prompt,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
-        }
-        
-        # Build URL with parameters
-        url = base_url + "?" + "&".join([f"{k}={v}" for k, v in params.items()])
-        
-        logger.info(f"Generated OAuth URL for state: {state[:8]}...")
-        
-        return url
-    
-    def handle_oauth_callback(
-        self,
-        code: str,
-        state: str,
-        redirect_uri: str = "http://localhost:8000/api/auth/callback",
-    ) -> bool:
-        """
-        Handle OAuth callback and exchange code for tokens.
-        
-        Args:
-            code: Authorization code from callback
-            state: State string from callback
-            redirect_uri: Redirect URI used in the authorization request
-            
-        Returns:
-            True if authentication succeeded, False otherwise
-        """
-        # Validate state
-        oauth_state = self.get_oauth_state(state)
-        if not oauth_state:
-            logger.error(f"Invalid OAuth state: {state[:8]}...")
-            return False
-        
-        # Mark state as used
-        self.mark_oauth_state_used(state)
-        
-        # Get verifier
-        verifier = oauth_state.verifier
-        
-        # Exchange code for tokens
-        try:
-            import requests
-            
-            # Token endpoint
-            token_url = "https://oauth2.googleapis.com/token"
-            
-            # Prepare request data
-            data = {
-                "code": code,
-                "client_id": self.CLIENT_ID,
-                "client_secret": self.CLIENT_SECRET,
-                "redirect_uri": redirect_uri,
-                "grant_type": "authorization_code",
-                "code_verifier": verifier,
-            }
-            
-            # Make request
-            response = requests.post(token_url, data=data, timeout=30)
-            
-            if response.status_code != 200:
-                logger.error(f"Token exchange failed: {response.status_code} - {response.text}")
-                return False
-            
-            # Parse response
-            token_data = response.json()
-            
-            # Create AuthToken
-            self._tokens = AuthToken(
-                access_token=token_data.get("access_token"),
-                refresh_token=token_data.get("refresh_token"),
-                token_type=token_data.get("token_type", "Bearer"),
-                expires_at=datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600)),
-                scopes=token_data.get("scope", "").split(" ") if token_data.get("scope") else None,
-            )
-            
-            # Save tokens
-            self._save_tokens()
-            self._is_authenticated = True
-            
-            logger.info("OAuth callback handled successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to handle OAuth callback: {e}")
-            return False
-    
-    def refresh_tokens(self) -> bool:
-        """
-        Refresh the access token using the refresh token.
-        
-        Returns:
-            True if refresh succeeded, False otherwise
-        """
-        if not self._tokens or not self._tokens.refresh_token:
-            logger.error("No refresh token available")
-            return False
-        
-        if not self.CLIENT_ID or not self.CLIENT_SECRET:
-            logger.error("Client ID or secret not configured")
-            return False
-        
-        try:
-            import requests
-            
-            # Token endpoint
-            token_url = "https://oauth2.googleapis.com/token"
-            
-            # Prepare request data
-            data = {
-                "client_id": self.CLIENT_ID,
-                "client_secret": self.CLIENT_SECRET,
-                "grant_type": "refresh_token",
-                "refresh_token": self._tokens.refresh_token,
-            }
-            
-            # Make request
-            response = requests.post(token_url, data=data, timeout=30)
-            
-            if response.status_code != 200:
-                logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
-                return False
-            
-            # Parse response
-            token_data = response.json()
-            
-            # Update tokens
-            self._tokens.access_token = token_data.get("access_token")
-            self._tokens.expires_at = datetime.utcnow() + timedelta(seconds=token_data.get("expires_in", 3600))
-            
-            # Save updated tokens
-            self._save_tokens()
-            self._is_authenticated = True
-            
-            logger.info("Tokens refreshed successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to refresh tokens: {e}")
-            self._is_authenticated = False
-            return False
-    
-    def authenticate_with_cookies(self, cookies_file: Optional[Path] = None) -> bool:
-        """
-        Authenticate using cookies file for ytmusicapi.
-        
-        This is an alternative authentication method that doesn't require OAuth.
-        
-        Args:
-            cookies_file: Path to cookies.json file. If None, uses the default.
-            
-        Returns:
-            True if authentication succeeded, False otherwise
-        """
-        try:
-            import ytmusicapi as ytma
-            
-            if cookies_file:
-                cookies_path = cookies_file
-            else:
-                cookies_path = self.get_cookies_path()
-            
-            if not cookies_path or not cookies_path.exists():
-                logger.error("Cookies file not found")
-                return False
-            
-            # Test authentication by creating a YTMusic instance
-            ytmusic = ytma.YTMusic(cookies_file=str(cookies_path))
-            
-            # Try to get user info to verify authentication
-            user_info = ytmusic.get_user()
-            
-            if not user_info:
-                logger.error("Failed to authenticate with cookies")
-                return False
-            
-            # Save cookies path for later use
-            self._user_info = user_info
-            self._is_authenticated = True
-            
-            logger.info(f"Authenticated with cookies: {cookies_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Failed to authenticate with cookies: {e}")
-            return False
-    
-    def logout(self) -> None:
-        """Log out and clear authentication."""
-        self._clear_tokens()
-        self._session_id = None
-        self._user_info = None
-        
-        # Clear OAuth sessions
-        global _oauth_sessions
-        _oauth_sessions.clear()
-        
-        logger.info("Logged out successfully")
-    
-    def get_auth_status(self) -> Dict[str, Any]:
-        """
-        Get the current authentication status.
-        
-        Returns:
-            Dictionary with authentication status
-        """
+    def client(self) -> Any:
+        """The YTMusic instance everything else should use (authenticated if signed in)."""
+        with self._lock:
+            if self._state == SIGNED_IN:
+                try:
+                    return self._ensure_client()
+                except Exception as e:
+                    if self._state == SIGNED_IN:  # network problem, not a dead session
+                        raise
+                    logger.warning("Falling back to anonymous client: %s", e)
+            if self._anonymous is None:
+                self._anonymous = self._factory()
+            return self._anonymous
+
+    def status(self) -> Dict[str, Any]:
         return {
-            "is_authenticated": self._is_authenticated,
-            "has_tokens": self._tokens is not None,
-            "tokens_expired": self._tokens.is_expired() if self._tokens else True,
-            "user_info": self._user_info,
-            "client_configured": self.CLIENT_ID is not None,
+            "state": self._state,
+            "is_authenticated": self.is_authenticated,
+            "account": self._account,
         }
-    
-    def save_cookies(self, cookies: Dict[str, Any], path: Optional[Path] = None) -> bool:
-        """
-        Save cookies to a file.
-        
-        Args:
-            cookies: Dictionary of cookies
-            path: Path to save cookies. If None, uses the default.
-            
-        Returns:
-            True if saved successfully, False otherwise
-        """
+
+    # ---- lifecycle --------------------------------------------------------
+    def load(self) -> None:
+        """Restore a saved session at startup. Makes no network call (the client is built lazily)."""
+        headers = self._store.read()
+        if headers and "cookie" in headers:
+            with self._lock:
+                self._headers, self._state = headers, SIGNED_IN
+            logger.info("Found saved YouTube Music session")
+
+    def verify(self) -> Dict[str, Any]:
+        """Ask YouTube whether the saved session still works. Call once when the app starts."""
+        if self._state != SIGNED_IN:
+            return self.status()
         try:
-            if path is None:
-                path = CACHE_DIR / "cookies.json"
-            
-            # Ensure directory exists
-            os.makedirs(path.parent, exist_ok=True)
-            
-            # Save cookies
-            with open(path, "w") as f:
-                json.dump(cookies, f, indent=2)
-            
-            logger.info(f"Cookies saved to: {path}")
-            return True
-            
+            self._account = self._ensure_client().get_account_info()
         except Exception as e:
-            logger.error(f"Failed to save cookies: {e}")
-            return False
-    
-    def load_cookies(self, path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-        """
-        Load cookies from a file.
-        
-        Args:
-            path: Path to cookies file. If None, uses the default.
-            
-        Returns:
-            Dictionary of cookies or None if not found
-        """
+            if _is_auth_failure(e):
+                self.mark_expired()
+            else:  # offline etc. - keep the session, try again later
+                logger.warning("Could not verify session (will retry later): %s", e)
+        return self.status()
+
+    def connect_with_cookies(self, cookies: CookieInput, authuser: str = "0") -> Dict[str, Any]:
+        """Validate cookies against YouTube, then persist them and switch to signed-in."""
+        headers = build_headers(normalize_cookies(cookies), authuser)
         try:
-            if path is None:
-                path = self.get_cookies_path()
-            
-            if not path or not path.exists():
-                return None
-            
-            with open(path, "r") as f:
-                cookies = json.load(f)
-            
-            logger.info(f"Cookies loaded from: {path}")
-            return cookies
-            
+            candidate = self._factory(auth=headers)
+            account = candidate.get_account_info()
+            if not account or not account.get("accountName"):
+                raise AuthError("YouTube did not recognise this session (not signed in?).")
+        except AuthError:
+            raise
         except Exception as e:
-            logger.error(f"Failed to load cookies: {e}")
-            return None
+            if _is_auth_failure(e):
+                raise AuthError("YouTube rejected this session. Please sign in again.") from e
+            raise AuthError(f"Could not reach YouTube Music: {e}") from e
+
+        with self._lock:
+            self._store.write(headers)
+            self._headers, self._client, self._account, self._state = headers, candidate, account, SIGNED_IN
+        logger.info("Signed in as %s", account.get("accountName"))
+        return self.status()
+
+    def import_from_browser(self, browser: str, profile: Optional[str] = None) -> Dict[str, Any]:
+        return self.connect_with_cookies(cookies_from_browser(browser, profile))
+
+    def mark_expired(self) -> None:
+        """Called when YouTube starts rejecting the session; the UI should offer 'Sign in again'."""
+        with self._lock:
+            if self._state == SIGNED_IN:
+                logger.warning("YouTube Music session expired")
+                self._state = EXPIRED
+
+    def logout(self) -> None:
+        with self._lock:
+            self._store.delete()
+            self._headers = self._client = self._account = None
+            self._state = SIGNED_OUT
+
+    @contextmanager
+    def guard(self) -> Iterator[None]:
+        """Wrap authenticated ytmusicapi calls so a dead session flips the state to 'expired'."""
+        try:
+            yield
+        except Exception as e:
+            if _is_auth_failure(e):
+                self.mark_expired()
+            raise
+
+
+# --------------------------------------------------------------------------- #
+_instance: Optional[AuthService] = None
+
+
+def get_auth_service() -> AuthService:
+    global _instance
+    if _instance is None:
+        from backend.config import CACHE_DIR  # imported lazily to keep this module testable
+
+        _instance = AuthService(Path(CACHE_DIR) / "ytm_session.json")
+    return _instance

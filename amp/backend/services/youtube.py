@@ -20,9 +20,9 @@ from backend.config import (
     BASE_DIR,
     CACHE_DIR,
     YOUTUBE_API_KEY,
-    YTMUSICAPI_COOKIES,
     DEBUG,
 )
+from backend.services.auth import get_auth_service
 from backend.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -168,143 +168,17 @@ class YouTubeService:
     
     def __init__(self):
         """Initialize the YouTubeService."""
-        self._ytmusic = None
-        self._is_authenticated = False
-        self._cookies_file = self._get_cookies_file()
-        self._authenticated_ytmusic = None
-        self._initialize()
-        # Automatically authenticate if cookies are available
-        if self._cookies_file:
-            self.authenticate()
+        self._auth = get_auth_service()
     
-    def _get_cookies_file(self) -> Optional[Path]:
-        """Get the path to the cookies file."""
-        if YTMUSICAPI_COOKIES:
-            cookies_path = Path(YTMUSICAPI_COOKIES)
-            if cookies_path.exists():
-                return cookies_path
-        
-        # Default location
-        default_cookies = CACHE_DIR / "cookies.json"
-        if default_cookies.exists():
-            return default_cookies
-        
-        return None
+
     
-    def _initialize(self) -> None:
-        """Initialize ytmusicapi."""
-        try:
-            import ytmusicapi as ytma
-            self._ytmusic = ytma.YTMusic()
-            logger.info("YouTubeService initialized (unauthenticated mode)")
-            self._is_authenticated = False
-        except ImportError as e:
-            logger.error(f"ytmusicapi not installed: {e}")
-            raise ImportError(
-                "ytmusicapi is required for YouTube integration. "
-                "Install it with: pip install ytmusicapi"
-            )
-        except Exception as e:
-            logger.error(f"Failed to initialize ytmusicapi: {e}")
-            raise
+    def _get_ytmusic(self) -> Any:
+        """Get the YTMusic instance (authenticated if signed in, anonymous otherwise)."""
+        return self._auth.client
     
     def is_authenticated(self) -> bool:
         """Check if the service is authenticated."""
-        return self._is_authenticated
-    
-    def authenticate(self, cookies_file: Optional[Path] = None) -> bool:
-        """
-        Authenticate with YouTube Music using cookies.
-        
-        Args:
-            cookies_file: Path to cookies.json file. If None, uses the default.
-            
-        Returns:
-            True if authentication succeeded, False otherwise.
-        """
-        try:
-            import ytmusicapi as ytma
-            
-            if cookies_file:
-                self._cookies_file = cookies_file
-            
-            if self._cookies_file and self._cookies_file.exists():
-                logger.info(f"Authenticating with cookies: {self._cookies_file}")
-                self._authenticated_ytmusic = ytma.YTMusic(
-                    requests_session=True,
-                    cookies_file=str(self._cookies_file)
-                )
-                self._is_authenticated = True
-                logger.info("YouTubeService authenticated successfully")
-                return True
-            else:
-                logger.warning("No cookies file found for authentication")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Authentication failed: {e}")
-            self._is_authenticated = False
-            self._authenticated_ytmusic = None
-            return False
-    
-    def _get_ytmusic(self) -> Any:
-        """Get the appropriate ytmusic instance (authenticated or unauthenticated)."""
-        if self._is_authenticated and self._authenticated_ytmusic:
-            return self._authenticated_ytmusic
-        return self._ytmusic
-    
-    def get_auth_url(self) -> str:
-        """
-        Get the OAuth authentication URL.
-        
-        Returns:
-            URL for OAuth authentication.
-        """
-        try:
-            import ytmusicapi as ytma
-            ytmusic = ytma.YTMusic()
-            return ytmusic.get_auth_url()
-        except Exception as e:
-            logger.error(f"Failed to get auth URL: {e}")
-            return ""
-    
-    def handle_oauth_callback(self, callback_data: Dict[str, str]) -> bool:
-        """
-        Handle OAuth callback and save cookies.
-        
-        Args:
-            callback_data: Dictionary containing OAuth callback data.
-            
-        Returns:
-            True if successful, False otherwise.
-        """
-        try:
-            import ytmusicapi as ytma
-            
-            # Create a new YTMusic instance for OAuth
-            ytmusic = ytma.YTMusic()
-            
-            # Handle the callback
-            # Note: ytmusicapi's OAuth flow is a bit different
-            # We need to use the oauth_credentials parameter
-            if 'code' in callback_data:
-                # This is a simplified flow
-                # In practice, ytmusicapi uses a different OAuth approach
-                # For now, we'll save the credentials to a file
-                cookies_path = CACHE_DIR / "cookies.json"
-                with open(cookies_path, 'w') as f:
-                    json.dump(callback_data, f)
-                
-                self._cookies_file = cookies_path
-                self._is_authenticated = True
-                logger.info(f"OAuth cookies saved to: {cookies_path}")
-                return True
-            
-            return False
-            
-        except Exception as e:
-            logger.error(f"OAuth callback failed: {e}")
-            return False
+        return self._auth.is_authenticated
     
     def search(
         self,
@@ -1040,32 +914,15 @@ class YouTubeService:
         Returns:
             List of PlaylistMetadata objects
         """
-        if not self._is_authenticated:
-            logger.warning("Cannot get user playlists: not authenticated")
+        if not self._auth.is_authenticated:
             return []
         
         logger.info("Getting user playlists")
         
         try:
-            ytmusic = self._get_ytmusic()
-            
-            # Get user playlists
-            playlists_info = ytmusic.get_user_playlists()
-            
-            playlists = []
-            for playlist in playlists_info:
-                playlist_metadata = PlaylistMetadata(
-                    id=playlist.get("id") or playlist.get("playlistId"),
-                    name=playlist.get("title") or playlist.get("name"),
-                    description=playlist.get("description"),
-                    owner="user",
-                    thumbnail_url=playlist.get("thumbnails", [{}])[-1].get("url") if playlist.get("thumbnails") else None,
-                    song_count=playlist.get("trackCount"),
-                    is_youtube=True,
-                )
-                playlists.append(playlist_metadata)
-            
-            return playlists
+            with self._auth.guard():
+                items = self._get_ytmusic().get_library_playlists(limit=None)
+            return [p for i in items if (p := self._parse_playlist(i))]
             
         except Exception as e:
             logger.error(f"Failed to get user playlists: {e}")
@@ -1080,25 +937,15 @@ class YouTubeService:
         Returns:
             List of SongMetadata objects
         """
-        if not self._is_authenticated:
-            logger.warning("Cannot get liked songs: not authenticated")
+        if not self._auth.is_authenticated:
             return []
         
         logger.info("Getting liked songs")
         
         try:
-            ytmusic = self._get_ytmusic()
-            
-            # Get liked songs
-            liked_songs_info = ytmusic.get_liked_songs()
-            
-            songs = []
-            for song in liked_songs_info:
-                song_metadata = self._parse_song(song)
-                if song_metadata:
-                    songs.append(song_metadata)
-            
-            return songs
+            with self._auth.guard():
+                data = self._get_ytmusic().get_liked_songs(limit=None)
+            return [m for t in data.get("tracks", []) if (m := self._parse_song(t))]
             
         except Exception as e:
             logger.error(f"Failed to get liked songs: {e}")
@@ -1113,20 +960,4 @@ class YouTubeService:
         Returns:
             Dictionary with user information or None
         """
-        if not self._is_authenticated:
-            logger.warning("Cannot get user info: not authenticated")
-            return None
-        
-        logger.info("Getting user info")
-        
-        try:
-            ytmusic = self._get_ytmusic()
-            
-            # Get user info
-            user_info = ytmusic.get_user()
-            
-            return user_info
-            
-        except Exception as e:
-            logger.error(f"Failed to get user info: {e}")
-            return None
+        return self._auth.account

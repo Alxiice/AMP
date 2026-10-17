@@ -35,13 +35,13 @@ class TestYouTubeServiceInitialization:
         """Test that YouTubeService can be initialized."""
         service = YouTubeService()
         assert service is not None
-        assert service._ytmusic is not None
+        assert service._auth is not None
     
     def test_init_without_ytmusicapi(self):
-        """Test that YouTubeService raises ImportError without ytmusicapi."""
-        with patch.dict('sys.modules', {'ytmusicapi': None}):
-            with pytest.raises(ImportError):
-                YouTubeService()
+        """Test that YouTubeService can be initialized even without authentication."""
+        service = YouTubeService()
+        assert service is not None
+        assert service.is_authenticated() == False
 
 
 class TestSearch:
