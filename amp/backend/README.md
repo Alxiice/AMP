@@ -173,7 +173,7 @@ curl http://localhost:8000/api/auth/status
 curl http://localhost:8000/api/user/likes
 ```
 
-See [AUTH_FLOW_GUIDE.md](../../AUTH_FLOW_GUIDE.md) for detailed auth documentation.
+See [IMPLEMENTATION_NOTES.md](../../IMPLEMENTATION_NOTES.md) for implementation details.
 
 ---
 
