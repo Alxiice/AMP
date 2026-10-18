@@ -38,13 +38,27 @@ const DEFAULT_CANDIDATES = [
   "http://localhost:8000",
 ];
 
-function getCandidates(): string[] {
+async function getWslHostCandidate(): Promise<string | null> {
+  if (!isTauri()) return null;
+  try {
+    const ip = await invoke<string | null>("get_wsl_host_ip");
+    if (ip) return `http://${ip}:8000`;
+  } catch {
+    // Not in WSL2 or command not available
+  }
+  return null;
+}
+
+async function getCandidates(): Promise<string[]> {
   const stored = localStorage.getItem("amp_api_url");
   const envUrl = import.meta.env.VITE_API_URL as string | undefined;
   const list: string[] = [];
   if (stored) list.push(stored);
   if (envUrl) list.push(envUrl);
   list.push(...DEFAULT_CANDIDATES);
+  // WSL2: try the Windows host IP via the gateway
+  const wslCandidate = await getWslHostCandidate();
+  if (wslCandidate) list.push(wslCandidate);
   return [...new Set(list)];
 }
 
@@ -56,7 +70,7 @@ async function findApiBase(addLog: (log: DebugLog) => void): Promise<string> {
   if (probing) return probing;
 
   probing = (async () => {
-    const candidates = getCandidates();
+    const candidates = await getCandidates();
     addLog({ time: timestamp(), type: "info", message: `Probing ${candidates.length} API URL(s)...` });
 
     for (const base of candidates) {
@@ -150,6 +164,8 @@ export function useYouTubeAuth() {
   const [apiUrlInput, setApiUrlInput] = useState<string>(resolvedApiBase ?? "");
   // Web-mode sign-in: true when the browser tab is open and user needs to sign in
   const [awaitingBrowserSignin, setAwaitingBrowserSignin] = useState(false);
+  // URL to open manually if the browser couldn't be opened automatically
+  const [signinUrl, setSigninUrl] = useState<string | null>(null);
   const initialized = useRef(false);
 
   const addLog = useCallback((log: DebugLog) => {
@@ -246,13 +262,18 @@ export function useYouTubeAuth() {
 
         // Web mode: open browser tab for sign-in
         addLog({ time: timestamp(), type: "info", message: "Opening browser for sign-in..." });
-        const res = await api<{ opened: boolean; message: string }>(
+        const res = await api<{ opened: boolean; url: string; message: string }>(
           "/auth/open-signin",
           { method: "POST", body: JSON.stringify({ browser: browser ?? null }) },
           addLog,
         );
+        setSigninUrl(res.url);
         setAwaitingBrowserSignin(true);
-        addLog({ time: timestamp(), type: "info", message: res.message });
+        if (res.opened) {
+          addLog({ time: timestamp(), type: "info", message: res.message });
+        } else {
+          addLog({ time: timestamp(), type: "warn", message: res.message });
+        }
         // Return current status — user will complete sign-in and click "I've signed in"
         return api<AuthStatus>("/auth/status", undefined, addLog);
       }),
@@ -290,5 +311,6 @@ export function useYouTubeAuth() {
     inTauri, logs, backendReachable,
     apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
     awaitingBrowserSignin, setAwaitingBrowserSignin,
+    signinUrl, setSigninUrl,
   };
 }

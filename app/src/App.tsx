@@ -26,6 +26,7 @@ function App() {
     inTauri, logs, backendReachable,
     apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
     awaitingBrowserSignin, setAwaitingBrowserSignin,
+    signinUrl, setSigninUrl,
   } = useYouTubeAuth();
 
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
@@ -70,6 +71,7 @@ function App() {
   };
 
   const handleConnect = () => {
+    setSigninUrl(null);
     login(inTauri ? undefined : selectedBrowser);
   };
 
@@ -230,6 +232,14 @@ function App() {
                 A browser tab has been opened to <strong>music.youtube.com</strong>.
                 Sign in with the Google account you want to use.
               </p>
+              {signinUrl && (
+                <p style={{ color: '#61dafb', fontSize: '0.85rem', marginTop: '0.5rem' }}>
+                  If the tab didn't open:{' '}
+                  <a href={signinUrl} target="_blank" rel="noopener noreferrer" style={{ color: '#61dafb', textDecoration: 'underline' }}>
+                    Open YouTube Music manually
+                  </a>
+                </p>
+              )}
               <p style={{ color: '#aaa', fontSize: '0.9rem' }}>
                 After signing in, come back here and click the button below.
               </p>
@@ -242,7 +252,7 @@ function App() {
                   {busy ? 'Capturing cookies...' : "I've signed in — capture cookies"}
                 </button>
                 <button
-                  onClick={() => setAwaitingBrowserSignin(false)}
+                  onClick={() => { setAwaitingBrowserSignin(false); setSigninUrl(null); }}
                   disabled={busy}
                   style={{
                     padding: '0.5rem 1rem', borderRadius: '4px',

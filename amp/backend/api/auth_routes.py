@@ -97,33 +97,61 @@ def open_signin(body: OpenSigninBody):
     via /auth/import-browser.
 
     In Tauri mode, prefer the sign-in window (invoke("youtube_login")) instead.
+
+    Returns opened=true if the browser was launched, or opened=false with
+    the URL so the frontend can display a clickable link.
     """
     url = "https://music.youtube.com"
     logger.info("Opening browser for sign-in: %s (browser=%s)", url, body.browser)
+
+    opened = False
+
+    # Try the system default browser first - most reliable cross-platform.
     try:
-        if body.browser:
-            # Open with a specific browser
-            browser_cmd = {
-                "firefox": "firefox",
-                "chrome": "google-chrome",
-                "edge": "msedge",
-                "brave": "brave-browser",
-                "chromium": "chromium-browser",
-            }.get(body.browser.lower())
-            if browser_cmd:
-                webbrowser.get(browser_cmd).open(url)
-            else:
-                webbrowser.open(url)
-        else:
-            webbrowser.open(url)
+        opened = webbrowser.open(url)
+        if opened:
+            logger.info("Opened system default browser")
+    except Exception as e:
+        logger.warning("webbrowser.open() failed: %s", e)
+
+    # If a specific browser was requested and default didn't work, try platform-specific commands.
+    if not opened and body.browser:
+        import sys
+        cmds = {
+            "firefox": ["firefox", "firefox.exe", "C:/Program Files/Mozilla Firefox/firefox.exe"],
+            "chrome": ["google-chrome", "chrome", "chrome.exe", "C:/Program Files/Google/Chrome/Application/chrome.exe"],
+            "edge": ["msedge", "msedge.exe", "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe"],
+            "brave": ["brave", "brave.exe", "brave-browser"],
+            "chromium": ["chromium", "chromium-browser", "chromium.exe"],
+        }.get(body.browser.lower(), [])
+
+        for cmd in cmds:
+            try:
+                if sys.platform == "win32":
+                    import subprocess
+                    subprocess.Popen([cmd, url], shell=False,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    webbrowser.get(cmd).open(url)
+                opened = True
+                logger.info("Opened browser via: %s", cmd)
+                break
+            except Exception:
+                continue
+
+    if opened:
         return {
             "opened": True,
             "url": url,
             "message": "Sign in to YouTube Music in the opened tab, then click 'I've signed in' to capture cookies.",
         }
-    except Exception as e:
-        logger.error("Failed to open browser: %s", e)
-        raise HTTPException(status_code=500, detail=f"Could not open browser: {e}")
+    else:
+        logger.warning("Could not auto-open browser; returning URL for manual open")
+        return {
+            "opened": False,
+            "url": url,
+            "message": "Could not open a browser automatically. Click the link below to open YouTube Music, sign in, then come back and click 'I've signed in'.",
+        }
 
 
 @router.post("/logout")
