@@ -1,0 +1,55 @@
+# Coverage.py Configuration
+# https://coverage.readthedocs.io/
+
+[run]
+# Source packages to measure
+source = amp/backend
+
+# Omit test files and __pycache__
+omit = 
+    amp/backend/tests/*
+    amp/backend/__pycache__/*
+    */tests/*
+    */__pycache__/*
+    venv/*
+
+# Enable branch coverage
+branch = True
+
+# Parallel mode for speed
+parallel = True
+
+[report]
+# Exclude lines from coverage reporting
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    def __str__
+    if self.debug:
+    if settings.DEBUG:
+    raise AssertionError
+    raise NotImplementedError
+    if 0:
+    if __name__ == .__main__.:
+    class .*\.Protocol\(.*\):
+    @(abc\.)?abstractmethod
+
+# Don't report files that are 100% covered
+skip_covered = False
+
+# Show missing line numbers in report
+show_missing = True
+
+# Minimum acceptable coverage (80%)
+fail_under = 80
+
+# Exclude files with no executable code
+ignore_errors = True
+
+[html]
+# HTML report directory
+directory = htmlcov
+
+[xml]
+# XML report output for CI
+output = coverage.xml

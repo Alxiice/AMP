@@ -1,0 +1,63 @@
+# Ruff Configuration for AMP Project
+# https://docs.astral.sh/ruff/configuration/
+# Compatible with Ruff 0.17.1+
+
+[lint]
+# Enable rule groups
+select = [
+    "A",
+    "B",
+    "C",
+    "E",
+    "F",
+    "G",
+    "I",
+    "N",
+    "Q",
+    "S",
+    "W",
+    "UP",
+]
+
+# Disable specific rules
+ignore = [
+    "D100",
+    "D101",
+    "D102",
+    "D103",
+    "D104",
+    "D203",
+    "D212",
+    "ANN001",
+    "ANN002",
+    "ANN003",
+    "ANN201",
+    "S101",
+    "PLR0913",
+]
+
+# File patterns to exclude
+exclude = [
+    "amp/backend/tests/*",
+    "amp/backend/__pycache__/*",
+    "venv/*",
+    ".git/*",
+]
+
+# isort settings
+[lint.isort]
+known-first-party = ["backend"]
+known-third-party = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "ytmusicapi",
+    "yt_dlp",
+    "pytest",
+    "httpx",
+    "uvicorn",
+]
+
+# pycodestyle settings (includes line-length)
+[lint.pycodestyle]
+max-line-length = 100
