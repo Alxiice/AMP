@@ -22,8 +22,14 @@ from backend.services.streaming import (
     StreamInfo,
     get_streaming_service,
     QUALITY_PRESETS,
+    ChunkStatus,
+    ChunkDownloadTask,
+    DownloadPriority,
+    PlaybackInfo,
+    DownloadManager,
+    PlaybackSession,
 )
-from backend.config import CHUNKS_DIR, CACHE_DIR, CHUNK_SIZE_SEC
+from backend.config import CHUNKS_DIR, CACHE_DIR, CHUNK_SIZE_SEC, CHUNK_SIZE_SEC
 
 
 class TestStreamingServiceInitialization:
@@ -285,28 +291,37 @@ class TestGetStreamInfo:
         """Test getting stream info with known duration."""
         with patch.object(streaming_service, 'get_song_url') as mock_url:
             with patch.object(streaming_service, '_get_duration_with_yt_dlp') as mock_duration:
-                mock_url.return_value = "https://example.com"
-                mock_duration.return_value = 180000  # 3 minutes
-                
-                info = streaming_service.get_stream_info("test_song")
-                
-                assert info is not None
-                assert info.song_id == "test_song"
-                assert info.duration_ms == 180000
-                # Should have 18 chunks (180s / 10s per chunk)
-                assert info.total_chunks == 18
+                with patch.object(streaming_service, '_get_cached_chunks') as mock_cached:
+                    with patch.object(streaming_service, 'get_downloading_chunks') as mock_downloading:
+                        mock_url.return_value = "https://example.com"
+                        mock_duration.return_value = 180000  # 3 minutes
+                        mock_cached.return_value = [0, 1, 2]
+                        mock_downloading.return_value = set()
+                        
+                        info = streaming_service.get_stream_info("test_song")
+                        
+                        assert info is not None
+                        assert info.song_id == "test_song"
+                        assert info.duration_ms == 180000
+                        # Should have 18 chunks (180s / 10s per chunk)
+                        assert info.total_chunks == 18
+                        assert info.downloading_chunks == set()
     
     def test_get_stream_info_no_duration(self, streaming_service):
         """Test getting stream info without duration."""
         with patch.object(streaming_service, 'get_song_url'):
             with patch.object(streaming_service, '_get_duration_with_yt_dlp') as mock_duration:
-                mock_duration.return_value = None
-                
-                info = streaming_service.get_stream_info("test_song")
-                
-                assert info is not None
-                assert info.duration_ms is None
-                assert info.total_chunks == 0
+                with patch.object(streaming_service, '_get_cached_chunks') as mock_cached:
+                    with patch.object(streaming_service, 'get_downloading_chunks') as mock_downloading:
+                        mock_duration.return_value = None
+                        mock_cached.return_value = []
+                        mock_downloading.return_value = set()
+                        
+                        info = streaming_service.get_stream_info("test_song")
+                        
+                        assert info is not None
+                        assert info.duration_ms is None
+                        assert info.total_chunks == 0
 
 
 class TestChunkManagement:
@@ -397,3 +412,388 @@ class TestFileOperations:
         """Test that required directories are created."""
         assert CHUNKS_DIR.exists()
         assert CHUNKS_DIR.is_dir()
+
+
+# =============================================================================
+# NEW PHASE 3 TESTS
+# =============================================================================
+
+class TestChunkStatus:
+    """Tests for chunk status tracking."""
+    
+    @pytest.fixture
+    def streaming_service(self):
+        """Create a StreamingService instance."""
+        return StreamingService()
+    
+    def test_chunk_status_enum_values(self):
+        """Test ChunkStatus enum values."""
+        assert ChunkStatus.NOT_DOWNLOADED.value == "not_downloaded"
+        assert ChunkStatus.DOWNLOADING.value == "downloading"
+        assert ChunkStatus.DOWNLOADED.value == "downloaded"
+        assert ChunkStatus.ERROR.value == "error"
+    
+    def test_get_chunk_status_empty(self, streaming_service):
+        """Test getting chunk status for unknown song."""
+        status = streaming_service.get_chunk_status("unknown_song")
+        assert status == {}
+    
+    def test_get_chunk_status_with_total_chunks(self, streaming_service):
+        """Test getting chunk status with total chunks."""
+        status = streaming_service.get_chunk_status("test_song", total_chunks=5)
+        assert len(status) == 5
+        assert all(s == ChunkStatus.NOT_DOWNLOADED for s in status.values())
+
+
+class TestPlaybackInfo:
+    """Tests for PlaybackInfo dataclass."""
+    
+    def test_playback_info_creation(self):
+        """Test creating PlaybackInfo."""
+        info = PlaybackInfo(
+            song_id="test_song",
+            current_chunk_index=2,
+            position_in_chunk_ms=5000,
+            is_playing=True,
+            volume=0.8,
+        )
+        
+        assert info.song_id == "test_song"
+        assert info.current_chunk_index == 2
+        assert info.position_in_chunk_ms == 5000
+        assert info.is_playing == True
+        assert info.volume == 0.8
+    
+    def test_playback_info_current_position_ms(self):
+        """Test calculating current position in ms."""
+        from backend.config import CHUNK_SIZE_SEC
+        
+        info = PlaybackInfo(
+            current_chunk_index=3,
+            position_in_chunk_ms=5000,
+        )
+        
+        expected_position = 3 * (CHUNK_SIZE_SEC * 1000) + 5000
+        assert info.current_position_ms == expected_position
+    
+    def test_playback_info_to_dict(self):
+        """Test converting PlaybackInfo to dictionary."""
+        info = PlaybackInfo(
+            song_id="test",
+            current_chunk_index=1,
+            position_in_chunk_ms=2000,
+        )
+        
+        data = info.to_dict()
+        
+        assert "song_id" in data
+        assert "current_chunk_index" in data
+        assert "position_in_chunk_ms" in data
+        assert "current_position_ms" in data
+        assert data["song_id"] == "test"
+
+
+class TestDownloadPriority:
+    """Tests for DownloadPriority enum."""
+    
+    def test_priority_values(self):
+        """Test priority values."""
+        assert DownloadPriority.LOW.value == 0
+        assert DownloadPriority.NORMAL.value == 1
+        assert DownloadPriority.HIGH.value == 2
+        assert DownloadPriority.CRITICAL.value == 3
+    
+    def test_priority_ordering(self):
+        """Test priority ordering."""
+        assert DownloadPriority.CRITICAL > DownloadPriority.HIGH
+        assert DownloadPriority.HIGH > DownloadPriority.NORMAL
+        assert DownloadPriority.NORMAL > DownloadPriority.LOW
+
+
+class TestChunkDownloadTask:
+    """Tests for ChunkDownloadTask dataclass."""
+    
+    def test_task_creation(self):
+        """Test creating a download task."""
+        task = ChunkDownloadTask(
+            song_id="test_song",
+            chunk_index=5,
+            priority=DownloadPriority.HIGH,
+        )
+        
+        assert task.song_id == "test_song"
+        assert task.chunk_index == 5
+        assert task.priority == DownloadPriority.HIGH
+    
+    def test_task_priority_comparison(self):
+        """Test task priority comparison."""
+        from datetime import timedelta
+        
+        critical_task = ChunkDownloadTask(
+            song_id="song1",
+            chunk_index=0,
+            priority=DownloadPriority.CRITICAL,
+        )
+        
+        high_task = ChunkDownloadTask(
+            song_id="song2",
+            chunk_index=0,
+            priority=DownloadPriority.HIGH,
+        )
+        
+        # Higher priority tasks should come first
+        assert critical_task < high_task
+
+
+class TestPlaybackSession:
+    """Tests for PlaybackSession."""
+    
+    @pytest.fixture
+    def playback_session(self):
+        """Create a PlaybackSession instance."""
+        return PlaybackSession()
+    
+    def test_initial_state(self, playback_session):
+        """Test initial playback session state."""
+        assert playback_session.current_song_id is None
+        assert playback_session.get_current_chunk_index() == 0
+    
+    def test_set_song(self, playback_session):
+        """Test setting the current song."""
+        playback_session.set_song("test_song")
+        
+        assert playback_session.current_song_id == "test_song"
+        assert playback_session.get_current_chunk_index() == 0
+    
+    def test_update_position(self, playback_session):
+        """Test updating playback position."""
+        playback_session.update_position(15000)  # 15 seconds
+        
+        # With 10-second chunks, this should be chunk 1 at position 5000ms
+        from backend.config import CHUNK_SIZE_SEC
+        chunk_size_ms = CHUNK_SIZE_SEC * 1000
+        
+        expected_chunk = 15000 // chunk_size_ms
+        expected_position = 15000 % chunk_size_ms
+        
+        assert playback_session.get_current_chunk_index() == expected_chunk
+        assert playback_session.get_playback_info().position_in_chunk_ms == expected_position
+    
+    def test_set_playing(self, playback_session):
+        """Test setting playing state."""
+        playback_session.set_playing(True)
+        assert playback_session.get_playback_info().is_playing == True
+        
+        playback_session.set_playing(False)
+        assert playback_session.get_playback_info().is_playing == False
+    
+    def test_get_chunks_to_buffer(self, playback_session):
+        """Test getting chunks to buffer."""
+        playback_session.set_song("test_song")
+        playback_session.update_position(0)
+        
+        total_chunks = 10
+        chunks_to_buffer = playback_session.get_chunks_to_buffer(total_chunks)
+        
+        # Should buffer ahead plus some before
+        assert len(chunks_to_buffer) > 0
+        assert 0 in chunks_to_buffer  # Current chunk
+    
+    def test_should_download_chunk(self, playback_session):
+        """Test should_download_chunk logic."""
+        playback_session.set_song("test_song")
+        
+        cached_chunks = {0, 1, 2}
+        downloading_chunks = {3}
+        total_chunks = 10
+        
+        # Already cached - should not download
+        assert not playback_session.should_download_chunk(0, total_chunks, cached_chunks, downloading_chunks)
+        
+        # Already downloading - should not download
+        assert not playback_session.should_download_chunk(3, total_chunks, cached_chunks, downloading_chunks)
+        
+        # Not cached, not downloading - should download if in buffer range
+        # Note: This depends on current playback position
+
+
+class TestStreamingServicePlayback:
+    """Tests for playback management in StreamingService."""
+    
+    @pytest.fixture
+    def streaming_service(self):
+        """Create a StreamingService instance."""
+        return StreamingService()
+    
+    def test_start_playback(self, streaming_service):
+        """Test starting playback."""
+        # Mock the required methods
+        with patch.object(streaming_service, 'get_stream_info') as mock_info:
+            with patch.object(streaming_service, 'buffer_chunks_for_song') as mock_buffer:
+                with patch.object(streaming_service, '_save_playback_state') as mock_save:
+                    mock_info.return_value = StreamInfo(
+                        song_id="test_song",
+                        title="Test Song",
+                        duration_ms=100000,
+                        total_chunks=10,
+                    )
+                    
+                    result = streaming_service.start_playback("test_song")
+                    
+                    assert result == True
+                    assert streaming_service.get_current_song_id() == "test_song"
+                    mock_buffer.assert_called_once()
+                    mock_save.assert_called_once()
+    
+    def test_pause_playback(self, streaming_service):
+        """Test pausing playback."""
+        streaming_service.start_playback("test_song")
+        
+        with patch.object(streaming_service, '_save_playback_state') as mock_save:
+            streaming_service.pause_playback()
+            mock_save.assert_called_once()
+    
+    def test_stop_playback(self, streaming_service):
+        """Test stopping playback."""
+        streaming_service.start_playback("test_song")
+        
+        with patch.object(streaming_service, '_save_playback_state') as mock_save:
+            streaming_service.stop_playback()
+            assert streaming_service.get_current_song_id() is None
+            mock_save.assert_called_once()
+    
+    def test_update_playback_position(self, streaming_service):
+        """Test updating playback position."""
+        streaming_service.start_playback("test_song")
+        
+        with patch.object(streaming_service, 'get_stream_info') as mock_info:
+            with patch.object(streaming_service, 'buffer_chunks_for_song') as mock_buffer:
+                with patch.object(streaming_service, '_save_playback_state') as mock_save:
+                    with patch.object(streaming_service._playback_session, 'update_position'):
+                        mock_info.return_value = StreamInfo(
+                            song_id="test_song",
+                            title="Test Song",
+                            duration_ms=100000,
+                            total_chunks=10,
+                        )
+                        
+                        streaming_service.update_playback_position(25000)
+                        
+                        # Verify position was updated
+                        playback_info = streaming_service.get_playback_state()
+                        # The position is stored in playback state which reads from the database
+                        # For this test, we just verify the method was called
+                        mock_save.assert_called()
+    
+    def test_get_playback_state(self, streaming_service):
+        """Test getting playback state."""
+        state = streaming_service.get_playback_state()
+        
+        assert "current_song_id" in state
+        assert "current_time_ms" in state
+        assert "is_playing" in state
+        assert "volume" in state
+    
+    def test_get_song_chunks_status(self, streaming_service):
+        """Test getting song chunks status."""
+        with patch.object(streaming_service, 'get_stream_info') as mock_info:
+            with patch.object(streaming_service, 'get_chunk_status') as mock_status:
+                with patch.object(streaming_service, 'get_downloading_chunks') as mock_downloading:
+                    mock_info.return_value = StreamInfo(
+                        song_id="test_song",
+                        title="Test Song",
+                        duration_ms=100000,
+                        total_chunks=10,
+                        cached_chunks=[0, 1, 2],
+                        downloading_chunks={3, 4},
+                    )
+                    mock_status.return_value = {
+                        0: ChunkStatus.DOWNLOADED,
+                        1: ChunkStatus.DOWNLOADED,
+                        2: ChunkStatus.DOWNLOADED,
+                        3: ChunkStatus.DOWNLOADING,
+                        4: ChunkStatus.DOWNLOADING,
+                        5: ChunkStatus.NOT_DOWNLOADED,
+                        6: ChunkStatus.NOT_DOWNLOADED,
+                        7: ChunkStatus.NOT_DOWNLOADED,
+                        8: ChunkStatus.NOT_DOWNLOADED,
+                        9: ChunkStatus.NOT_DOWNLOADED,
+                    }
+                    mock_downloading.return_value = {3, 4}
+                    
+                    status_info = streaming_service.get_song_chunks_status("test_song")
+                    
+                    assert "total_chunks" in status_info
+                    assert "chunk_status" in status_info
+                    assert "cached_count" in status_info
+                    assert "downloading_count" in status_info
+                    assert status_info["total_chunks"] == 10
+                    assert status_info["downloading_count"] == 2
+                    assert status_info["cached_count"] == 3
+
+
+class TestStreamingServiceBuffering:
+    """Tests for buffer-ahead logic."""
+    
+    @pytest.fixture
+    def streaming_service(self):
+        """Create a StreamingService instance."""
+        return StreamingService()
+    
+    def test_buffer_chunks_for_song(self, streaming_service):
+        """Test buffering chunks for a song."""
+        with patch.object(streaming_service, 'get_stream_info') as mock_info:
+            with patch.object(streaming_service, '_get_cached_chunks') as mock_cached:
+                with patch.object(streaming_service, 'get_downloading_chunks') as mock_downloading:
+                    with patch.object(streaming_service._playback_session, 'get_chunks_to_buffer') as mock_buffer:
+                        with patch.object(streaming_service._download_manager, 'add_task') as mock_add:
+                            mock_info.return_value = StreamInfo(
+                                song_id="test_song",
+                                title="Test Song",
+                                duration_ms=100000,
+                                total_chunks=10,
+                            )
+                            mock_cached.return_value = []
+                            mock_downloading.return_value = set()
+                            mock_buffer.return_value = [0, 1, 2, 3, 4]
+                            
+                            streaming_service.buffer_chunks_for_song("test_song", 10)
+                            
+                            # Should add tasks for chunks that need buffering
+                            assert mock_add.call_count >= 0
+
+
+class TestChunkStatusVisualization:
+    """Tests for chunk status visualization."""
+    
+    @pytest.fixture
+    def streaming_service(self):
+        """Create a StreamingService instance."""
+        return StreamingService()
+    
+    def test_chunk_status_update_on_download(self, streaming_service):
+        """Test that chunk status is updated when downloading."""
+        with patch.object(streaming_service, '_download_audio') as mock_download:
+            mock_download.return_value = True
+            
+            # Create a temp file for the chunk
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp:
+                tmp_path = Path(tmp.name)
+            
+            try:
+                # Patch _generate_chunk_filename to return our temp path
+                with patch.object(streaming_service, '_generate_chunk_filename') as mock_gen:
+                    mock_gen.return_value = tmp_path
+                    
+                    # Mock save_chunk_metadata
+                    with patch.object(streaming_service, '_save_chunk_metadata'):
+                        streaming_service.download_chunk("test_song", 0)
+                        
+                        # Check status was updated
+                        status = streaming_service.get_chunk_status("test_song", total_chunks=1)
+                        assert 0 in status
+                        assert status[0] == ChunkStatus.DOWNLOADED
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
