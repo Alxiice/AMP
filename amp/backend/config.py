@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     PORT: int = 8000
     
     # Directories
-    BASE_DIR: Path = Path(__file__).parent.parent
+    BASE_DIR: Path = Path(__file__).parent.parent.parent
     CACHE_DIR: Path = BASE_DIR / ".amp" / "cache"
     CHUNKS_DIR: Path = CACHE_DIR / "chunks"
     LOGS_DIR: Path = BASE_DIR / ".amp" / "logs"
@@ -48,7 +48,6 @@ class Settings(BaseSettings):
     
     # YouTube
     YOUTUBE_API_KEY: Optional[str] = None
-    YTMUSICAPI_COOKIES: Optional[str] = None  # Path to cookies file for ytmusicapi
     
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -82,6 +81,5 @@ AUDIO_QUALITY = settings.AUDIO_QUALITY
 AUDIO_FORMAT = settings.AUDIO_FORMAT
 AUDIO_BITRATE = settings.AUDIO_BITRATE
 YOUTUBE_API_KEY = settings.YOUTUBE_API_KEY
-YTMUSICAPI_COOKIES = settings.YTMUSICAPI_COOKIES
 LOG_LEVEL = settings.LOG_LEVEL
 LOG_FILE = settings.LOG_FILE

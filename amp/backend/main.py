@@ -15,7 +15,8 @@ import os
 import sys
 
 # Add backend directory to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+BACKEND_FOLDER = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.dirname(BACKEND_FOLDER))
 
 from backend.api.server import app, HOST, PORT
 from backend.utils.logger import get_logger

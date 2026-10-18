@@ -1,0 +1,32 @@
+{
+  "name": "amp",
+  "version": "0.1.0",
+  "description": "Another Music Player - Desktop App",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "serve": "node dev-server.cjs",
+    "serve:prod": "node dev-server.cjs",
+    "dev:full": "concurrently \"npm run dev\" \"cd .. && python amp/backend/main.py\"",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build",
+    "build:exe": "bash scripts/build-windows-exe.sh"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-shell": "^2.5.0",
+    "express": "^4.18.2",
+    "http-proxy-middleware": "^4.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
+    "@vitejs/plugin-react": "^4.3.3",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

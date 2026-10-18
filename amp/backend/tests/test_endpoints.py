@@ -132,3 +132,42 @@ class TestPlaybackEndpoints:
         assert response.status_code == 200
         data = response.json()
         assert "message" in data
+
+
+class TestAuthEndpoints:
+    """Tests for authentication endpoints."""
+    
+    def test_auth_status_endpoint(self, client):
+        """Test GET /auth/status returns status."""
+        response = client.get("/api/auth/status")
+        assert response.status_code == 200
+        data = response.json()
+        assert "is_authenticated" in data
+        assert "state" in data
+        assert data["is_authenticated"] == False
+        assert data["state"] == "signed_out"
+    
+    def test_auth_status_endpoint_with_verify(self, client):
+        """Test GET /auth/status?verify=true."""
+        response = client.get("/api/auth/status?verify=true")
+        assert response.status_code == 200
+        data = response.json()
+        assert "is_authenticated" in data
+        assert "state" in data
+    
+    def test_auth_logout_endpoint(self, client):
+        """Test POST /auth/logout returns success."""
+        response = client.post("/api/auth/logout")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["state"] == "signed_out"
+        assert data["is_authenticated"] == False
+    
+    def test_auth_cookies_endpoint_invalid_cookies(self, client):
+        """Test POST /auth/cookies with invalid cookies returns 401."""
+        response = client.post("/api/auth/cookies", json={
+            "cookies": [{"name": "SID", "value": "invalid"}]
+        })
+        assert response.status_code == 401
+        data = response.json()
+        assert "detail" in data
