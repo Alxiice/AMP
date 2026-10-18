@@ -1,8 +1,14 @@
-# AMP
+<div align="center">
+  <img src="./icon/logo-square.svg" width="200"/>
+  <h1 style="font-size: value;">
+    AMP <br/>
+  </h1>
+  <i>Another Music Player : a local music player based on Youtube Music library.
 
-Another Music Player — a local music player based on your YouTube Music library.
-
-**Status**: Phase 2 complete (Backend + YouTube Integration + Auth + Web Interface) | **Next**: Phase 3 (Core Playback)
+</i>
+  <br/>
+  <br/>
+</div>
 
 ---
 
