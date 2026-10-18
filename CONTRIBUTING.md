@@ -6,7 +6,7 @@
 |------|---------|---------|
 | Python | 3.11+ | Backend (FastAPI) |
 | Node.js | 20+ | Frontend (React + Vite) |
-| Rust | 1.70+ | Tauri desktop app (optional) |
+| Rust | 1.70+ | Tauri desktop app (build only) |
 | Git | any | Version control |
 
 ## Quick Start
@@ -81,9 +81,87 @@ npm run tauri:dev     # Development mode (hot reload)
 npm run tauri:build   # Production build (.exe in src-tauri/target/release/)
 ```
 
-### Option B: WSL2 (Linux build, run on Windows)
+### Option B: Cross-compile Windows .exe from WSL2 (no Windows dev tools needed)
 
-You can build the Tauri app inside WSL2, but there are important caveats:
+Build a Windows `.exe` inside WSL2 using the `mingw-w64` cross-compiler, then copy
+it to Windows and run it from PowerShell. **No Visual Studio, Rust, or Node.js needed on Windows.**
+
+#### Step 1: Install cross-compilation tools in WSL2
+
+```bash
+# Open a WSL2 terminal (Ubuntu/Debian)
+sudo apt update
+sudo apt install -y mingw-w64
+
+# Add the Windows GNU Rust target
+rustup target add x86_64-pc-windows-gnu
+```
+
+#### Step 2: Build the frontend
+
+```bash
+cd /mnt/e/Documents/TRAVAIL/packages/AMP/app
+npm install
+npm run build
+# Output goes to AMP/dist/ (configured in vite.config.ts)
+```
+
+#### Step 3: Build the Windows .exe
+
+A `.cargo/config.toml` is already configured in `app/src-tauri/` to use the mingw linker.
+
+```bash
+cd /mnt/e/Documents/TRAVAIL/packages/AMP/app/src-tauri
+cargo build --target x86_64-pc-windows-gnu --release
+```
+
+Or using the Tauri CLI (builds frontend + exe in one step):
+```bash
+cd /mnt/e/Documents/TRAVAIL/packages/AMP/app
+npm run tauri:build -- --target x86_64-pc-windows-gnu
+```
+
+#### Step 4: Copy the .exe to Windows and run it
+
+The exe is at:
+```
+app/src-tauri/target/x86_64-pc-windows-gnu/release/app.exe
+```
+
+Copy it to Windows (e.g., your Desktop) and launch from PowerShell:
+```powershell
+& "$env:USERPROFILE\Desktop\app.exe"
+```
+
+#### Step 5: Start the backend on Windows
+
+The exe runs natively on Windows, so it connects to `http://127.0.0.1:8000`.
+Start the backend in a separate PowerShell window:
+
+```powershell
+cd E:\Documents\TRAVAIL\packages\AMP
+.\venv\Scripts\activate.ps1
+python amp\backend\main.py
+```
+
+#### Requirements on the Windows machine
+
+- Windows 10/11 with **WebView2** runtime (pre-installed on Windows 11; [download here](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) for Windows 10)
+- No Visual Studio, no Rust, no Node.js needed on Windows
+
+#### Troubleshooting cross-compilation
+
+| Error | Solution |
+|-------|----------|
+| `linker x86_64-w64-mingw32-gcc not found` | `sudo apt install mingw-w64` |
+| `failed to run custom build command for tauri-winres` | Make sure `app/src-tauri/icons/32x32.png` exists |
+| Build succeeds but exe won't start | Install WebView2 runtime on Windows |
+| `gobject-2.0 not found` (building for Linux) | `sudo apt install libglib2.0-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev` |
+| `libappindicator3-dev` conflict on Ubuntu 24.04+ | Install only `libayatana-appindicator3-dev` |
+
+### Option C: Run Tauri in WSL2 (dev only, needs display)
+
+For development only — run the Tauri app inside WSL2 with a display.
 
 #### Networking: Backend on Windows, App in WSL2
 
@@ -106,13 +184,7 @@ cat /etc/resolv.conf | grep nameserver | awk '{print $2}'
 # Example output: 10.255.255.254
 ```
 
-Also make sure the backend binds to all interfaces (not just localhost):
-```bash
-# The backend already binds to 0.0.0.0 by default (config.py: HOST = "0.0.0.0")
-python amp/backend/main.py
-```
-
-#### WSL2 System Dependencies
+#### WSL2 System Dependencies (for Linux build)
 
 ```bash
 sudo apt update
@@ -131,39 +203,13 @@ sudo apt install -y libwebkit2gtk-4.1-dev \
     pkg-config
 ```
 
-> **Note:** On Ubuntu 24.04+, `libappindicator3-dev` conflicts with `libayatana-appindicator3-dev`.
-> Install only `libayatana-appindicator3-dev`.
-
-#### Building in WSL2
+#### Building in WSL2 (Linux binary)
 
 ```bash
-cd app
+cd /mnt/e/Documents/TRAVAIL/packages/AMP/app
 npm install
-npm run tauri:dev     # Dev mode (needs a display: use VcXsrv or WSLg)
-npm run tauri:build   # Production build
+npm run tauri:dev     # Dev mode (needs a display: use WSLg or VcXsrv)
 ```
-
-#### Running a WSL2-built .exe on Windows
-
-If you build the app in WSL2 and want to run it on Windows:
-
-```bash
-# In WSL2: cross-compile for Windows (requires mingw-w64)
-sudo apt install -y mingw-w64
-# Add the Windows target
-rustup target add x86_64-pc-windows-gnu
-
-# Build
-cd app/src-tauri
-cargo build --target x86_64-pc-windows-gnu --release
-
-# The .exe is at:
-# app/src-tauri/target/x86_64-pc-windows-gnu/release/app.exe
-# Copy it to Windows and run from PowerShell:
-#   & "E:\path\to\app.exe"
-```
-
-> **Simpler alternative:** Build natively on Windows (Option A) — no cross-compilation needed.
 
 #### WSL2 Display
 
@@ -199,12 +245,16 @@ AMP/
 │   │   ├── App.tsx         # Main UI
 │   │   └── useYouTubeAuth.ts # Auth hook + API client
 │   └── src-tauri/          # Tauri Rust backend
+│       ├── .cargo/
+│       │   └── config.toml # Cross-compilation linker config
 │       ├── src/
 │       │   ├── main.rs     # Tauri entry + command registration
 │       │   ├── youtube_login.rs # Sign-in window command
 │       │   └── wsl_detect.rs    # WSL2 host IP detection
 │       ├── capabilities/   # Tauri 2.x permissions
+│       ├── icons/          # App icons
 │       └── tauri.conf.json
+├── dist/                   # Frontend build output (Vite)
 ├── venv/                   # Python virtual environment
 ├── AGENTS.md               # AI agent instructions
 ├── ROADMAP.md              # 10-phase roadmap
@@ -239,11 +289,14 @@ Cookies are saved to `.amp/cache/ytm_session.json` with `0600` permissions.
 | `npm run tauri:dev` fails with "Missing script" | Run `npm install` in `app/` first |
 | Tauri build fails: "no targets specified" | `Cargo.toml` must be in `app/src-tauri/`, not `app/` |
 | Tauri 2.x: "Cannot read properties of undefined (reading 'invoke')" | Add `@tauri-apps/api` to `app/package.json` dependencies and create `capabilities/default.json` |
-| WSL2: "Backend unreachable" | Set API URL to Windows host IP (see above) |
+| WSL2: "Backend unreachable" | Set API URL to Windows host IP (see Option C above) |
 | WSL2: "Load failed" / blank window | Install WSLg or VcXsrv for display |
 | WSL2: `gobject-2.0 not found` | `sudo apt install libglib2.0-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev` |
 | `webbrowser.open()` fails on backend | The `/auth/open-signin` endpoint now returns the URL for manual opening |
 | Tests fail: SQLite QueuePool timeout | Pre-existing flaky test, re-run to confirm |
+| Exe shows blank screen / ERR_CONNECTION_REFUSED | `frontendDist` path was wrong — fixed to `../../dist` in tauri.conf.json |
+| Cross-compile: linker not found | `sudo apt install mingw-w64` in WSL2 |
+| Exe won't start on Windows | Install WebView2 runtime |
 
 ## Coding Guidelines
 
