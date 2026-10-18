@@ -28,6 +28,19 @@ jobs:
       - name: Install Ruff
         run: pip install ruff
 
+      - name: Count tests
+        id: count
+        run: |
+          cd amp
+          COUNT=$(python -m pytest backend/tests/ --collect-only -q 2>&1 | grep "collected" | awk '{print $2}')
+          echo "TEST_COUNT=$COUNT" >> $GITHUB_OUTPUT
+          echo "Count: $COUNT"
+
+      - name: Create test count JSON
+        run: |
+          mkdir -p .github/badges
+          echo '{"schemaVersion": 1, "label": "tests", "message": "${{ steps.count.outputs.TEST_COUNT }} passing", "color": "brightgreen"}' > .github/badges/test-count.json
+
       - name: Run Ruff linter
         run: ruff check amp/backend/
 
@@ -42,3 +55,12 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           file: amp/coverage.xml
           fail_ci_if_error: false
+
+      - name: Commit test count badge
+        if: github.ref == 'refs/heads/develop'
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add .github/badges/test-count.json
+          git commit -m "chore: update test count badge [skip ci]"
+          git push
