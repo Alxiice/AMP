@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import traceback
+import webbrowser
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
@@ -46,6 +47,11 @@ class BrowserBody(BaseModel):
     profile: Optional[str] = None
 
 
+class OpenSigninBody(BaseModel):
+    """Which browser to open for sign-in (web mode fallback)."""
+    browser: Optional[str] = None  # None = system default browser
+
+
 @router.get("/status")
 def status(verify: bool = False):
     """verify=true asks YouTube whether the saved session still works (call once at app start)."""
@@ -80,6 +86,44 @@ def import_browser(body: BrowserBody):
     except Exception as e:
         logger.error("Unexpected error in /auth/import-browser:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {e}")
+
+
+@router.post("/open-signin")
+def open_signin(body: OpenSigninBody):
+    """Opens a browser tab to YouTube Music sign-in (web mode fallback).
+
+    The user signs in with any Google account in the opened tab,
+    then returns to the app and clicks "I've signed in" to capture cookies
+    via /auth/import-browser.
+
+    In Tauri mode, prefer the sign-in window (invoke("youtube_login")) instead.
+    """
+    url = "https://music.youtube.com"
+    logger.info("Opening browser for sign-in: %s (browser=%s)", url, body.browser)
+    try:
+        if body.browser:
+            # Open with a specific browser
+            browser_cmd = {
+                "firefox": "firefox",
+                "chrome": "google-chrome",
+                "edge": "msedge",
+                "brave": "brave-browser",
+                "chromium": "chromium-browser",
+            }.get(body.browser.lower())
+            if browser_cmd:
+                webbrowser.get(browser_cmd).open(url)
+            else:
+                webbrowser.open(url)
+        else:
+            webbrowser.open(url)
+        return {
+            "opened": True,
+            "url": url,
+            "message": "Sign in to YouTube Music in the opened tab, then click 'I've signed in' to capture cookies.",
+        }
+    except Exception as e:
+        logger.error("Failed to open browser: %s", e)
+        raise HTTPException(status_code=500, detail=f"Could not open browser: {e}")
 
 
 @router.post("/logout")

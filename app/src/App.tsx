@@ -1,8 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useYouTubeAuth } from './useYouTubeAuth';
 
-const BACKEND_URL = 'http://localhost:8000';
-
 type Song = {
   id: string;
   title: string;
@@ -13,17 +11,29 @@ type Song = {
   year: number | null;
 };
 
+const BROWSERS = [
+  { id: 'firefox', label: 'Firefox' },
+  { id: 'chrome', label: 'Chrome' },
+  { id: 'edge', label: 'Edge' },
+  { id: 'brave', label: 'Brave' },
+] as const;
+
+type BrowserId = typeof BROWSERS[number]['id'];
+
 function App() {
   const {
-    status, busy, error: authError, login, logout, importFromBrowser,
+    status, busy, error: authError, login, completeBrowserSignin, importFromBrowser, logout,
     inTauri, logs, backendReachable,
     apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
+    awaitingBrowserSignin, setAwaitingBrowserSignin,
   } = useYouTubeAuth();
+
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [selectedBrowser, setSelectedBrowser] = useState<BrowserId>('firefox');
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -42,7 +52,7 @@ function App() {
     try {
       setLoading(true);
       setError(null);
-      const base = apiUrl || BACKEND_URL;
+      const base = apiUrl || 'http://localhost:8000';
       const response = await fetch(`${base}/api/user/likes`);
       if (response.status === 401) {
         setLikedSongs([]);
@@ -59,8 +69,16 @@ function App() {
     }
   };
 
-  const handleImportFirefox = () => {
-    importFromBrowser('firefox');
+  const handleConnect = () => {
+    login(inTauri ? undefined : selectedBrowser);
+  };
+
+  const handleCompleteSignin = () => {
+    completeBrowserSignin(selectedBrowser);
+  };
+
+  const handleQuickImport = () => {
+    importFromBrowser(selectedBrowser);
   };
 
   return (
@@ -72,9 +90,7 @@ function App() {
       <div style={{ fontSize: '0.8rem', marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         {backendReachable === null && <span style={{ color: '#888' }}>Checking backend...</span>}
         {backendReachable === true && <span style={{ color: '#4caf50' }}>Backend connected</span>}
-        {backendReachable === false && (
-          <span style={{ color: '#f44336' }}>Backend unreachable</span>
-        )}
+        {backendReachable === false && <span style={{ color: '#f44336' }}>Backend unreachable</span>}
         {' | '}
         <span style={{ color: '#888' }}>{inTauri ? 'Tauri' : 'Browser'}</span>
         {' | '}
@@ -118,9 +134,8 @@ function App() {
           </div>
           {inTauri && (
             <p style={{ color: '#888', fontSize: '0.75rem', marginTop: '0.5rem' }}>
-              Running in Tauri/WSL2? Use your Windows host IP, e.g.{' '}
-              <code style={{ color: '#61dafb' }}>http://172.x.x.x:8000</code>
-              {' '}(find it in WSL2 with: <code style={{ color: '#61dafb' }}>cat /etc/resolv.conf | grep nameserver</code>)
+              Tauri/WSL2? Use Windows host IP:{' '}
+              <code style={{ color: '#61dafb' }}>cat /etc/resolv.conf | grep nameserver</code>
             </p>
           )}
         </div>
@@ -153,41 +168,107 @@ function App() {
       {/* Main content */}
       {!status.is_authenticated ? (
         <div>
-          {inTauri && (
-            <button className="button" onClick={login} disabled={busy || loading}>
-              {busy ? 'Opening sign-in window...' : 'Connect YouTube Music'}
-            </button>
-          )}
+          {/* Browser selector */}
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ fontSize: '0.85rem', color: '#aaa', marginRight: '0.5rem' }}>
+              {inTauri ? 'Fallback browser:' : 'Sign in with:'}
+            </label>
+            <select
+              value={selectedBrowser}
+              onChange={(e) => setSelectedBrowser(e.target.value as BrowserId)}
+              disabled={busy}
+              style={{
+                padding: '0.3rem 0.5rem', borderRadius: '4px',
+                border: '1px solid #444', background: '#1a1a2e', color: '#fff',
+                fontSize: '0.85rem',
+              }}
+            >
+              {BROWSERS.map((b) => (
+                <option key={b.id} value={b.id}>{b.label}</option>
+              ))}
+            </select>
+          </div>
 
-          <button
-            className="button"
-            onClick={handleImportFirefox}
-            disabled={busy || loading}
-            style={{ marginLeft: inTauri ? '0.5rem' : 0 }}
-          >
-            {busy ? 'Importing...' : 'Import from Firefox'}
-          </button>
+          {/* Step 1: Connect */}
+          {!awaitingBrowserSignin ? (
+            <div>
+              <button
+                className="button"
+                onClick={handleConnect}
+                disabled={busy || loading}
+              >
+                {busy
+                  ? (inTauri ? 'Opening sign-in window...' : 'Opening browser...')
+                  : 'Connect YouTube Music'}
+              </button>
+              <p style={{ color: '#888', fontSize: '0.8rem', marginTop: '0.5rem' }}>
+                {inTauri
+                  ? 'Opens a sign-in window. Sign in with any Google account.'
+                  : 'Opens a browser tab to YouTube Music. Sign in with any Google account, then come back here.'}
+              </p>
 
-          {!inTauri && (
-            <p style={{ color: '#888', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-              Browser mode. Use "Import from Firefox" to connect.
-            </p>
+              {/* Quick import (secondary) */}
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #333' }}>
+                <p style={{ color: '#666', fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+                  Already signed in to YouTube Music in {BROWSERS.find(b => b.id === selectedBrowser)?.label}?
+                </p>
+                <button
+                  className="button"
+                  onClick={handleQuickImport}
+                  disabled={busy || loading}
+                  style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}
+                >
+                  {busy ? 'Importing...' : `Quick import from ${BROWSERS.find(b => b.id === selectedBrowser)?.label}`}
+                </button>
+              </div>
+            </div>
+          ) : (
+            /* Step 2: Awaiting sign-in in browser tab */
+            <div className="status" style={{ padding: '1rem' }}>
+              <h3>Sign in to YouTube Music</h3>
+              <p style={{ color: '#aaa', fontSize: '0.9rem' }}>
+                A browser tab has been opened to <strong>music.youtube.com</strong>.
+                Sign in with the Google account you want to use.
+              </p>
+              <p style={{ color: '#aaa', fontSize: '0.9rem' }}>
+                After signing in, come back here and click the button below.
+              </p>
+              <div style={{ marginTop: '1rem', display: 'flex', gap: '0.5rem' }}>
+                <button
+                  className="button"
+                  onClick={handleCompleteSignin}
+                  disabled={busy}
+                >
+                  {busy ? 'Capturing cookies...' : "I've signed in — capture cookies"}
+                </button>
+                <button
+                  onClick={() => setAwaitingBrowserSignin(false)}
+                  disabled={busy}
+                  style={{
+                    padding: '0.5rem 1rem', borderRadius: '4px',
+                    border: '1px solid #444', background: 'transparent',
+                    color: '#888', cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
+              <p style={{ color: '#666', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+                Make sure {BROWSERS.find(b => b.id === selectedBrowser)?.label} is fully closed before capturing
+                (yt-dlp reads the cookie database directly).
+              </p>
+            </div>
           )}
 
           {authError && status.state !== 'expired' && (
-            <p className="error">{authError}</p>
+            <p className="error" style={{ marginTop: '1rem' }}>{authError}</p>
           )}
 
           {status.state === 'expired' && (
             <div className="status" style={{ marginTop: '1rem' }}>
               <p style={{ color: '#ffc107' }}>Session expired. Please connect again.</p>
-              {inTauri && (
-                <button className="button" onClick={login} disabled={busy}>
-                  {busy ? 'Connecting...' : 'Connect YouTube Music'}
-                </button>
-              )}
-              <button className="button" onClick={handleImportFirefox} disabled={busy} style={{ marginLeft: inTauri ? '0.5rem' : 0 }}>
-                {busy ? 'Importing...' : 'Import from Firefox'}
+              <button className="button" onClick={handleConnect} disabled={busy}>
+                {busy ? 'Connecting...' : 'Connect YouTube Music'}
               </button>
             </div>
           )}
@@ -235,7 +316,7 @@ function App() {
         </div>
       )}
 
-      {!status.is_authenticated && !busy && !loading && (
+      {!status.is_authenticated && !busy && !loading && !awaitingBrowserSignin && (
         <div className="status">
           <h3>Not connected</h3>
           <p>Connect with YouTube Music to access your liked songs.</p>
