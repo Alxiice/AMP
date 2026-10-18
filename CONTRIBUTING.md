@@ -110,13 +110,20 @@ npm run build
 
 A `.cargo/config.toml` is already configured in `app/src-tauri/` to use the mingw linker.
 
+> **Important:** WSL2 cannot write build artifacts to `/mnt/e/` (Windows drive mount).
+> Redirect the target directory to the WSL2 filesystem with `CARGO_TARGET_DIR`.
+
 ```bash
+# Redirect build output to WSL2 native filesystem (avoids /mnt/e permission errors)
+export CARGO_TARGET_DIR=/tmp/amp-build
+
 cd /mnt/e/Documents/TRAVAIL/packages/AMP/app/src-tauri
 cargo build --target x86_64-pc-windows-gnu --release
 ```
 
 Or using the Tauri CLI (builds frontend + exe in one step):
 ```bash
+export CARGO_TARGET_DIR=/tmp/amp-build
 cd /mnt/e/Documents/TRAVAIL/packages/AMP/app
 npm run tauri:build -- --target x86_64-pc-windows-gnu
 ```
@@ -125,10 +132,16 @@ npm run tauri:build -- --target x86_64-pc-windows-gnu
 
 The exe is at:
 ```
-app/src-tauri/target/x86_64-pc-windows-gnu/release/app.exe
+/tmp/amp-build/x86_64-pc-windows-gnu/release/app.exe
 ```
 
-Copy it to Windows (e.g., your Desktop) and launch from PowerShell:
+Copy it to Windows (e.g., your Desktop):
+```bash
+# In WSL2:
+cp /tmp/amp-build/x86_64-pc-windows-gnu/release/app.exe /mnt/e/Users/Alice/Desktop/
+```
+
+Then launch from PowerShell:
 ```powershell
 & "$env:USERPROFILE\Desktop\app.exe"
 ```
@@ -154,10 +167,9 @@ python amp\backend\main.py
 | Error | Solution |
 |-------|----------|
 | `linker x86_64-w64-mingw32-gcc not found` | `sudo apt install mingw-w64` |
+| `Permission denied (os error 13)` on `/mnt/e/` | `export CARGO_TARGET_DIR=/tmp/amp-build` before building |
 | `failed to run custom build command for tauri-winres` | Make sure `app/src-tauri/icons/32x32.png` exists |
 | Build succeeds but exe won't start | Install WebView2 runtime on Windows |
-| `gobject-2.0 not found` (building for Linux) | `sudo apt install libglib2.0-dev libgtk-3-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev` |
-| `libappindicator3-dev` conflict on Ubuntu 24.04+ | Install only `libayatana-appindicator3-dev` |
 
 ### Option C: Run Tauri in WSL2 (dev only, needs display)
 
@@ -295,7 +307,8 @@ Cookies are saved to `.amp/cache/ytm_session.json` with `0600` permissions.
 | `webbrowser.open()` fails on backend | The `/auth/open-signin` endpoint now returns the URL for manual opening |
 | Tests fail: SQLite QueuePool timeout | Pre-existing flaky test, re-run to confirm |
 | Exe shows blank screen / ERR_CONNECTION_REFUSED | `frontendDist` path was wrong — fixed to `../../dist` in tauri.conf.json |
-| Cross-compile: linker not found | `sudo apt install mingw-w64` in WSL2 |
+| Cross-compile: linker not found | `sudo apt install mingw-w64` |
+| Cross-compile: "Permission denied" on /mnt/e | `export CARGO_TARGET_DIR=/tmp/amp-build` before building |
 | Exe won't start on Windows | Install WebView2 runtime |
 
 ## Coding Guidelines
