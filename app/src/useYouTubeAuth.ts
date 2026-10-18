@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { invoke } from "@tauri-apps/api/core";
 
@@ -25,7 +25,6 @@ export interface DebugLog {
 
 const SIGNED_OUT: AuthStatus = { state: "signed_out", is_authenticated: false, account: null };
 
-/** True when running inside a Tauri webview. */
 function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -34,11 +33,7 @@ function timestamp(): string {
   return new Date().toLocaleTimeString();
 }
 
-// Candidate API base URLs, tried in order. First one that responds wins.
-// 1. User-configured (localStorage)
-// 2. Vite env var
-// 3. Same-host loopback (works when backend runs on same machine)
-// 4. Common WSL2 gateway IPs (Windows host from WSL2)
+// Candidate API base URLs, tried in order.
 const DEFAULT_CANDIDATES = [
   "http://127.0.0.1:8000",
   "http://localhost:8000",
@@ -55,39 +50,44 @@ function getCandidates(): string[] {
 }
 
 let resolvedApiBase: string | null = null;
+let probing: Promise<string> | null = null;
 
 async function findApiBase(addLog: (log: DebugLog) => void): Promise<string> {
   if (resolvedApiBase) return resolvedApiBase;
+  if (probing) return probing;
 
-  const candidates = getCandidates();
-  addLog({ time: timestamp(), type: "info", message: `Probing ${candidates.length} API URLs...` });
+  probing = (async () => {
+    const candidates = getCandidates();
+    addLog({ time: timestamp(), type: "info", message: `Probing ${candidates.length} API URL(s)...` });
 
-  for (const base of candidates) {
-    try {
-      const res = await fetch(`${base}/api/health`, {
-        method: "GET",
-        signal: AbortSignal.timeout(3000),
-      });
-      if (res.ok) {
-        resolvedApiBase = base;
-        localStorage.setItem("amp_api_url", base);
-        addLog({ time: timestamp(), type: "info", message: `API found at ${base}` });
-        return base;
+    for (const base of candidates) {
+      try {
+        const res = await fetch(`${base}/api/health`, {
+          method: "GET",
+          signal: AbortSignal.timeout(3000),
+        });
+        if (res.ok) {
+          resolvedApiBase = base;
+          localStorage.setItem("amp_api_url", base);
+          addLog({ time: timestamp(), type: "info", message: `API found at ${base}` });
+          return base;
+        }
+      } catch {
+        addLog({ time: timestamp(), type: "warn", message: `Not reachable: ${base}` });
       }
-    } catch {
-      addLog({ time: timestamp(), type: "warn", message: `API not reachable at ${base}` });
     }
-  }
 
-  // None worked — use the first candidate and let requests fail with details
-  resolvedApiBase = candidates[0];
-  addLog({
-    time: timestamp(),
-    type: "error",
-    message: `No API found. Tried: ${candidates.join(", ")}`,
-    detail: "If running Tauri in WSL2 with backend on Windows, set the API URL manually.\nEdit localStorage 'amp_api_url' or set VITE_API_URL env var.",
-  });
-  return resolvedApiBase;
+    resolvedApiBase = candidates[0];
+    addLog({
+      time: timestamp(),
+      type: "error",
+      message: `No API found. Tried: ${candidates.join(", ")}`,
+      detail: "Set the API URL in Settings (gear icon) to your Windows host IP.",
+    });
+    return resolvedApiBase;
+  })();
+
+  return probing;
 }
 
 async function api<T>(
@@ -103,7 +103,7 @@ async function api<T>(
     time: timestamp(),
     type: "request",
     message: `${method} ${url}`,
-    detail: init?.body ? String(init.body) : undefined,
+    detail: init?.body ? String(init.body).slice(0, 200) : undefined,
   });
 
   let res: Response;
@@ -118,26 +118,26 @@ async function api<T>(
       time: timestamp(),
       type: "error",
       message: `Network error: ${method} ${url}`,
-      detail: `${msg}\n\nIf running Tauri in WSL2 with backend on Windows, set the API URL to your Windows host IP.`,
+      detail: msg,
     });
-    throw new Error(`Cannot reach backend at ${base} — ${msg}`);
+    throw new Error(`Cannot reach backend at ${base}`);
   }
 
   const bodyText = await res.text();
   addLog?.({
     time: timestamp(),
     type: "response",
-    message: `${res.status} ${method} ${url}`,
-    detail: bodyText.slice(0, 500),
+    message: `${res.status} ${method} ${path}`,
+    detail: bodyText.slice(0, 300),
   });
 
   if (!res.ok) {
     let detail: string;
     try {
       const body = JSON.parse(bodyText);
-      detail = body.detail ?? bodyText.slice(0, 500);
+      detail = body.detail ?? bodyText.slice(0, 300);
     } catch {
-      detail = bodyText.slice(0, 500) || `HTTP ${res.status}`;
+      detail = bodyText.slice(0, 300) || `HTTP ${res.status}`;
     }
     throw new Error(detail);
   }
@@ -149,63 +149,72 @@ export function useYouTubeAuth() {
   const [status, setStatus] = useState<AuthStatus>(SIGNED_OUT);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inTauri, setInTauri] = useState(isTauri);
+  const [inTauri] = useState(isTauri);
   const [logs, setLogs] = useState<DebugLog[]>([]);
   const [backendReachable, setBackendReachable] = useState<boolean | null>(null);
-  const [apiUrl, setApiUrl] = useState<string>("");
-  const [apiUrlInput, setApiUrlInput] = useState<string>("");
+  const [apiUrl, setApiUrl] = useState<string>(resolvedApiBase ?? "");
+  const [apiUrlInput, setApiUrlInput] = useState<string>(resolvedApiBase ?? "");
+  const initialized = useRef(false);
 
   const addLog = useCallback((log: DebugLog) => {
     setLogs((prev) => [...prev.slice(-99), log]);
   }, []);
 
-  // On app start: find the API, then check auth status
+  const checkAuth = useCallback(async () => {
+    try {
+      const s = await api<AuthStatus>("/auth/status?verify=true", undefined, addLog);
+      setStatus(s);
+      setBackendReachable(true);
+    } catch (e) {
+      setStatus(SIGNED_OUT);
+      setBackendReachable(resolvedApiBase !== null);
+      addLog({
+        time: timestamp(),
+        type: "warn",
+        message: `Auth check failed: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+  }, [addLog]);
+
+  // Initialize once (StrictMode double-invokes effects in dev)
   useEffect(() => {
-    addLog({ time: timestamp(), type: "info", message: `App started. Tauri: ${isTauri()}` });
+    if (initialized.current) return;
+    initialized.current = true;
+
+    addLog({ time: timestamp(), type: "info", message: `App started (${isTauri() ? "Tauri" : "Browser"})` });
 
     findApiBase(addLog).then((base) => {
       setApiUrl(base);
       setApiUrlInput(base);
-
-      api<AuthStatus>("/auth/status?verify=true", undefined, addLog)
-        .then((s) => {
-          setStatus(s);
-          setBackendReachable(true);
-          addLog({ time: timestamp(), type: "info", message: `Auth status: ${s.state}` });
-        })
-        .catch((e) => {
-          setStatus(SIGNED_OUT);
-          setBackendReachable(true); // API is reachable, auth just failed
-          addLog({ time: timestamp(), type: "error", message: `Auth status check failed: ${e.message}` });
-        });
+      checkAuth();
     });
-  }, [addLog]);
+  }, [addLog, checkAuth]);
 
   const setApiUrlManually = useCallback(
     (url: string) => {
       const cleaned = url.replace(/\/$/, "").replace(/\/api$/, "");
       resolvedApiBase = cleaned;
+      probing = null;
       localStorage.setItem("amp_api_url", cleaned);
       setApiUrl(cleaned);
       setApiUrlInput(cleaned);
       addLog({ time: timestamp(), type: "info", message: `API URL set to ${cleaned}` });
 
-      // Re-check auth with new URL
-      api<AuthStatus>("/auth/status?verify=true", undefined, addLog)
-        .then((s) => {
-          setStatus(s);
-          setBackendReachable(true);
+      // Verify and re-check auth
+      fetch(`${cleaned}/api/health`, { signal: AbortSignal.timeout(3000) })
+        .then((res) => {
+          setBackendReachable(res.ok);
+          if (res.ok) checkAuth();
         })
         .catch(() => setBackendReachable(false));
     },
-    [addLog],
+    [addLog, checkAuth],
   );
 
   const run = useCallback(
     async (fn: () => Promise<AuthStatus>) => {
       setBusy(true);
       setError(null);
-
       try {
         const result = await fn();
         setStatus(result);
@@ -226,10 +235,8 @@ export function useYouTubeAuth() {
   const login = useCallback(
     () =>
       run(async () => {
-        if (!isTauri()) {
-          throw new Error("Sign-in window requires the Tauri desktop app.");
-        }
-        addLog({ time: timestamp(), type: "info", message: "Opening Tauri sign-in window..." });
+        if (!isTauri()) throw new Error("Sign-in window requires the Tauri desktop app.");
+        addLog({ time: timestamp(), type: "info", message: "Opening sign-in window..." });
         const cookies = await invoke<TauriCookie[]>("youtube_login");
         addLog({ time: timestamp(), type: "info", message: `Received ${cookies.length} cookies` });
         return api<AuthStatus>("/auth/cookies", { method: "POST", body: JSON.stringify({ cookies }) }, addLog);
