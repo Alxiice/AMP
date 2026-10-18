@@ -292,6 +292,21 @@ export function useYouTubeAuth() {
     [run, addLog],
   );
 
+  /**
+   * Web mode fallback: user manually pastes the Cookie header from browser Dev Tools.
+   * Works with any browser (Edge, Chrome, etc.) since it doesn't rely on yt-dlp.
+   */
+  const pasteCookies = useCallback(
+    (cookieHeader: string) =>
+      run(() =>
+        api<AuthStatus>("/auth/cookie-header", {
+          method: "POST",
+          body: JSON.stringify({ cookie_header: cookieHeader }),
+        }, addLog),
+      ),
+    [run, addLog],
+  );
+
   /** Quick shortcut: import cookies from an already-signed-in browser. */
   const importFromBrowser = useCallback(
     (browser: "firefox" | "chrome" | "edge" | "brave" | "safari") =>
@@ -312,5 +327,6 @@ export function useYouTubeAuth() {
     apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
     awaitingBrowserSignin, setAwaitingBrowserSignin,
     signinUrl, setSigninUrl,
+    pasteCookies,
   };
 }

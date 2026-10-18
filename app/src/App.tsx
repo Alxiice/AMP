@@ -26,7 +26,7 @@ function App() {
     inTauri, logs, backendReachable,
     apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
     awaitingBrowserSignin, setAwaitingBrowserSignin,
-    signinUrl, setSigninUrl,
+    signinUrl, setSigninUrl, pasteCookies,
   } = useYouTubeAuth();
 
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
@@ -35,6 +35,8 @@ function App() {
   const [showLogs, setShowLogs] = useState<boolean>(false);
   const [showSettings, setShowSettings] = useState<boolean>(false);
   const [selectedBrowser, setSelectedBrowser] = useState<BrowserId>('firefox');
+  const [cookiePaste, setCookiePaste] = useState('');
+  const [showCookiePaste, setShowCookiePaste] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -267,6 +269,44 @@ function App() {
                 Make sure {BROWSERS.find(b => b.id === selectedBrowser)?.label} is fully closed before capturing
                 (yt-dlp reads the cookie database directly).
               </p>
+              
+              {/* Manual cookie paste fallback (works with any browser) */}
+              <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid #333' }}>
+                <button
+                  onClick={() => setShowCookiePaste(!showCookiePaste)}
+                  style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem', padding: 0 }}
+                >
+                  {showCookiePaste ? 'Hide' : "Can't capture cookies? Paste them manually"}
+                </button>
+                {showCookiePaste && (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <p style={{ color: '#888', fontSize: '0.75rem', marginBottom: '0.5rem' }}>
+                      In the browser tab where you signed in to YouTube Music, open Dev Tools (F12)
+                      then Network, click any request to music.youtube.com, Request Headers, copy the
+                      <code style={{ color: '#61dafb' }}> Cookie </code> value. Paste it below:
+                    </p>
+                    <textarea
+                      value={cookiePaste}
+                      onChange={(e) => setCookiePaste(e.target.value)}
+                      placeholder="__Secure-3PAPISID=...; __Secure-3PSID=...; ..."
+                      rows={4}
+                      style={{
+                        width: '100%', padding: '0.4rem', borderRadius: '4px',
+                        border: '1px solid #444', background: '#0d0d1a', color: '#fff',
+                        fontFamily: 'monospace', fontSize: '0.7rem', resize: 'vertical',
+                      }}
+                    />
+                    <button
+                      className="button"
+                      onClick={() => { pasteCookies(cookiePaste); setCookiePaste(''); }}
+                      disabled={busy || !cookiePaste.trim()}
+                      style={{ marginTop: '0.5rem', fontSize: '0.85rem', padding: '0.4rem 0.8rem' }}
+                    >
+                      {busy ? 'Connecting...' : 'Connect with pasted cookies'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

@@ -52,6 +52,12 @@ class OpenSigninBody(BaseModel):
     browser: Optional[str] = None  # None = system default browser
 
 
+class CookieHeaderBody(BaseModel):
+    """Raw Cookie header string (copied from browser Dev Tools > Network > Request Headers)."""
+    cookie_header: str
+    authuser: Optional[str] = "0"
+
+
 @router.get("/status")
 def status(verify: bool = False):
     """verify=true asks YouTube whether the saved session still works (call once at app start)."""
@@ -69,6 +75,40 @@ def connect_cookies(body: CookiesBody):
         raise HTTPException(status_code=401, detail=str(e))
     except Exception as e:
         logger.error("Unexpected error in /auth/cookies:\n%s", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Internal error: {e}")
+
+
+@router.post("/cookie-header")
+def connect_cookie_header(body: CookieHeaderBody):
+    """Accepts a raw Cookie header string (from browser Dev Tools) and connects.
+
+    Works with any browser. The user copies the Cookie header from
+    Dev Tools > Network > any request to music.youtube.com > Request Headers > Cookie.
+    """
+    raw = body.cookie_header.strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="Empty cookie header")
+
+    # Parse "name1=value1; name2=value2; ..." into cookie dicts
+    cookies = []
+    for part in raw.split(";"):
+        part = part.strip()
+        if not part or "=" not in part:
+            continue
+        name, _, value = part.partition("=")
+        cookies.append({"name": name.strip(), "value": value.strip(), "domain": ".youtube.com"})
+
+    if not cookies:
+        raise HTTPException(status_code=400, detail="Could not parse any cookies from the header")
+
+    logger.info("Cookie header auth: parsed %d cookies", len(cookies))
+    try:
+        return get_auth_service().connect_with_cookies(cookies, authuser=body.authuser or "0")
+    except AuthError as e:
+        logger.warning("Cookie header auth failed: %s", e)
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        logger.error("Unexpected error in /auth/cookie-header:\n%s", traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Internal error: {e}")
 
 
