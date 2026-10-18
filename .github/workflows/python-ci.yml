@@ -8,20 +8,16 @@ on:
 
 jobs:
   test:
-    name: Test and Lint (Python ${{ matrix.python-version }})
+    name: Test and Lint
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11"]
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: "3.11"
 
       - name: Install dependencies
         run: |
@@ -38,55 +34,11 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd amp
-          python -m pytest backend/tests/ --cov=backend --cov-report=xml --cov-report=term -v
-
-      - name: Upload coverage report
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: coverage-report-python-${{ matrix.python-version }}
-          path: amp/coverage.xml
-
-      - name: Display coverage summary
-        run: |
-          echo "### Coverage Summary" >> $GITHUB_STEP_SUMMARY
-          cd amp
-          python -m pytest backend/tests/ --cov=backend --cov-report=term >> $GITHUB_STEP_SUMMARY
-
-  lint:
-    name: Full Lint Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install Ruff
-        run: pip install ruff
-
-      - name: Run Ruff linter with fixes
-        run: |
-          ruff check amp/backend/ --diff
-          ruff check amp/backend/ --fix --diff
-
-  coverage:
-    name: Coverage Upload
-    needs: test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download coverage artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: coverage-artifacts
-          pattern: coverage-report-*
+          python -m pytest backend/tests/ --cov=backend --cov-report=xml -v
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage-artifacts/**/coverage.xml
+          file: amp/coverage.xml
           fail_ci_if_error: false
