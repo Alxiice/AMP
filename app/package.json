@@ -11,7 +11,8 @@
     "serve:prod": "node dev-server.cjs",
     "dev:full": "concurrently \"npm run dev\" \"cd .. && python amp/backend/main.py\"",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "build:exe": "bash scripts/build-windows-exe.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

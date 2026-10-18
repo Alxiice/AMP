@@ -66,7 +66,7 @@ Optional:
 | Streaming Service | `services/streaming.py` | ✅ yt-dlp, chunk caching (25 tests) |
 | Auth Routes | `api/auth_routes.py` | status, cookies, cookie-header, import-browser, open-signin, logout |
 | WSL2 Detection | `app/src-tauri/src/wsl_detect.rs` | Auto-detect Windows host IP |
-| Build Script | `scripts/build-windows-exe.sh` | Clean Windows .exe from WSL2 |
+| Build Script | `app/scripts/build-windows-exe.sh` | Clean Windows .exe from WSL2 |
 | Auth Tests | `tests/test_ytm_auth.py` | ✅ 11 tests |
 | Web Interface | `app/src/` | ✅ React + Vite (port 1420) |
 | Auth Hook | `app/src/useYouTubeAuth.ts` | ✅ React auth state |
@@ -133,7 +133,7 @@ curl -X POST http://localhost:8000/api/auth/import-browser \
   -H "Content-Type: application/json" -d '{"browser": "firefox"}'
 
 # Build Windows .exe from WSL2
-bash scripts/build-windows-exe.sh    # Output: build/windows/AMP.exe
+bash app/scripts/build-windows-exe.sh    # Output: build/windows/AMP.exe
 ```
 
 ---
@@ -161,8 +161,8 @@ AMP/
 │   │   ├── App.tsx            # Main component
 │   │   └── useYouTubeAuth.ts  # Auth hook
 │   └── src-tauri/             # Tauri desktop (structure ready)
-├── scripts/
-│   └── build-windows-exe.sh   # WSL2 cross-compilation script
+├── app/scripts/
+│   └── build-windows-exe.sh   # WSL2 cross-compilation script (npm run build:exe)
 ├── build/windows/             # Clean release output (AMP.exe + WebView2Loader.dll)
 ├── dist/                      # Frontend build output (Vite)
 └── venv/                      # Python virtual environment

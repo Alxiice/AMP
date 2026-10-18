@@ -14,11 +14,10 @@
 
 set -euo pipefail
 
-# Resolve project root (script is in scripts/, project root is one level up)
+# Resolve paths (script is in app/scripts/, project root is two levels up)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-APP_DIR="$PROJECT_ROOT/app"
+APP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_ROOT="$(cd "$APP_DIR/.." && pwd)"
 SRC_TAURI="$APP_DIR/src-tauri"
 DIST_DIR="$PROJECT_ROOT/dist"
 TARGET_TRIPLE="x86_64-pc-windows-gnu"
