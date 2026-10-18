@@ -10,7 +10,9 @@
   <br/>
   <div>
     <img src="https://github.com/Alxiice/AMP/actions/workflows/python-ci.yml/badge.svg" alt="Python CI" />
+    <img src="https://img.shields.io/badge/tests-92%2F92-brightgreen" alt="Tests" />
     <img src="https://img.shields.io/codecov/c/github/Alxiice/AMP/develop?logo=codecov" alt="Code Coverage" />
+    <img src="https://github.com/Alxiice/AMP/actions/workflows/tauri-build.yml/badge.svg" alt="Tauri Build" />
   </div>
 </div>
 
