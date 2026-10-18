@@ -14,19 +14,22 @@ type Song = {
 };
 
 function App() {
-  const { status, busy, error: authError, login, logout, importFromBrowser, inTauri, logs, backendReachable } = useYouTubeAuth();
+  const {
+    status, busy, error: authError, login, logout, importFromBrowser,
+    inTauri, logs, backendReachable,
+    apiUrl, apiUrlInput, setApiUrlInput, setApiUrlManually,
+  } = useYouTubeAuth();
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [showLogs, setShowLogs] = useState<boolean>(false);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll logs to bottom
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
 
-  // Load liked songs when authenticated
   useEffect(() => {
     if (status.is_authenticated) {
       loadLikedSongs();
@@ -39,18 +42,13 @@ function App() {
     try {
       setLoading(true);
       setError(null);
-
-      const response = await fetch(`${BACKEND_URL}/api/user/likes`);
-
+      const base = apiUrl || BACKEND_URL;
+      const response = await fetch(`${base}/api/user/likes`);
       if (response.status === 401) {
         setLikedSongs([]);
         return;
       }
-
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const songs = await response.json();
       setLikedSongs(songs);
     } catch (err) {
@@ -70,43 +68,75 @@ function App() {
       <h1>AMP</h1>
       <p className="powered-by">Powered by YouTube Music</p>
 
-      {/* Backend status indicator */}
-      <div style={{ fontSize: '0.8rem', marginBottom: '1rem' }}>
+      {/* Status bar */}
+      <div style={{ fontSize: '0.8rem', marginBottom: '1rem', display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
         {backendReachable === null && <span style={{ color: '#888' }}>Checking backend...</span>}
         {backendReachable === true && <span style={{ color: '#4caf50' }}>Backend connected</span>}
         {backendReachable === false && (
-          <span style={{ color: '#f44336' }}>
-            Backend unreachable — start it with: python amp/backend/main.py
-          </span>
+          <span style={{ color: '#f44336' }}>Backend unreachable</span>
         )}
         {' | '}
-        <span style={{ color: '#888' }}>{inTauri ? 'Tauri app' : 'Browser mode'}</span>
+        <span style={{ color: '#888' }}>{inTauri ? 'Tauri' : 'Browser'}</span>
         {' | '}
-        <button
-          onClick={() => setShowLogs(!showLogs)}
-          style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}
-        >
+        <button onClick={() => setShowLogs(!showLogs)} style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}>
           {showLogs ? 'Hide logs' : 'Show logs'} ({logs.length})
         </button>
+        {' | '}
+        <button onClick={() => setShowSettings(!showSettings)} style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}>
+          {showSettings ? 'Hide settings' : 'Settings'}
+        </button>
       </div>
+
+      {/* Settings panel */}
+      {showSettings && (
+        <div style={{
+          background: '#1a1a2e', border: '1px solid #333', borderRadius: '4px',
+          padding: '0.75rem', marginBottom: '1rem',
+        }}>
+          <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.85rem', color: '#aaa' }}>
+            API URL (backend address):
+          </label>
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <input
+              type="text"
+              value={apiUrlInput}
+              onChange={(e) => setApiUrlInput(e.target.value)}
+              placeholder="http://127.0.0.1:8000"
+              style={{
+                flex: 1, padding: '0.4rem', borderRadius: '4px',
+                border: '1px solid #444', background: '#0d0d1a', color: '#fff',
+                fontFamily: 'monospace', fontSize: '0.85rem',
+              }}
+            />
+            <button
+              className="button"
+              onClick={() => setApiUrlManually(apiUrlInput)}
+              style={{ padding: '0.4rem 0.8rem', fontSize: '0.85rem' }}
+            >
+              Save
+            </button>
+          </div>
+          {inTauri && (
+            <p style={{ color: '#888', fontSize: '0.75rem', marginTop: '0.5rem' }}>
+              Running in Tauri/WSL2? Use your Windows host IP, e.g.{' '}
+              <code style={{ color: '#61dafb' }}>http://172.x.x.x:8000</code>
+              {' '}(find it in WSL2 with: <code style={{ color: '#61dafb' }}>cat /etc/resolv.conf | grep nameserver</code>)
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Debug log panel */}
       {showLogs && (
         <div style={{
-          background: '#1a1a2e',
-          border: '1px solid #333',
-          borderRadius: '4px',
-          padding: '0.5rem',
-          marginBottom: '1rem',
-          maxHeight: '200px',
-          overflowY: 'auto',
-          fontFamily: 'monospace',
-          fontSize: '0.75rem',
+          background: '#1a1a2e', border: '1px solid #333', borderRadius: '4px',
+          padding: '0.5rem', marginBottom: '1rem', maxHeight: '200px', overflowY: 'auto',
+          fontFamily: 'monospace', fontSize: '0.75rem',
         }}>
           {logs.length === 0 && <div style={{ color: '#666' }}>No logs yet</div>}
           {logs.map((log, i) => (
             <div key={i} style={{
-              color: log.type === 'error' ? '#f44336' : log.type === 'request' ? '#61dafb' : log.type === 'response' ? '#4caf50' : '#aaa',
+              color: log.type === 'error' ? '#f44336' : log.type === 'request' ? '#61dafb' : log.type === 'response' ? '#4caf50' : log.type === 'warn' ? '#ffc107' : '#aaa',
               marginBottom: '2px',
             }}>
               <span style={{ color: '#666' }}>[{log.time}]</span>{' '}
@@ -120,14 +150,11 @@ function App() {
         </div>
       )}
 
+      {/* Main content */}
       {!status.is_authenticated ? (
         <div>
           {inTauri && (
-            <button
-              className="button"
-              onClick={login}
-              disabled={busy || loading}
-            >
+            <button className="button" onClick={login} disabled={busy || loading}>
               {busy ? 'Opening sign-in window...' : 'Connect YouTube Music'}
             </button>
           )}
@@ -143,8 +170,7 @@ function App() {
 
           {!inTauri && (
             <p style={{ color: '#888', fontSize: '0.85rem', marginTop: '0.5rem' }}>
-              Running in browser mode. Use "Import from Firefox" to connect,
-              or run the Tauri desktop app for one-click sign-in.
+              Browser mode. Use "Import from Firefox" to connect.
             </p>
           )}
 
@@ -154,18 +180,13 @@ function App() {
 
           {status.state === 'expired' && (
             <div className="status" style={{ marginTop: '1rem' }}>
-              <p style={{ color: '#ffc107' }}>Your session has expired. Please connect again.</p>
+              <p style={{ color: '#ffc107' }}>Session expired. Please connect again.</p>
               {inTauri && (
                 <button className="button" onClick={login} disabled={busy}>
                   {busy ? 'Connecting...' : 'Connect YouTube Music'}
                 </button>
               )}
-              <button
-                className="button"
-                onClick={handleImportFirefox}
-                disabled={busy}
-                style={{ marginLeft: inTauri ? '0.5rem' : 0 }}
-              >
+              <button className="button" onClick={handleImportFirefox} disabled={busy} style={{ marginLeft: inTauri ? '0.5rem' : 0 }}>
                 {busy ? 'Importing...' : 'Import from Firefox'}
               </button>
             </div>
@@ -180,7 +201,6 @@ function App() {
           {status.account && (
             <div className="status">
               <h3>Connected as {status.account.accountName}</h3>
-              <p>You can now access your YouTube Music library.</p>
             </div>
           )}
 
@@ -196,9 +216,7 @@ function App() {
                     <img
                       src={song.thumbnail_url}
                       alt={song.title}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
+                      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   )}
                   <div className="song-info">
@@ -216,8 +234,6 @@ function App() {
           )}
         </div>
       )}
-
-      {error && <p className="error">{error}</p>}
 
       {!status.is_authenticated && !busy && !loading && (
         <div className="status">
