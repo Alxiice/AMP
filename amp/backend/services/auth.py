@@ -113,10 +113,13 @@ def cookies_from_browser(browser: str, profile: Optional[str] = None) -> Dict[st
         from yt_dlp.cookies import extract_cookies_from_browser
 
         jar = extract_cookies_from_browser(browser, profile)
+        logger.info("yt-dlp returned %d cookies from %s", len(jar), browser)
     except Exception as e:  # yt-dlp raises many different errors
+        logger.error("yt-dlp cookie extraction failed for %s: %s", browser, e)
         raise AuthError(f"Could not read cookies from {browser}: {e}") from e
 
     cookies = {c.name: c.value for c in jar if c.domain.lstrip(".").endswith("youtube.com") and c.value}
+    logger.info("Found %d YouTube cookies in %s", len(cookies), browser)
     if not cookies:
         raise AuthError(f"No YouTube cookies found in {browser}. Sign in to music.youtube.com there first.")
     return cookies

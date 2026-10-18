@@ -1,10 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useYouTubeAuth } from './useYouTubeAuth';
 
-// Backend API base URL
 const BACKEND_URL = 'http://localhost:8000';
 
-// Types for our data
 type Song = {
   id: string;
   title: string;
@@ -16,10 +14,17 @@ type Song = {
 };
 
 function App() {
-  const { status, busy, error: authError, login, logout, importFromBrowser, inTauri } = useYouTubeAuth();
+  const { status, busy, error: authError, login, logout, importFromBrowser, inTauri, logs, backendReachable } = useYouTubeAuth();
   const [likedSongs, setLikedSongs] = useState<Song[]>([]);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLogs, setShowLogs] = useState<boolean>(false);
+  const logsEndRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll logs to bottom
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
 
   // Load liked songs when authenticated
   useEffect(() => {
@@ -65,9 +70,58 @@ function App() {
       <h1>AMP</h1>
       <p className="powered-by">Powered by YouTube Music</p>
 
+      {/* Backend status indicator */}
+      <div style={{ fontSize: '0.8rem', marginBottom: '1rem' }}>
+        {backendReachable === null && <span style={{ color: '#888' }}>Checking backend...</span>}
+        {backendReachable === true && <span style={{ color: '#4caf50' }}>Backend connected</span>}
+        {backendReachable === false && (
+          <span style={{ color: '#f44336' }}>
+            Backend unreachable — start it with: python amp/backend/main.py
+          </span>
+        )}
+        {' | '}
+        <span style={{ color: '#888' }}>{inTauri ? 'Tauri app' : 'Browser mode'}</span>
+        {' | '}
+        <button
+          onClick={() => setShowLogs(!showLogs)}
+          style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}
+        >
+          {showLogs ? 'Hide logs' : 'Show logs'} ({logs.length})
+        </button>
+      </div>
+
+      {/* Debug log panel */}
+      {showLogs && (
+        <div style={{
+          background: '#1a1a2e',
+          border: '1px solid #333',
+          borderRadius: '4px',
+          padding: '0.5rem',
+          marginBottom: '1rem',
+          maxHeight: '200px',
+          overflowY: 'auto',
+          fontFamily: 'monospace',
+          fontSize: '0.75rem',
+        }}>
+          {logs.length === 0 && <div style={{ color: '#666' }}>No logs yet</div>}
+          {logs.map((log, i) => (
+            <div key={i} style={{
+              color: log.type === 'error' ? '#f44336' : log.type === 'request' ? '#61dafb' : log.type === 'response' ? '#4caf50' : '#aaa',
+              marginBottom: '2px',
+            }}>
+              <span style={{ color: '#666' }}>[{log.time}]</span>{' '}
+              {log.message}
+              {log.detail && (
+                <div style={{ color: '#888', paddingLeft: '1rem', whiteSpace: 'pre-wrap' }}>{log.detail}</div>
+              )}
+            </div>
+          ))}
+          <div ref={logsEndRef} />
+        </div>
+      )}
+
       {!status.is_authenticated ? (
         <div>
-          {/* Primary: Tauri sign-in window (only in desktop app) */}
           {inTauri && (
             <button
               className="button"
@@ -78,7 +132,6 @@ function App() {
             </button>
           )}
 
-          {/* Fallback: Browser import (works in web browser and Tauri) */}
           <button
             className="button"
             onClick={handleImportFirefox}
@@ -103,11 +156,7 @@ function App() {
             <div className="status" style={{ marginTop: '1rem' }}>
               <p style={{ color: '#ffc107' }}>Your session has expired. Please connect again.</p>
               {inTauri && (
-                <button
-                  className="button"
-                  onClick={login}
-                  disabled={busy}
-                >
+                <button className="button" onClick={login} disabled={busy}>
                   {busy ? 'Connecting...' : 'Connect YouTube Music'}
                 </button>
               )}
@@ -124,11 +173,7 @@ function App() {
         </div>
       ) : (
         <div>
-          <button
-            className="button"
-            onClick={logout}
-            disabled={loading}
-          >
+          <button className="button" onClick={logout} disabled={loading}>
             {loading ? 'Logging out...' : 'Logout'}
           </button>
 
@@ -139,13 +184,8 @@ function App() {
             </div>
           )}
 
-          {loading && (
-            <p className="loading">Loading your liked songs...</p>
-          )}
-
-          {error && (
-            <p className="error">{error}</p>
-          )}
+          {loading && <p className="loading">Loading your liked songs...</p>}
+          {error && <p className="error">{error}</p>}
 
           {likedSongs.length > 0 && (
             <div className="songs">
@@ -177,9 +217,7 @@ function App() {
         </div>
       )}
 
-      {error && (
-        <p className="error">{error}</p>
-      )}
+      {error && <p className="error">{error}</p>}
 
       {!status.is_authenticated && !busy && !loading && (
         <div className="status">
