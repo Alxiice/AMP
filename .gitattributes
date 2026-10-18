@@ -1,0 +1,22 @@
+# Force LF for shell scripts (they break with CRLF on Linux/WSL2)
+*.sh text eol=lf
+
+# Force LF for Rust source files
+*.rs text eol=lf
+
+# Force LF for TOML/JSON config files
+*.toml text eol=lf
+*.json text eol=lf
+
+# Force LF for markdown docs
+*.md text eol=lf
+
+# Keep CRLF for Windows batch/PowerShell scripts
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# Python and TypeScript: let git's autocrlf handle them
+*.py text
+*.ts text
+*.tsx text

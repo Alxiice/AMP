@@ -44,7 +44,7 @@ pub async fn youtube_login(app: AppHandle) -> Result<Vec<CookieDto>, String> {
         .inner_size(480.0, 760.0)
         .center()
         .user_agent(USER_AGENT)
-        // .incognito(true)  // enable if you want every sign-in to start clean ("switch account")
+        .incognito(true)  // every sign-in starts clean, no cached Google session
         .build()
         .map_err(|e| e.to_string())?;
 
