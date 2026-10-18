@@ -8,6 +8,10 @@
 </i>
   <br/>
   <br/>
+  <div>
+    <img src="https://github.com/Alxiice/AMP/actions/workflows/python-ci.yml/badge.svg" alt="Python CI" />
+    <img src="https://img.shields.io/codecov/c/github/Alxiice/AMP/develop?logo=codecov" alt="Code Coverage" />
+  </div>
 </div>
 
 ---
