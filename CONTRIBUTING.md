@@ -290,7 +290,7 @@ The exe is at:
 Copy it to Windows (e.g., your Desktop):
 ```bash
 # In WSL2:
-cp /tmp/amp-build/x86_64-pc-windows-gnu/release/app.exe /mnt/e/Users/Alice/Desktop/
+cp -R /tmp/amp-build/x86_64-pc-windows-gnu/release /mnt/e/Documents/TRAVAIL/packages/AMP/build
 ```
 
 Then launch from PowerShell:
