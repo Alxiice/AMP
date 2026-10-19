@@ -117,6 +117,9 @@ Desktop.ini
 
 # AMP cache, cookies, and logs
 .amp/
+
+# External tools (ffmpeg static builds, etc.)
+tools/
 *.log
 logs/
 
