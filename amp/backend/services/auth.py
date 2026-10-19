@@ -204,6 +204,26 @@ class AuthService:
     def account(self) -> Optional[Dict[str, Any]]:
         return self._account
 
+    def get_cookie_header(self) -> Optional[str]:
+        """Return the raw Cookie header string for use with yt-dlp, or None if not signed in."""
+        with self._lock:
+            if self._headers and "cookie" in self._headers:
+                return self._headers["cookie"]
+            return None
+
+    def get_cookies_dict(self) -> Dict[str, str]:
+        """Return cookies as a dictionary (name -> value), or empty dict if not signed in."""
+        cookie_header = self.get_cookie_header()
+        if not cookie_header:
+            return {}
+        cookies = {}
+        for part in cookie_header.split(";"):
+            part = part.strip()
+            if "=" in part:
+                name, value = part.split("=", 1)
+                cookies[name.strip()] = value.strip()
+        return cookies
+
     def _ensure_client(self) -> Any:
         """Build the authenticated client on first use.
 
