@@ -772,28 +772,37 @@ class TestChunkStatusVisualization:
         return StreamingService()
     
     def test_chunk_status_update_on_download(self, streaming_service):
-        """Test that chunk status is updated when downloading."""
-        with patch.object(streaming_service, '_download_audio') as mock_download:
-            mock_download.return_value = True
-            
-            # Create a temp file for the chunk
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp:
-                tmp_path = Path(tmp.name)
-            
-            try:
-                # Patch _generate_chunk_filename to return our temp path
-                with patch.object(streaming_service, '_generate_chunk_filename') as mock_gen:
-                    mock_gen.return_value = tmp_path
-                    
-                    # Mock save_chunk_metadata
-                    with patch.object(streaming_service, '_save_chunk_metadata'):
-                        streaming_service.download_chunk("test_song", 0)
-                        
-                        # Check status was updated
-                        status = streaming_service.get_chunk_status("test_song", total_chunks=1)
-                        assert 0 in status
-                        assert status[0] == ChunkStatus.DOWNLOADED
-            finally:
-                if tmp_path.exists():
-                    tmp_path.unlink()
+        """Test that chunk status is updated when downloading (Range request flow)."""
+        # Create a temp file for the chunk
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.opus') as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(b'fake audio data')
+
+        def mock_download_byte_range(url, output_path, start_byte, end_byte=None):
+            """Mock that creates the output file with fake data."""
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'wb') as f:
+                f.write(b'fake audio chunk data')
+            return True
+
+        try:
+            # Mock get_chunk to return None (not cached)
+            with patch.object(streaming_service, 'get_chunk', return_value=None):
+                # Mock stream URL
+                with patch.object(streaming_service, '_get_stream_url_cached', return_value='https://example.com/audio'):
+                    # Mock byte range calculation
+                    with patch.object(streaming_service, '_get_chunk_byte_range', return_value=(0, 1023)):
+                        # Mock the actual byte range download
+                        with patch.object(streaming_service, '_download_byte_range', side_effect=mock_download_byte_range):
+                            # Mock save_chunk_metadata
+                            with patch.object(streaming_service, '_save_chunk_metadata'):
+                                streaming_service.download_chunk("test_song", 0)
+
+                                # Check status was updated
+                                status = streaming_service.get_chunk_status("test_song", total_chunks=1)
+                                assert 0 in status
+                                assert status[0] == ChunkStatus.DOWNLOADED
+        finally:
+            if tmp_path.exists():
+                tmp_path.unlink()
