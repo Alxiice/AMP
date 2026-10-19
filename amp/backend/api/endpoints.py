@@ -895,51 +895,233 @@ async def update_playback_position(position_ms: int):
 # Streaming Endpoints
 # -----------------------------------------------------------------------------
 
-@router.get("/stream/{song_id}", tags=["streaming"])
-async def stream_song(song_id: str, chunk_index: int = 0):
+
+# Specific endpoints must come before generic /stream/{song_id}
+# to prevent FastAPI from matching them as song IDs
+
+@router.get("/stream/logs", tags=["streaming"])
+async def get_streaming_logs():
     """
-    Stream a specific chunk of a song.
-    
-    Args:
-        song_id: YouTube video ID
-        chunk_index: Chunk index to stream (0-based)
-        
-    Returns:
-        StreamingResponse with audio data
+    Get recent streaming/logging messages for debugging.
     """
-    logger.info(f"Stream request: song_id={song_id}, chunk_index={chunk_index}")
+    logger.info("Get streaming logs")
     
     try:
-        # Get or download the chunk
-        chunk_path = streaming_service.download_chunk(song_id, chunk_index)
+        # Get logs from the streaming service
+        logs = streaming_service.get_streaming_logs()
+        return {"logs": logs}
         
-        if not chunk_path:
+    except Exception as e:
+        logger.error(f"Failed to get streaming logs: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get streaming logs: {str(e)}",
+        )
+
+
+@router.get("/stream/test/{song_id}", tags=["streaming"])
+async def test_stream_download(song_id: str):
+    """
+    Test direct streaming download for debugging.
+    Tries to download the song using yt-dlp directly.
+    """
+    logger.info(f"Testing stream download: {song_id}")
+    
+    try:
+        # Try to get stream info which will trigger a download
+        stream_info = streaming_service.get_stream_info(song_id)
+        
+        if stream_info:
+            return {
+                "status": "success",
+                "song_id": song_id,
+                "title": stream_info.title,
+                "duration_ms": stream_info.duration_ms,
+                "total_chunks": stream_info.total_chunks,
+            }
+        else:
+            return {"status": "failed", "error": "Could not get stream info"}
+            
+    except Exception as e:
+        logger.error(f"Test stream download failed: {e}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        return {"status": "error", "error": str(e)}
+
+
+@router.get("/stream/playback-state", tags=["playback"])
+async def get_stream_playback_state():
+    """Get the current playback state."""
+    logger.info("Get stream playback state")
+    
+    try:
+        state = streaming_service.get_playback_state()
+        
+        current_song_id = streaming_service.get_current_song_id()
+        current_chunk_index = streaming_service.get_current_chunk_index()
+        
+        if current_song_id:
+            song = streaming_service.get_stream_info(current_song_id)
+            if song:
+                state["current_song_info"] = {
+                    "song_id": song.song_id,
+                    "title": song.title,
+                    "duration_ms": song.duration_ms,
+                    "total_chunks": song.total_chunks,
+                }
+        
+        state["current_chunk_index"] = current_chunk_index
+        
+        return state
+        
+    except Exception as e:
+        logger.error(f"Failed to get stream playback state: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get stream playback state: {str(e)}",
+        )
+
+
+@router.post("/stream/buffer/{song_id}", tags=["streaming"])
+async def buffer_song_chunks(song_id: str):
+    """Start buffering chunks for a song."""
+    logger.info(f"Buffer song chunks: song_id={song_id}")
+    
+    try:
+        stream_info = streaming_service.get_stream_info(song_id)
+        
+        if not stream_info:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Chunk not available: {song_id} [{chunk_index}]",
+                detail=f"Stream info not available: {song_id}",
             )
         
-        # Stream the chunk file
-        def iterfile():
-            with open(chunk_path, "rb") as f:
-                yield from f
+        streaming_service.buffer_chunks_for_song(song_id, stream_info.total_chunks)
         
-        return StreamingResponse(
-            iterfile(),
-            media_type="audio/mpeg",
-            headers={
-                "Content-Length": str(os.path.getsize(chunk_path)),
-                "Cache-Control": "no-cache",
-            },
-        )
+        return {
+            "message": "Buffering started",
+            "song_id": song_id,
+            "total_chunks": stream_info.total_chunks,
+        }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to stream: {e}")
+        logger.error(f"Failed to buffer song chunks: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stream: {str(e)}",
+            detail=f"Failed to buffer song chunks: {str(e)}",
+        )
+
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+
+@router.post("/stream/pause", tags=["playback"])
+async def pause_stream_playback():
+    """Pause the current playback."""
+    logger.info("Pause playback")
+    
+    try:
+        streaming_service.pause_playback()
+        return {"message": "Playback paused"}
+        
+    except Exception as e:
+        logger.error(f"Failed to pause playback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to pause playback: {str(e)}",
+        )
+
+
+
+
+
+
+@router.post("/stream/resume", tags=["playback"])
+async def resume_stream_playback():
+    """Resume the current playback."""
+    logger.info("Resume playback")
+    
+    try:
+        streaming_service.resume_playback()
+        return {"message": "Playback resumed"}
+        
+    except Exception as e:
+        logger.error(f"Failed to resume playback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to resume playback: {str(e)}",
+        )
+
+
+@router.post("/stream/stop", tags=["playback"])
+async def stop_stream_playback():
+    """Stop the current playback."""
+    logger.info("Stop playback")
+    
+    try:
+        streaming_service.stop_playback()
+        return {"message": "Playback stopped"}
+        
+    except Exception as e:
+        logger.error(f"Failed to stop playback: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stop playback: {str(e)}",
+        )
+
+
+@router.post("/stream/position", tags=["playback"])
+async def update_stream_playback_position(position_ms: int):
+    """Update the current playback position."""
+    logger.debug(f"Update stream position: {position_ms}ms")
+    
+    try:
+        streaming_service.update_playback_position(position_ms)
+        return {"message": "Position updated", "position_ms": position_ms}
+        
+    except Exception as e:
+        logger.error(f"Failed to update stream position: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update stream position: {str(e)}",
+        )
+
+
+
+
+
+
+@router.post("/stream/seek", tags=["playback"])
+async def seek_stream(position_ms: int):
+    """
+    Seek to a new position in the current stream.
+
+    Cancels downloads for chunks before the new position and re-buffers
+    chunks from the new position onwards.
+
+    Args:
+        position_ms: Target position in milliseconds
+    """
+    logger.info(f"Stream seek request: {position_ms}ms")
+
+    try:
+        result = streaming_service.seek_to_position(position_ms)
+        if "error" in result:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=result["error"],
+            )
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to seek stream: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to seek: {str(e)}",
         )
 
 
@@ -987,6 +1169,124 @@ async def get_stream_info(song_id: str):
 
 
 
+
+@router.get("/stream/{song_id}/audio", tags=["streaming"])
+async def stream_full_audio(song_id: str):
+    """
+    Stream song audio chunk-by-chunk for instant playback.
+
+    Uses HTTP Range requests to download individual ~10 second chunks on-demand.
+    The first chunk downloads in under a second, allowing immediate playback start.
+    Subsequent chunks download progressively as the stream progresses.
+
+    Args:
+        song_id: YouTube video ID
+
+    Returns:
+        StreamingResponse with audio data served chunk by chunk
+    """
+    logger.info(f"Audio stream request: song_id={song_id}")
+
+    # Validate song_id
+    if not song_id or song_id in ["playback-state", "status", "info", "chunks", "chunk", "play", "pause", "audio"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid song ID: {song_id}",
+        )
+
+    try:
+        # Get stream info to validate the song exists
+        stream_info = streaming_service.get_stream_info(song_id)
+        if not stream_info or stream_info.total_chunks == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Could not get stream info for: {song_id}",
+            )
+
+        # Get total stream size for Content-Length header
+        total_bytes = streaming_service.get_stream_total_bytes(song_id)
+        content_type = streaming_service.get_stream_content_type(song_id)
+
+        # Ensure first chunk is downloading (for instant start)
+        streaming_service.download_chunk(song_id, 0)
+
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-cache",
+        }
+        if total_bytes:
+            headers["Content-Length"] = str(total_bytes)
+
+        return StreamingResponse(
+            streaming_service.generate_audio_stream(song_id),
+            media_type=content_type,
+            headers=headers,
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to stream audio: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stream audio: {str(e)}",
+        )
+
+@router.get("/stream/{song_id}", tags=["streaming"])
+async def stream_song(song_id: str, chunk_index: int = 0):
+    """
+    Stream a specific chunk of a song.
+    
+    Args:
+        song_id: YouTube video ID
+        chunk_index: Chunk index to stream (0-based)
+        
+    Returns:
+        StreamingResponse with audio data
+    """
+    logger.info(f"Stream request: song_id={song_id}, chunk_index={chunk_index}")
+    
+    # Validate song_id - reject reserved names that are actually endpoint paths
+    if not song_id or song_id in ["playback-state", "status", "info", "chunks", "chunk", "play", "pause"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid song ID: {song_id}",
+        )
+    
+    try:
+        # Get or download the chunk
+        chunk_path = streaming_service.download_chunk(song_id, chunk_index)
+        
+        if not chunk_path:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Chunk not available: {song_id} [{chunk_index}]",
+            )
+        
+        # Stream the chunk file
+        def iterfile():
+            with open(chunk_path, "rb") as f:
+                yield from f
+        
+        return StreamingResponse(
+            iterfile(),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Length": str(os.path.getsize(chunk_path)),
+                "Cache-Control": "no-cache",
+            },
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to stream: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to stream: {str(e)}",
+        )
+
+
 @router.get("/stream/{song_id}/chunks", tags=["streaming"])
 async def get_song_chunks_status(song_id: str):
     """
@@ -1001,6 +1301,13 @@ async def get_song_chunks_status(song_id: str):
         Dictionary with chunk status information
     """
     logger.info(f"Get chunks status: song_id={song_id}")
+    # Validate song_id
+    if not song_id or song_id in ["playback-state", "status", "info", "chunks", "chunk", "play", "pause"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid song ID: {song_id}",
+        )
+    
     
     try:
         status_info = streaming_service.get_song_chunks_status(song_id)
@@ -1074,6 +1381,13 @@ async def stream_chunk(
 async def start_stream_playback(song_id: str):
     """Start playback for a song."""
     logger.info(f"Start playback: song_id={song_id}")
+    # Validate song_id
+    if not song_id or song_id in ["playback-state", "status", "info", "chunks", "chunk", "play", "pause"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid song ID: {song_id}",
+        )
+    
     
     try:
         success = streaming_service.start_playback(song_id)
@@ -1096,141 +1410,13 @@ async def start_stream_playback(song_id: str):
         )
 
 
-@router.post("/stream/pause", tags=["playback"])
-async def pause_stream_playback():
-    """Pause the current playback."""
-    logger.info("Pause playback")
-    
-    try:
-        streaming_service.pause_playback()
-        return {"message": "Playback paused"}
-        
-    except Exception as e:
-        logger.error(f"Failed to pause playback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to pause playback: {str(e)}",
-        )
 
 
-@router.post("/stream/resume", tags=["playback"])
-async def resume_stream_playback():
-    """Resume the current playback."""
-    logger.info("Resume playback")
-    
-    try:
-        streaming_service.resume_playback()
-        return {"message": "Playback resumed"}
-        
-    except Exception as e:
-        logger.error(f"Failed to resume playback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to resume playback: {str(e)}",
-        )
 
 
-@router.post("/stream/stop", tags=["playback"])
-async def stop_stream_playback():
-    """Stop the current playback."""
-    logger.info("Stop playback")
-    
-    try:
-        streaming_service.stop_playback()
-        return {"message": "Playback stopped"}
-        
-    except Exception as e:
-        logger.error(f"Failed to stop playback: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to stop playback: {str(e)}",
-        )
 
 
-@router.post("/stream/position", tags=["playback"])
-async def update_stream_playback_position(position_ms: int):
-    """Update the current playback position."""
-    logger.debug(f"Update stream position: {position_ms}ms")
-    
-    try:
-        streaming_service.update_playback_position(position_ms)
-        return {"message": "Position updated", "position_ms": position_ms}
-        
-    except Exception as e:
-        logger.error(f"Failed to update stream position: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update stream position: {str(e)}",
-        )
 
-
-@router.get("/stream/playback-state", tags=["playback"])
-async def get_stream_playback_state():
-    """Get the current playback state."""
-    logger.info("Get stream playback state")
-    
-    try:
-        state = streaming_service.get_playback_state()
-        
-        current_song_id = streaming_service.get_current_song_id()
-        current_chunk_index = streaming_service.get_current_chunk_index()
-        
-        if current_song_id:
-            song = streaming_service.get_stream_info(current_song_id)
-            if song:
-                state["current_song_info"] = {
-                    "song_id": song.song_id,
-                    "title": song.title,
-                    "duration_ms": song.duration_ms,
-                    "total_chunks": song.total_chunks,
-                }
-        
-        state["current_chunk_index"] = current_chunk_index
-        
-        return state
-        
-    except Exception as e:
-        logger.error(f"Failed to get stream playback state: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get stream playback state: {str(e)}",
-        )
-
-
-@router.post("/stream/buffer/{song_id}", tags=["streaming"])
-async def buffer_song_chunks(song_id: str):
-    """Start buffering chunks for a song."""
-    logger.info(f"Buffer song chunks: song_id={song_id}")
-    
-    try:
-        stream_info = streaming_service.get_stream_info(song_id)
-        
-        if not stream_info:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Stream info not available: {song_id}",
-            )
-        
-        streaming_service.buffer_chunks_for_song(song_id, stream_info.total_chunks)
-        
-        return {
-            "message": "Buffering started",
-            "song_id": song_id,
-            "total_chunks": stream_info.total_chunks,
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Failed to buffer song chunks: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to buffer song chunks: {str(e)}",
-        )
-
-# -----------------------------------------------------------------------------
-# Helper Functions
-# -----------------------------------------------------------------------------
 
 def _get_mock_search_results(query: str, limit: int) -> List[SongResponse]:
     """Return mock search results for fallback."""
