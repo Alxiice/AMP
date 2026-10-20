@@ -130,6 +130,31 @@ def fmt_size(b: int) -> str:
 # Backend Management
 # =============================================================================
 
+def kill_process_on_port(port: int) -> None:
+    """Kill any process listening on the given port (Windows)."""
+    if sys.platform != "win32":
+        return
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, timeout=10,
+        )
+        stdout = result.stdout.decode("utf-8", errors="replace") if result.stdout else ""
+        for line in stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                parts = line.split()
+                pid = parts[-1]
+                if pid.isdigit():
+                    log(f"Killing zombie process on port {port} (PID {pid})", "WARN")
+                    subprocess.run(
+                        ["taskkill", "/F", "/PID", pid],
+                        capture_output=True, timeout=10,
+                    )
+        time.sleep(1)
+    except Exception as e:
+        log(f"Could not kill process on port {port}: {e}", "WARN")
+
+
 class Backend:
     def __init__(self, host: str, port: int):
         self.host = host
@@ -140,6 +165,7 @@ class Backend:
 
     def start(self) -> None:
         log(f"Starting backend on {self.host}:{self.port}...")
+        kill_process_on_port(self.port)
         env = os.environ.copy()
         env["PYTHONPATH"] = str(AMP_DIR)
         log_path = CACHE_DIR / "integration_reports" / "backend.log"
@@ -175,36 +201,21 @@ class Backend:
         if not self.proc:
             return
         log("Stopping backend...")
+        # Try terminate first (works on both Windows and Linux)
         try:
-            if sys.platform == "win32":
-                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                self.proc.terminate()
-            self.proc.wait(timeout=10)
+            self.proc.terminate()
+            self.proc.wait(timeout=5)
         except Exception:
+            pass
+        # Force kill if still alive
+        if self.proc.poll() is None:
             try:
                 self.proc.kill()
+                self.proc.wait(timeout=5)
             except Exception:
                 pass
         if hasattr(self, "_log_fh") and self._log_fh:
             self._log_fh.close()
-        log("Backend stopped")
-
-    def stop(self) -> None:
-        if not self.proc:
-            return
-        log("Stopping backend...")
-        try:
-            if sys.platform == "win32":
-                self.proc.send_signal(signal.CTRL_BREAK_EVENT)
-            else:
-                self.proc.terminate()
-            self.proc.wait(timeout=10)
-        except Exception:
-            try:
-                self.proc.kill()
-            except Exception:
-                pass
         log("Backend stopped")
 
 
