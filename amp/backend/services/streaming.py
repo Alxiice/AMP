@@ -43,6 +43,7 @@ from backend.config import (
     CACHE_MAX_SIZE_MB,
     DEBUG,
     BUFFER_AHEAD_SEC,
+    LOGS_DIR,
 )
 
 from backend.database.session import get_userdb_session, get_playdb_session
@@ -366,9 +367,13 @@ class StreamingService:
         """Initialize the StreamingService."""
         self._quality_preset = QUALITY_PRESETS.get(AUDIO_QUALITY.lower(), QUALITY_PRESETS["high"])
         self._chunk_size_ms = CHUNK_SIZE_SEC * 1000
-        # Initialize log buffer for debugging
+        # Initialize log buffer for debugging (in-memory + file)
         self._streaming_logs: List[str] = []
-        self._max_logs = 100
+        self._max_logs = 200
+        # Persistent streaming log file
+        self._stream_log_path = Path(LOGS_DIR) / "streaming.log"
+        Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
+        self._stream_log_lock = threading.Lock()
         self._cache_max_size_bytes = CACHE_MAX_SIZE_MB * 1024 * 1024
         
         # Ensure directories exist
@@ -408,6 +413,29 @@ class StreamingService:
         
         logger.info(f"StreamingService initialized: quality={AUDIO_QUALITY}, chunk_size={CHUNK_SIZE_SEC}s")
     
+    def _log_streaming(self, msg: str, level: str = "INFO") -> None:
+        """Log to both in-memory buffer and persistent file."""
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        entry = f"[{ts}] [{level}] {msg}"
+        # In-memory buffer
+        self._streaming_logs.append(entry)
+        if len(self._streaming_logs) > self._max_logs:
+            self._streaming_logs = self._streaming_logs[-self._max_logs:]
+        # Persistent file
+        try:
+            with self._stream_log_lock:
+                with open(self._stream_log_path, "a", encoding="utf-8") as f:
+                    f.write(entry + "\n")
+        except Exception:
+            pass
+        # Also log via standard logger
+        if level == "ERROR":
+            logger.error(msg)
+        elif level == "WARNING":
+            logger.warning(msg)
+        else:
+            logger.info(msg)
+
     def _initialize_chunk_cache(self) -> None:
         """Initialize chunk cache from database."""
         try:
@@ -588,6 +616,25 @@ class StreamingService:
             logger.error(f"Failed to get direct audio URL: {e}")
             return None
 
+    def _get_cdn_headers(self, extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Build headers for YouTube CDN requests, including auth cookies and User-Agent."""
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        try:
+            from backend.services.auth import get_auth_service
+            auth = get_auth_service()
+            cookie_header = auth.get_cookie_header()
+            if cookie_header:
+                headers['Cookie'] = cookie_header
+        except Exception as e:
+            logger.debug(f"Could not get cookies for CDN request: {e}")
+        if extra:
+            headers.update(extra)
+        return headers
+
     def _get_url_content_length(self, url: str) -> Optional[int]:
         """
         Get the content length of a URL using multiple strategies.
@@ -596,9 +643,11 @@ class StreamingService:
         Strategy 2: GET with Range: bytes=0-0, parse Content-Range header (most reliable for CDNs)
         Strategy 3: Return None (caller will fall back to yt-dlp --get-filesize or estimation)
         """
+        cdn_headers = self._get_cdn_headers()
+
         # Strategy 1: HEAD request
         try:
-            response = requests.head(url, timeout=10, allow_redirects=True)
+            response = requests.head(url, headers=cdn_headers, timeout=10, allow_redirects=True)
             if response.status_code in (200, 206):
                 content_length = response.headers.get('content-length')
                 if content_length:
@@ -609,9 +658,10 @@ class StreamingService:
 
         # Strategy 2: GET with Range: bytes=0-0, parse Content-Range
         try:
+            range_headers = self._get_cdn_headers({'Range': 'bytes=0-0'})
             response = requests.get(
                 url,
-                headers={'Range': 'bytes=0-0'},
+                headers=range_headers,
                 stream=True,
                 timeout=15,
                 allow_redirects=True,
@@ -634,7 +684,7 @@ class StreamingService:
         except Exception as e:
             logger.debug(f"Range probe failed: {e}")
 
-        logger.warning(f"Could not determine content length for URL: {url[:80]}...")
+        self._log_streaming(f"Could not determine content length for URL: {url[:80]}...", "WARNING")
         return None
 
     def _get_filesize_with_yt_dlp(self, song_id: str) -> Optional[int]:
@@ -684,7 +734,7 @@ class StreamingService:
             else:
                 range_header = f'bytes={start_byte}-'
             
-            headers = {'Range': range_header}
+            headers = self._get_cdn_headers({'Range': range_header})
             
             logger.debug(f"Downloading byte range {range_header} from {url[:50]}...")
             
@@ -696,8 +746,9 @@ class StreamingService:
             )
             
             if response.status_code not in [200, 206]:
-                logger.error(f"Failed to download byte range: HTTP {response.status_code}")
+                self._log_streaming(f"HTTP {response.status_code} for byte range {range_header} from {url[:60]}...", "ERROR")
                 return False
+            self._log_streaming(f"HTTP {response.status_code} for byte range {range_header}")
             
             with open(output_path, 'wb') as f:
                 for chunk_data in response.iter_content(chunk_size=8192):
@@ -705,7 +756,7 @@ class StreamingService:
                         f.write(chunk_data)
             
             if output_path.exists() and output_path.stat().st_size > 0:
-                logger.debug(f"Downloaded byte range to: {output_path} ({output_path.stat().st_size} bytes)")
+                self._log_streaming(f"Byte range saved: {output_path.name} ({output_path.stat().st_size} bytes)")
                 return True
             else:
                 logger.error(f"Downloaded file is empty: {output_path}")
@@ -1221,10 +1272,12 @@ class StreamingService:
                         self._chunk_status[song_id] = {}
                     self._chunk_status[song_id][chunk_index] = ChunkStatus.DOWNLOADING
 
+            self._log_streaming(f"Starting chunk download: {song_id} [{chunk_index}] ({start_ms}-{end_ms}ms)")
+
             # Get the direct stream URL (cached after first call)
             stream_url = self._get_stream_url_cached(song_id)
             if not stream_url:
-                logger.error(f"Failed to get stream URL for: {song_id}")
+                self._log_streaming(f"Failed to get stream URL for: {song_id}", "ERROR")
                 raise RuntimeError(f"No stream URL for {song_id}")
 
             # Calculate byte range for this chunk
@@ -1234,7 +1287,7 @@ class StreamingService:
                 raise RuntimeError(f"No byte range for {song_id} [{chunk_index}]")
 
             start_byte, end_byte = byte_range
-            logger.info(f"Downloading chunk {chunk_index}: bytes {start_byte}-{end_byte} ({end_byte - start_byte + 1} bytes)")
+            self._log_streaming(f"Byte range for chunk {chunk_index}: {start_byte}-{end_byte} ({end_byte - start_byte + 1} bytes)")
 
             # Generate output path
             output_path = self._generate_chunk_filename(song_id, chunk_index)
@@ -1259,10 +1312,7 @@ class StreamingService:
                     self._chunk_status[song_id][chunk_index] = ChunkStatus.DOWNLOADED
 
                 size = output_path.stat().st_size
-                self._streaming_logs.append(f"Chunk downloaded: {song_id} [{chunk_index}] ({size} bytes)")
-                if len(self._streaming_logs) > self._max_logs:
-                    self._streaming_logs = self._streaming_logs[-self._max_logs:]
-                logger.info(f"Chunk downloaded: {song_id} [{chunk_index}] -> {output_path.name} ({size} bytes)")
+                self._log_streaming(f"Chunk downloaded: {song_id} [{chunk_index}] -> {output_path.name} ({size} bytes, {start_ms}-{end_ms}ms)")
                 return output_path
             else:
                 # Mark as error
@@ -1270,10 +1320,7 @@ class StreamingService:
                     if song_id in self._chunk_status:
                         self._chunk_status[song_id][chunk_index] = ChunkStatus.ERROR
 
-                self._streaming_logs.append(f"Failed to download chunk: {song_id} [{chunk_index}]")
-                if len(self._streaming_logs) > self._max_logs:
-                    self._streaming_logs = self._streaming_logs[-self._max_logs:]
-                logger.error(f"Failed to download chunk: {song_id} [{chunk_index}]")
+                self._log_streaming(f"Failed to download chunk: {song_id} [{chunk_index}] (bytes {start_byte}-{end_byte})", "ERROR")
                 return None
 
         except Exception as e:
@@ -1791,7 +1838,7 @@ class StreamingService:
                         self._chunk_status[song_id] = {}
                     self._chunk_status[song_id][chunk_index] = ChunkStatus.DOWNLOADING
 
-                logger.info(f"Queued chunk for buffering: {song_id} [{chunk_index}] priority={priority.name}")
+                self._log_streaming(f"Queued chunk for buffering: {song_id} [{chunk_index}] priority={priority.name}")
 
             # Clean up completed downloads from tracking
             self._cleanup_download_tracking(song_id)

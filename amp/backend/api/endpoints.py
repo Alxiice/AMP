@@ -4,6 +4,7 @@ FastAPI Endpoints
 REST API endpoints for AMP Backend.
 """
 import os
+import json
 import threading
 from collections import deque
 from datetime import datetime
@@ -14,6 +15,7 @@ from typing import Any, Optional, List, Union, Dict
 from pydantic import BaseModel
 import io
 
+from backend.config import LOGS_DIR
 from backend.utils.logger import get_logger
 from backend.database.session import get_userdb_session, get_playdb_session
 from backend.database.models import (
@@ -49,15 +51,23 @@ router.include_router(auth_router)
 
 _api_log_buffer: deque = deque(maxlen=500)
 _api_log_lock = threading.Lock()
+_api_log_file = Path(LOGS_DIR) / "api_logs.jsonl"
+Path(LOGS_DIR).mkdir(parents=True, exist_ok=True)
 
 
 @router.post("/logs", tags=["monitoring"])
 async def receive_api_log(request: Request):
-    """Receive an API log entry from the frontend."""
+    """Receive an API log entry from the frontend. Persists to .amp/logs/api_logs.jsonl."""
     try:
         entry = await request.json()
         with _api_log_lock:
             _api_log_buffer.append(entry)
+            # Persist to file (JSONL format)
+            try:
+                with open(_api_log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry) + "\n")
+            except Exception:
+                pass
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -76,6 +86,10 @@ async def clear_api_logs():
     """Clear all stored API log entries."""
     with _api_log_lock:
         _api_log_buffer.clear()
+        try:
+            _api_log_file.write_text("", encoding="utf-8")
+        except Exception:
+            pass
     return {"ok": True, "cleared": True}
 
 
