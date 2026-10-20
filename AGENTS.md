@@ -19,9 +19,9 @@
 **Project**: AMP (Another Music Player)
 **Description**: Local music player based on YouTube Music library
 **Tech Stack**: FastAPI, React, Tauri, yt-dlp, ytmusicapi, SQLAlchemy, SQLite
-**Current Phase**: Phase 3 (Core Playback System) — ✅ COMPLETE (fixed 2026-10-19)
+**Current Phase**: Phase 3 (Core Playback System) — ✅ COMPLETE (fixed 2026-10-20)
 **Next Phase**: Phase 4 (Frontend Buffering) — ⏳ READY TO START
-**Tests**: 135/135 passing (116 unit + 19 integration)
+**Tests**: 155/155 passing (116 unit + 39 integration)
 
 ---
 
@@ -507,7 +507,7 @@ Each chunk is 4.7% of full stream — real byte ranges, not full copies
 
 **Last Updated**: 2026-10-19
 **Current Phase**: Phase 3 Complete (fixed) — Phase 4 (Frontend Buffering) Next
-**Tests**: 135/135 passing (116 unit + 19 integration)
+**Tests**: 155/155 passing (116 unit + 39 integration)
 
 ---
 
@@ -689,6 +689,61 @@ Integration test: 7/7 steps passed
 
 ---
 
-**Last Updated**: 2026-10-20
+## Phase 3 Fixes (2026-10-20, fifth round) - 403 errors, performance, logging
+
+### Root Cause 1: HTTP 403 on chunk downloads
+
+**Problem**: All chunk downloads failed with HTTP 403 from YouTube CDN. The backend was sending Range requests to googlevideo.com URLs without any authentication headers.
+
+**Solution**: Added _get_cdn_headers() method to StreamingService (amp/backend/services/streaming.py):
+- Includes User-Agent, Accept, Accept-Language headers
+- Includes Cookie header from auth_service.get_cookie_header()
+- Applied to all CDN requests: _get_url_content_length() (HEAD + Range probe), _download_byte_range() (byte range download)
+
+**Result**: Chunks now download successfully at HTTP 206 (Partial Content). Integration test confirms: 158.8 KB per chunk, ~200-260ms download time.
+
+### Root Cause 2: 10-22 second delays on every API call
+
+**Problem**: get_stream_info() called YouTube API/yt-dlp on every request with no caching. The /chunks endpoint took 19-22 seconds.
+
+**Solution**: Added in-memory _stream_info_cache to StreamingService:
+- First call: ~2.5s (yt-dlp extraction)
+- Subsequent calls: ~0.24s (cache hit, 12x faster)
+- Dynamic fields (cached_chunks, downloading_chunks) refreshed on each cache hit
+
+### Persistent Logging
+
+Two log files in .amp/logs/:
+
+| File | Source | Content |
+|------|--------|---------|
+| streaming.log | Backend _log_streaming() | Chunk download lifecycle: start, byte range, HTTP status, file saved, errors |
+| api_logs.jsonl | Frontend via POST /api/logs | Every API call: timestamp, method, URL, status, duration, response preview |
+
+_log_streaming() writes to: in-memory buffer (200 entries) + persistent file + standard logger.
+
+### Dashboard
+
+Served directly from backend at GET /api/dashboard (port 8000). No separate server needed. Dashboard HTML at amp/backend/static/dashboard.html uses same-origin relative URLs.
+
+### Frontend Fixes
+
+- chunkPollInFlightRef prevents overlapping /chunks poll requests
+- Poll interval: 1000ms (cache makes it fast)
+- shareLogsToDashboard POSTs to baseUrl/api/logs
+- Dashboard link: http://localhost:8000/api/dashboard
+
+### Test Results
+
+    155 passed in 23.83s (116 unit + 39 integration)
+    Integration test: 7/7 steps passed
+      - Chunk 0: 158.8 KB in 2091ms (first call, includes stream URL fetch)
+      - Chunk 1: 158.8 KB in 194ms
+      - Chunk 10: 158.8 KB in 257ms
+    Vite build: OK (350ms)
+
+---
+
+**Last Updated**: 2026-10-20 (fifth round)
 **Current Phase**: Phase 3 Complete (fixed 2026-10-20) — Phase 4 (Frontend Buffering) Next
 **Tests**: 155/155 passing (116 unit + 39 integration)
