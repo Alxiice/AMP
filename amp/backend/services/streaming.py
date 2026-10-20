@@ -389,6 +389,10 @@ class StreamingService:
         self._chunk_status: Dict[str, Dict[int, ChunkStatus]] = {}
         self._status_lock = threading.Lock()
 
+        # Cache stream info per song (avoid repeated YouTube API / yt-dlp calls)
+        self._stream_info_cache: Dict[str, 'StreamInfo'] = {}
+        self._stream_info_lock = threading.Lock()
+
         # Cache direct stream URLs per song (avoid repeated yt-dlp calls)
         self._stream_urls: Dict[str, str] = {}
         self._stream_urls_lock = threading.Lock()
@@ -843,6 +847,15 @@ class StreamingService:
         Returns:
             StreamInfo object or None if failed
         """
+        # Check cache first - stream info doesn't change for a given song
+        with self._stream_info_lock:
+            cached = self._stream_info_cache.get(song_id)
+            if cached is not None:
+                # Refresh dynamic fields (cached_chunks, downloading_chunks, chunk_status)
+                cached.cached_chunks = self._get_cached_chunks(song_id)
+                cached.downloading_chunks = self.get_downloading_chunks(song_id)
+                return cached
+
         try:
             # First, get song metadata to get duration
             from backend.services.youtube import YouTubeService, get_youtube_service
@@ -870,7 +883,7 @@ class StreamingService:
             # Get chunk status for this song
             chunk_status = self.get_chunk_status(song_id, total_chunks)
             
-            return StreamInfo(
+            info = StreamInfo(
                 song_id=song_id,
                 title=song_metadata.title if song_metadata else song_id,
                 duration_ms=duration_ms,
@@ -878,6 +891,10 @@ class StreamingService:
                 cached_chunks=cached_chunks,
                 downloading_chunks=downloading_chunks,
             )
+            # Cache the result (duration and total_chunks never change)
+            with self._stream_info_lock:
+                self._stream_info_cache[song_id] = info
+            return info
             
         except Exception as e:
             logger.error(f"Failed to get stream info: {e}")

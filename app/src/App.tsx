@@ -91,6 +91,7 @@ function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentSongIdRef = useRef<string | null>(null);
   const chunkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const chunkPollInFlightRef = useRef<boolean>(false);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -100,7 +101,7 @@ function App() {
   // Share API logs to the external dashboard server (port 8001) via POST
   const shareLogsToDashboard = useCallback((entry: ApiLogEntry) => {
     try {
-      fetch('http://localhost:8001/api/logs', {
+      fetch(`${baseUrl}/api/logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -116,7 +117,7 @@ function App() {
         }),
       }).catch(() => { /* dashboard not running, ignore */ });
     } catch { /* ignore */ }
-  }, []);
+  }, [baseUrl]);
 
   const loggedFetch = useCallback(async (url: string, options?: RequestInit): Promise<Response> => {
     const startTime = performance.now();
@@ -224,10 +225,10 @@ function App() {
     if (currentSong) {
       // Initial fetch
       loadChunksStatus(currentSong.id);
-      // Poll every 500ms for real-time chunk status updates
+      // Poll every 1000ms for chunk status updates (cached on backend, fast)
       chunkPollRef.current = setInterval(() => {
         loadChunksStatus(currentSong.id);
-      }, 500);
+      }, 1000);
     } else {
       if (chunkPollRef.current) {
         clearInterval(chunkPollRef.current);
@@ -263,6 +264,8 @@ function App() {
   };
 
   const loadChunksStatus = useCallback(async (songId: string) => {
+    if (chunkPollInFlightRef.current) return;
+    chunkPollInFlightRef.current = true;
     try {
       const response = await loggedFetch(`${baseUrl}/api/stream/${songId}/chunks`);
       if (!response.ok) return;
@@ -270,6 +273,8 @@ function App() {
       setChunksStatus(data);
     } catch (err) {
       console.error('Failed to load chunks status:', err);
+    } finally {
+      chunkPollInFlightRef.current = false;
     }
   }, [baseUrl, loggedFetch]);
 
@@ -530,14 +535,14 @@ function App() {
         </button>
         {' | '}
         <a
-          href="http://localhost:8001"
+          href={`${baseUrl}/dashboard`}
           target="_blank"
           rel="noopener noreferrer"
           style={{
             color: apiLogs.some(l => l.status === null || l.status >= 400) ? '#f44336' : '#4caf50',
             textDecoration: 'none', fontSize: '0.8rem', fontWeight: 500,
           }}
-          title="Open dashboard (requires: npm run dashboard)"
+          title="Open API monitoring dashboard (served by backend)"
         >
           Dashboard ({apiLogs.length})
         </a>

@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AMP - API Monitor Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: #0d1117;
+            color: #c9d1d9;
+            padding: 1rem;
+        }
+        h1 { color: #fff; margin-bottom: 0.5rem; font-size: 1.3rem; }
+        .subtitle { color: #8b949e; font-size: 0.85rem; margin-bottom: 1rem; }
+        .controls {
+            display: flex; gap: 0.5rem; align-items: center; margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+        .controls input, .controls select, .controls button {
+            padding: 0.35rem 0.6rem; border-radius: 4px; border: 1px solid #30363d;
+            background: #161b22; color: #c9d1d9; font-size: 0.8rem;
+        }
+        .controls button { cursor: pointer; background: #21262d; }
+        .controls button:hover { background: #30363d; }
+        .controls button.active { background: #238636; border-color: #238636; color: #fff; }
+        .stats {
+            display: flex; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+        }
+        .stat-box {
+            background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+            padding: 0.5rem 1rem; text-align: center; min-width: 100px;
+        }
+        .stat-box .value { font-size: 1.3rem; font-weight: 600; color: #fff; }
+        .stat-box .label { font-size: 0.7rem; color: #8b949e; }
+        .stat-box.ok .value { color: #4caf50; }
+        .stat-box.err .value { color: #f44336; }
+        .stat-box.warn .value { color: #ffc107; }
+        .panels { display: flex; flex-direction: column; gap: 1rem; }
+        .panel {
+            background: #161b22; border: 1px solid #30363d; border-radius: 6px;
+            overflow: hidden;
+        }
+        .panel-header {
+            padding: 0.5rem 0.75rem; background: #21262d; font-weight: 600;
+            font-size: 0.85rem; color: #fff; display: flex; justify-content: space-between;
+            align-items: center; cursor: pointer;
+        }
+        .panel-header:hover { background: #30363d; }
+        .panel-body {
+            max-height: 300px; overflow-y: auto; font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.72rem;
+        }
+        .panel-body.collapsed { display: none; }
+        .log-entry {
+            padding: 0.3rem 0.75rem; border-bottom: 1px solid #21262d;
+            word-break: break-all;
+        }
+        .log-entry.error { background: rgba(244,67,54,0.08); }
+        .log-entry .ts { color: #484f58; margin-right: 0.5rem; }
+        .log-entry .method { font-weight: 600; margin-right: 0.5rem; min-width: 35px; display: inline-block; }
+        .log-entry .method.GET { color: #61dafb; }
+        .log-entry .method.POST { color: #4caf50; }
+        .log-entry .status { font-weight: 600; margin-left: 0.5rem; }
+        .log-entry .status.ok { color: #4caf50; }
+        .log-entry .status.err { color: #f44336; }
+        .log-entry .status.warn { color: #ffc107; }
+        .log-entry .dur { color: #8b949e; margin-left: 0.5rem; }
+        .log-entry .url { color: #c9d1d9; }
+        .log-entry .detail { color: #6e7681; padding-left: 1rem; white-space: pre-wrap; margin-top: 2px; }
+        .chunk-grid {
+            display: flex; flex-wrap: wrap; gap: 2px; padding: 0.5rem;
+        }
+        .chunk-box {
+            width: 20px; height: 20px; border-radius: 2px; cursor: default;
+        }
+        .chunk-box.not_downloaded { background: #484f58; }
+        .chunk-box.downloaded { background: #4caf50; }
+        .chunk-box.downloading { background: #ffc107; animation: pulse 1s infinite; }
+        .chunk-box.error { background: #f44336; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .chunk-legend { display: flex; gap: 1rem; padding: 0.5rem; font-size: 0.7rem; color: #8b949e; flex-wrap: wrap; }
+        .chunk-legend span { display: flex; align-items: center; gap: 4px; }
+        .chunk-legend .swatch { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+        .info-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.5rem; padding: 0.75rem; }
+        .info-item { font-size: 0.75rem; }
+        .info-item .key { color: #8b949e; }
+        .info-item .val { color: #c9d1d9; font-family: monospace; }
+        .empty { color: #484f58; padding: 1rem; text-align: center; }
+        .refresh-indicator { font-size: 0.7rem; color: #484f58; }
+        #toast {
+            position: fixed; bottom: 1rem; right: 1rem; background: #238636; color: #fff;
+            padding: 0.5rem 1rem; border-radius: 4px; font-size: 0.8rem;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        #toast.show { opacity: 1; }
+    </style>
+</head>
+<body>
+    <h1>AMP API Monitor Dashboard</h1>
+    <p class="subtitle">Real-time monitoring of backend API, streaming logs, and chunk status</p>
+
+    <div class="controls">
+        <label style="font-size:0.8rem;color:#8b949e;">Backend URL:</label>
+        <input type="text" id="apiUrl" value="(same origin)" style="width:200px;" placeholder="Leave empty for same origin">
+        <button onclick="saveSettings()">Save</button>
+        <span style="color:#484f58;">|</span>
+        <label style="font-size:0.8rem;color:#8b949e;">Refresh:</label>
+        <select id="refreshRate" onchange="saveSettings()">
+            <option value="500">500ms</option>
+            <option value="1000" selected>1s</option>
+            <option value="2000">2s</option>
+            <option value="5000">5s</option>
+        </select>
+        <span style="color:#484f58;">|</span>
+        <label style="font-size:0.8rem;color:#8b949e;">Filter:</label>
+        <input type="text" id="filterUrl" placeholder="Filter by URL..." oninput="renderLogs()">
+        <button onclick="clearLogs()">Clear Logs</button>
+        <span style="color:#484f58;">|</span>
+        <button id="autoScrollBtn" class="active" onclick="toggleAutoScroll()">Auto-scroll: ON</button>
+        <span class="refresh-indicator" id="lastUpdate">Never updated</span>
+    </div>
+
+    <div class="stats">
+        <div class="stat-box"><div class="value" id="statRequests">0</div><div class="label">API Requests</div></div>
+        <div class="stat-box ok"><div class="value" id="statOk">0</div><div class="label">OK (2xx-3xx)</div></div>
+        <div class="stat-box err"><div class="value" id="statErr">0</div><div class="label">Errors (4xx-5xx)</div></div>
+        <div class="stat-box"><div class="value" id="statChunks">-</div><div class="label">Chunks Cached</div></div>
+        <div class="stat-box"><div class="value" id="statPlaying">-</div><div class="label">Playback</div></div>
+        <div class="stat-box"><div class="value" id="statBackend">?</div><div class="label">Backend</div></div>
+    </div>
+
+    <div class="panels">
+        <!-- API Logs Panel -->
+        <div class="panel">
+            <div class="panel-header" onclick="togglePanel(this)">
+                <span>API Request Logs</span>
+                <span id="logCount">0 entries</span>
+            </div>
+            <div class="panel-body" id="apiLogsBody">
+                <div class="empty">No API calls logged yet. The dashboard intercepts requests made through the main app.</div>
+            </div>
+        </div>
+
+        <!-- Streaming Logs Panel -->
+        <div class="panel">
+            <div class="panel-header" onclick="togglePanel(this)">
+                <span>Backend Streaming Logs</span>
+                <span id="streamLogCount">0 entries</span>
+            </div>
+            <div class="panel-body" id="streamLogsBody">
+                <div class="empty">No streaming logs yet</div>
+            </div>
+        </div>
+
+        <!-- Chunk Status Panel -->
+        <div class="panel">
+            <div class="panel-header" onclick="togglePanel(this)">
+                <span>Chunk Status</span>
+                <span id="chunkInfo">No song playing</span>
+            </div>
+            <div class="panel-body" id="chunkPanelBody" style="max-height:none;">
+                <div class="empty">Start playback in the main app to see chunk status</div>
+            </div>
+        </div>
+
+        <!-- Playback State Panel -->
+        <div class="panel">
+            <div class="panel-header" onclick="togglePanel(this)">
+                <span>Playback State</span>
+            </div>
+            <div class="panel-body" id="playbackBody" style="max-height:none;">
+                <div class="empty">No playback data</div>
+            </div>
+        </div>
+
+        <!-- Backend Health Panel -->
+        <div class="panel">
+            <div class="panel-header" onclick="togglePanel(this)">
+                <span>Backend Health</span>
+            </div>
+            <div class="panel-body" id="healthBody" style="max-height:none;">
+                <div class="empty">Checking...</div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast"></div>
+
+    <script>
+        // State
+        let apiLogs = [];
+        let maxLogs = 500;
+        let autoScroll = true;
+        let refreshInterval = 1000;
+        let lastLogCount = 0;
+        let pollTimer = null;
+
+        // Settings
+        function getApiUrl() {
+            return localStorage.getItem('amp_api_url') || '';
+        }
+        function saveSettings() {
+            const val = document.getElementById('apiUrl').value;
+            localStorage.setItem('amp_api_url', val === '(same origin)' ? '' : val);
+            refreshInterval = parseInt(document.getElementById('refreshRate').value);
+            restartPolling();
+            showToast('Settings saved');
+        }
+
+        // Initialize
+        document.getElementById('apiUrl').value = getApiUrl();
+        refreshInterval = parseInt(localStorage.getItem('amp_refresh_rate') || '1000');
+        document.getElementById('refreshRate').value = refreshInterval;
+
+        // Toast
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            setTimeout(() => t.classList.remove('show'), 2000);
+        }
+
+        // Panel toggle
+        function togglePanel(header) {
+            const body = header.nextElementSibling;
+            body.classList.toggle('collapsed');
+        }
+
+        // Auto-scroll toggle
+        function toggleAutoScroll() {
+            autoScroll = !autoScroll;
+            const btn = document.getElementById('autoScrollBtn');
+            btn.textContent = 'Auto-scroll: ' + (autoScroll ? 'ON' : 'OFF');
+            btn.classList.toggle('active', autoScroll);
+        }
+
+        // Clear logs (both local and server-side)
+        function clearLogs() {
+            apiLogs = [];
+            lastLogCount = 0;
+            renderLogs();
+            fetch('/api/logs', { method: 'DELETE' }).catch(() => {});
+        }
+
+        // Fetch helper
+        async function fetchJson(url) {
+            try {
+                const resp = await fetch(url);
+                return { ok: resp.ok, status: resp.status, data: await resp.json() };
+            } catch (e) {
+                return { ok: false, status: 0, data: { error: String(e) } };
+            }
+        }
+
+        // Poll backend health
+        async function pollHealth() {
+            const r = await fetchJson(getApiUrl() + '/api/health');
+            const el = document.getElementById('statBackend');
+            const body = document.getElementById('healthBody');
+            if (r.ok) {
+                el.textContent = 'OK';
+                el.style.color = '#4caf50';
+                body.innerHTML = '<div class="info-grid">' +
+                    '<div class="info-item"><span class="key">Status:</span> <span class="val">' + (r.data.status || 'ok') + '</span></div>' +
+                    '<div class="info-item"><span class="key">Message:</span> <span class="val">' + (r.data.message || '-') + '</span></div>' +
+                    '<div class="info-item"><span class="key">YouTube Service:</span> <span class="val">' + (r.data.services?.youtube_service ? 'OK' : 'Down') + '</span></div>' +
+                    '<div class="info-item"><span class="key">Streaming Service:</span> <span class="val">' + (r.data.services?.streaming_service ? 'OK' : 'Down') + '</span></div>' +
+                    '</div>';
+            } else {
+                el.textContent = 'DOWN';
+                el.style.color = '#f44336';
+                body.innerHTML = '<div class="empty">Backend unreachable at ' + (getApiUrl() || 'same origin') + '</div>';
+            }
+        }
+
+        // Poll streaming logs
+        async function pollStreamLogs() {
+            const r = await fetchJson(getApiUrl() + '/api/stream/logs');
+            const body = document.getElementById('streamLogsBody');
+            const count = document.getElementById('streamLogCount');
+            if (r.ok && r.data.logs) {
+                const logs = r.data.logs;
+                count.textContent = logs.length + ' entries';
+                if (logs.length === 0) {
+                    body.innerHTML = '<div class="empty">No streaming logs</div>';
+                } else {
+                    body.innerHTML = logs.slice(-100).reverse().map(l =>
+                        '<div class="log-entry"><span class="ts"></span><span class="url">' + escapeHtml(l) + '</span></div>'
+                    ).join('');
+                }
+                if (autoScroll) body.scrollTop = 0;
+            }
+        }
+
+        // Poll playback state
+        async function pollPlayback() {
+            const r = await fetchJson(getApiUrl() + '/api/stream/playback-state');
+            const body = document.getElementById('playbackBody');
+            const stat = document.getElementById('statPlaying');
+            if (r.ok && r.data) {
+                const d = r.data;
+                stat.textContent = d.is_playing ? 'Playing' : 'Stopped';
+                stat.style.color = d.is_playing ? '#4caf50' : '#8b949e';
+                let html = '<div class="info-grid">';
+                html += '<div class="info-item"><span class="key">Song ID:</span> <span class="val">' + escapeHtml(d.current_song_id || '-') + '</span></div>';
+                html += '<div class="info-item"><span class="key">Position:</span> <span class="val">' + formatMs(d.current_time_ms) + '</span></div>';
+                html += '<div class="info-item"><span class="key">Playing:</span> <span class="val">' + (d.is_playing ? 'Yes' : 'No') + '</span></div>';
+                html += '<div class="info-item"><span class="key">Volume:</span> <span class="val">' + (d.volume ?? 1.0) + '</span></div>';
+                html += '<div class="info-item"><span class="key">Current Chunk:</span> <span class="val">' + (d.current_chunk_index ?? '-') + '</span></div>';
+                if (d.current_song_info) {
+                    html += '<div class="info-item"><span class="key">Title:</span> <span class="val">' + escapeHtml(d.current_song_info.title || '-') + '</span></div>';
+                    html += '<div class="info-item"><span class="key">Duration:</span> <span class="val">' + formatMs(d.current_song_info.duration_ms) + '</span></div>';
+                    html += '<div class="info-item"><span class="key">Total Chunks:</span> <span class="val">' + (d.current_song_info.total_chunks ?? '-') + '</span></div>';
+                }
+                html += '</div>';
+                body.innerHTML = html;
+
+                // Also poll chunk status if a song is playing
+                if (d.current_song_id) {
+                    pollChunks(d.current_song_id, d.current_song_info?.total_chunks);
+                }
+            } else {
+                stat.textContent = '-';
+                body.innerHTML = '<div class="empty">No playback data</div>';
+            }
+        }
+
+        // Poll chunk status
+        async function pollChunks(songId, totalChunks) {
+            const r = await fetchJson(getApiUrl() + '/api/stream/' + songId + '/chunks');
+            const body = document.getElementById('chunkPanelBody');
+            const info = document.getElementById('chunkInfo');
+            const stat = document.getElementById('statChunks');
+            if (r.ok && r.data) {
+                const d = r.data;
+                const total = d.total_chunks || totalChunks || 0;
+                const cached = d.cached_count || 0;
+                info.textContent = songId + ' - ' + cached + '/' + total + ' cached';
+                stat.textContent = cached + '/' + total;
+
+                // Chunk grid
+                let html = '<div class="chunk-legend">';
+                html += '<span><span class="swatch" style="background:#484f58;"></span>Not downloaded</span>';
+                html += '<span><span class="swatch" style="background:#4caf50;"></span>Downloaded</span>';
+                html += '<span><span class="swatch" style="background:#ffc107;"></span>Downloading</span>';
+                html += '<span><span class="swatch" style="background:#f44336;"></span>Error</span>';
+                html += '</div>';
+                html += '<div class="chunk-grid">';
+                const cs = d.chunk_status || {};
+                for (let i = 0; i < total; i++) {
+                    const s = cs[String(i)] || cs[i] || 'not_downloaded';
+                    html += '<div class="chunk-box ' + s + '" title="Chunk ' + i + ' (' + formatMs(i * 10000) + '): ' + s + '"></div>';
+                }
+                html += '</div>';
+                body.innerHTML = html;
+            }
+        }
+
+        // Fetch API logs from the dashboard server (main app POSTs them here)
+        async function checkSharedLogs() {
+            try {
+                const resp = await fetch('/api/logs');
+                const data = await resp.json();
+                if (data.logs && data.logs.length > 0) {
+                    // Reverse to show newest first (main app sends newest)
+                    apiLogs = data.logs.slice().reverse().slice(0, maxLogs);
+                    lastLogCount = data.logs.length;
+                    renderLogs();
+                }
+            } catch (e) { /* server not ready yet */ }
+        }
+
+        // Render API logs
+        function renderLogs() {
+            const body = document.getElementById('apiLogsBody');
+            const filter = document.getElementById('filterUrl').value.toLowerCase();
+            const filtered = apiLogs.filter(l => !filter || l.url.toLowerCase().includes(filter));
+
+            document.getElementById('statRequests').textContent = apiLogs.length;
+            document.getElementById('statOk').textContent = apiLogs.filter(l => l.status !== null && l.status < 400).length;
+            document.getElementById('statErr').textContent = apiLogs.filter(l => l.status === null || l.status >= 400).length;
+            document.getElementById('logCount').textContent = filtered.length + ' entries';
+
+            if (filtered.length === 0) {
+                body.innerHTML = '<div class="empty">No API calls logged yet</div>';
+                return;
+            }
+
+            body.innerHTML = filtered.slice(-200).reverse().map(l => {
+                const isErr = l.status === null || l.status >= 400;
+                const sc = isErr ? 'err' : (l.status >= 300 ? 'warn' : 'ok');
+                const mc = l.method === 'GET' ? 'GET' : 'POST';
+                let html = '<div class="log-entry' + (isErr ? ' error' : '') + '">';
+                html += '<span class="ts">' + escapeHtml(l.timestamp || '') + '</span>';
+                html += '<span class="method ' + mc + '">' + mc + '</span>';
+                html += '<span class="url">' + escapeHtml(l.url || '') + '</span>';
+                html += '<span class="status ' + sc + '">' + (l.status !== null && l.status !== undefined ? l.status : 'ERR') + '</span>';
+                if (l.duration_ms !== null && l.duration_ms !== undefined) {
+                    html += '<span class="dur">' + l.duration_ms + 'ms</span>';
+                }
+                html += '</div>';
+                if (l.responsePreview) {
+                    html += '<div class="log-entry"><div class="detail">res: ' + escapeHtml(l.responsePreview.substring(0, 300)) + '</div></div>';
+                }
+                if (l.error) {
+                    html += '<div class="log-entry error"><div class="detail">error: ' + escapeHtml(l.error) + '</div></div>';
+                }
+                return html;
+            }).join('');
+
+            if (autoScroll) body.scrollTop = 0;
+        }
+
+        // Helpers
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        function formatMs(ms) {
+            if (!ms) return '0:00';
+            const s = Math.floor(ms / 1000);
+            return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+        }
+
+        // Polling
+        function startPolling() {
+            pollHealth();
+            pollStreamLogs();
+            pollPlayback();
+            checkSharedLogs();
+            document.getElementById('lastUpdate').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+        }
+        function restartPolling() {
+            if (pollTimer) clearInterval(pollTimer);
+            startPolling();
+            pollTimer = setInterval(startPolling, refreshInterval);
+        }
+
+        // Start
+        restartPolling();
+    </script>
+</body>
+</html>

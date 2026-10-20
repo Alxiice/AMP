@@ -4,10 +4,13 @@ FastAPI Endpoints
 REST API endpoints for AMP Backend.
 """
 import os
+import threading
+from collections import deque
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query, status, Response
-from fastapi.responses import JSONResponse, StreamingResponse, FileResponse
-from typing import Optional, List, Union, Dict
+from pathlib import Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, Response
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse, FileResponse
+from typing import Any, Optional, List, Union, Dict
 from pydantic import BaseModel
 import io
 
@@ -39,6 +42,50 @@ streaming_service = get_streaming_service()
 
 # Include auth routes
 router.include_router(auth_router)
+
+# =============================================================================
+# API LOG RELAY (for dashboard)
+# =============================================================================
+
+_api_log_buffer: deque = deque(maxlen=500)
+_api_log_lock = threading.Lock()
+
+
+@router.post("/logs", tags=["monitoring"])
+async def receive_api_log(request: Request):
+    """Receive an API log entry from the frontend."""
+    try:
+        entry = await request.json()
+        with _api_log_lock:
+            _api_log_buffer.append(entry)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/logs", tags=["monitoring"])
+async def get_api_logs():
+    """Get all stored API log entries."""
+    with _api_log_lock:
+        logs = list(_api_log_buffer)
+    return {"logs": logs, "count": len(logs)}
+
+
+@router.delete("/logs", tags=["monitoring"])
+async def clear_api_logs():
+    """Clear all stored API log entries."""
+    with _api_log_lock:
+        _api_log_buffer.clear()
+    return {"ok": True, "cleared": True}
+
+
+@router.get("/dashboard", response_class=HTMLResponse, tags=["monitoring"], include_in_schema=False)
+async def serve_dashboard():
+    """Serve the API monitoring dashboard."""
+    dashboard_path = Path(__file__).parent.parent / "static" / "dashboard.html"
+    if dashboard_path.exists():
+        return HTMLResponse(content=dashboard_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content="<h1>Dashboard not found</h1>", status_code=404)
 
 
 # =============================================================================
