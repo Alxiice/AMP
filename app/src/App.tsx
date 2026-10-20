@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, MouseEvent } from 'react';
+import { useState, useEffect, useRef, useCallback, type ChangeEvent, type MouseEvent as ReactMouseEvent, type TouchEvent as ReactTouchEvent } from 'react';
 import { useYouTubeAuth } from './useYouTubeAuth';
 
 type Song = {
@@ -83,22 +83,39 @@ function App() {
 
   // API monitoring state
   const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
-  const [showApiMonitor, setShowApiMonitor] = useState<boolean>(false);
-  const [apiLogFilter, setApiLogFilter] = useState<string>('');
   const apiLogIdRef = useRef<number>(0);
-  const apiLogsEndRef = useRef<HTMLDivElement>(null);
 
   // Audio element ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const currentSongIdRef = useRef<string | null>(null);
   const chunkPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const seekDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   const baseUrl = apiUrl || 'http://localhost:8000';
 
   // Logged fetch wrapper - tracks every API call for monitoring
+  // Share API logs to the external dashboard server (port 8001) via POST
+  const shareLogsToDashboard = useCallback((entry: ApiLogEntry) => {
+    try {
+      fetch('http://localhost:8001/api/logs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: entry.id,
+          timestamp: entry.timestamp,
+          method: entry.method,
+          url: entry.url,
+          status: entry.status,
+          duration_ms: entry.duration_ms,
+          requestBody: entry.requestBody,
+          responsePreview: entry.responsePreview?.substring(0, 200),
+          error: entry.error,
+        }),
+      }).catch(() => { /* dashboard not running, ignore */ });
+    } catch { /* ignore */ }
+  }, []);
+
   const loggedFetch = useCallback(async (url: string, options?: RequestInit): Promise<Response> => {
     const startTime = performance.now();
     const method = options?.method || 'GET';
@@ -133,7 +150,9 @@ function App() {
           responsePreview,
         };
         const updated = [entry, ...prev];
-        return updated.slice(0, 200); // Keep last 200 entries
+        const sliced = updated.slice(0, 200);
+        shareLogsToDashboard(entry);
+        return sliced;
       });
 
       return response;
@@ -151,18 +170,15 @@ function App() {
           error: String(err),
         };
         const updated = [entry, ...prev];
-        return updated.slice(0, 200);
+        const sliced = updated.slice(0, 200);
+        shareLogsToDashboard(entry);
+        return sliced;
       });
       throw err;
     }
-  }, [baseUrl]);
+  }, [baseUrl, shareLogsToDashboard]);
 
-  // Auto-scroll API logs
-  useEffect(() => {
-    if (showApiMonitor) {
-      apiLogsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [apiLogs, showApiMonitor]);
+  // API logs auto-scroll removed - use external dashboard at http://localhost:8001
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -205,13 +221,13 @@ function App() {
 
   // Poll chunk status while playing
   useEffect(() => {
-    if (isPlaying && currentSong) {
+    if (currentSong) {
       // Initial fetch
       loadChunksStatus(currentSong.id);
-      // Poll every 2 seconds
+      // Poll every 500ms for real-time chunk status updates
       chunkPollRef.current = setInterval(() => {
         loadChunksStatus(currentSong.id);
-      }, 2000);
+      }, 500);
     } else {
       if (chunkPollRef.current) {
         clearInterval(chunkPollRef.current);
@@ -224,7 +240,7 @@ function App() {
         chunkPollRef.current = null;
       }
     };
-  }, [isPlaying, currentSong?.id]);
+  }, [currentSong?.id]);
 
   const loadLikedSongs = async () => {
     try {
@@ -285,6 +301,13 @@ function App() {
       await loggedFetch(`${baseUrl}/api/stream/${song.id}/play`, { method: 'POST' });
     } catch (err) {
       console.error('Failed to start backend playback:', err);
+    }
+
+    // Pre-buffer chunks for faster playback start
+    try {
+      await loggedFetch(`${baseUrl}/api/stream/buffer/${song.id}`, { method: 'POST' });
+    } catch (err) {
+      console.error('Failed to start buffering:', err);
     }
 
     // Load chunks status
@@ -435,14 +458,14 @@ function App() {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [dragPositionMs, setDragPositionMs] = useState<number>(0);
 
-  const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleSliderChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const ms = parseInt(e.target.value);
     setDragPositionMs(ms);
     setIsDragging(true);
     setCurrentTimeMs(ms);
   }, []);
 
-  const handleSliderCommit = useCallback((e: React.MouseEvent<HTMLInputElement> | React.TouchEvent<HTMLInputElement>) => {
+  const handleSliderCommit = useCallback((e: ReactMouseEvent<HTMLInputElement> | ReactTouchEvent<HTMLInputElement>) => {
     setIsDragging(false);
     seekCommitted(dragPositionMs);
   }, [dragPositionMs, seekCommitted]);
@@ -514,15 +537,17 @@ function App() {
           {showLogs ? 'Hide logs' : 'Show logs'} ({logs.length})
         </button>
         {' | '}
-        <button
-          onClick={() => setShowApiMonitor(!showApiMonitor)}
+        <a
+          href="http://localhost:8001"
+          target="_blank"
+          rel="noopener noreferrer"
           style={{
-            background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem',
             color: apiLogs.some(l => l.status === null || l.status >= 400) ? '#f44336' : '#4caf50',
+            textDecoration: 'none', fontSize: '0.8rem', fontWeight: 500,
           }}
         >
-          {showApiMonitor ? 'Hide API monitor' : 'API monitor'} ({apiLogs.length})
-        </button>
+          API monitor (new tab) ({apiLogs.length})
+        </a>
         {' | '}
         <button onClick={() => setShowSettings(!showSettings)} style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}>
           {showSettings ? 'Hide settings' : 'Settings'}
@@ -588,144 +613,6 @@ function App() {
             </div>
           ))}
           <div ref={logsEndRef} />
-        </div>
-      )}
-
-      {/* API Monitor Panel */}
-      {showApiMonitor && (
-        <div style={{
-          background: '#0d1117',
-          border: '1px solid #30363d',
-          borderRadius: '6px',
-          marginBottom: '1rem',
-          display: 'flex',
-          flexDirection: 'column',
-          maxHeight: '400px',
-        }}>
-          {/* Panel header */}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '0.5rem 0.75rem',
-            borderBottom: '1px solid #30363d',
-            flexShrink: 0,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.85rem' }}>
-                API Monitor
-              </span>
-              <span style={{ color: '#8b949e', fontSize: '0.75rem' }}>
-                {apiLogs.length} requests
-              </span>
-              <span style={{
-                color: apiLogs.some(l => l.status === null || l.status >= 400) ? '#f44336' : '#4caf50',
-                fontSize: '0.75rem',
-              }}>
-                {apiLogs.filter(l => l.status !== null && l.status < 400).length} ok,{' '}
-                {apiLogs.filter(l => l.status === null || l.status >= 400).length} errors
-              </span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <input
-                type="text"
-                value={apiLogFilter}
-                onChange={(e) => setApiLogFilter(e.target.value)}
-                placeholder="Filter by URL..."
-                style={{
-                  padding: '0.25rem 0.5rem',
-                  borderRadius: '4px',
-                  border: '1px solid #30363d',
-                  background: '#161b22',
-                  color: '#c9d1d9',
-                  fontSize: '0.75rem',
-                  width: '150px',
-                }}
-              />
-              <button
-                onClick={() => setApiLogs([])}
-                style={{
-                  padding: '0.25rem 0.6rem',
-                  borderRadius: '4px',
-                  border: '1px solid #30363d',
-                  background: '#21262d',
-                  color: '#8b949e',
-                  cursor: 'pointer',
-                  fontSize: '0.75rem',
-                }}
-              >
-                Clear
-              </button>
-            </div>
-          </div>
-
-          {/* Log entries */}
-          <div style={{
-            overflowY: 'auto',
-            flex: 1,
-            fontFamily: 'monospace',
-            fontSize: '0.72rem',
-          }}>
-            {apiLogs.length === 0 && (
-              <div style={{ color: '#484f58', padding: '1rem', textAlign: 'center' }}>
-                No API calls yet. Interact with the app to see requests here.
-              </div>
-            )}
-            {apiLogs
-              .filter(log => !apiLogFilter || log.url.toLowerCase().includes(apiLogFilter.toLowerCase()))
-              .map((log) => {
-                const isError = log.status === null || log.status >= 400;
-                const statusColor = isError ? '#f44336' : log.status! >= 300 ? '#ffc107' : '#4caf50';
-                const methodColor = log.method === 'GET' ? '#61dafb' : log.method === 'POST' ? '#4caf50' : '#ffc107';
-
-                return (
-                  <div
-                    key={log.id}
-                    style={{
-                      padding: '0.35rem 0.75rem',
-                      borderBottom: '1px solid #21262d',
-                      background: isError ? 'rgba(244,67,54,0.05)' : 'transparent',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                      <span style={{ color: '#484f58' }}>{log.timestamp}</span>
-                      <span style={{
-                        color: methodColor,
-                        fontWeight: 600,
-                        minWidth: '35px',
-                      }}>
-                        {log.method}
-                      </span>
-                      <span style={{ color: isError ? '#f44336' : '#c9d1d9', wordBreak: 'break-all' }}>
-                        {log.url}
-                      </span>
-                      <span style={{ color: statusColor, fontWeight: 600, marginLeft: 'auto' }}>
-                        {log.status !== null ? log.status : 'ERR'}
-                      </span>
-                      {log.duration_ms !== null && (
-                        <span style={{ color: '#8b949e' }}>{log.duration_ms}ms</span>
-                      )}
-                    </div>
-                    {log.requestBody && (
-                      <div style={{ color: '#8b949e', marginTop: '2px', paddingLeft: '1rem' }}>
-                        req: {log.requestBody}
-                      </div>
-                    )}
-                    {log.responsePreview && (
-                      <div style={{ color: '#6e7681', marginTop: '2px', paddingLeft: '1rem', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                        res: {log.responsePreview}
-                      </div>
-                    )}
-                    {log.error && (
-                      <div style={{ color: '#f44336', marginTop: '2px', paddingLeft: '1rem' }}>
-                        error: {log.error}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            <div ref={apiLogsEndRef} />
-          </div>
         </div>
       )}
 

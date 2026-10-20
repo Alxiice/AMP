@@ -12,7 +12,9 @@
     "dev:full": "concurrently \"npm run dev\" \"cd .. && python amp/backend/main.py\"",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
-    "build:exe": "bash scripts/build-windows-exe.sh"
+    "build:exe": "bash scripts/build-windows-exe.sh",
+    "dashboard": "python dashboard/serve_dashboard.py",
+    "dev:dashboard": "concurrently \"npm run dev\" \"npm run dashboard\""
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
