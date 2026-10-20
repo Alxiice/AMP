@@ -784,7 +784,7 @@ class TestChunkStatusVisualization:
             output_path.parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, 'wb') as f:
                 f.write(b'fake audio chunk data')
-            return True
+            return True, 206
 
         try:
             # Mock get_chunk to return None (not cached)

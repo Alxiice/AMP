@@ -635,6 +635,43 @@ class StreamingService:
             headers.update(extra)
         return headers
 
+    def _parse_url_clen(self, url: str) -> Optional[int]:
+        """Extract content length (clen) from the stream URL query parameters."""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = parse_qs(urlparse(url).query)
+            clen = parsed.get("clen", [None])[0]
+            if clen and clen.isdigit():
+                return int(clen)
+        except Exception:
+            pass
+        return None
+
+    def _parse_url_metadata(self, url: str) -> Dict[str, str]:
+        """Extract useful metadata from the stream URL."""
+        try:
+            from urllib.parse import urlparse, parse_qs
+            parsed = parse_qs(urlparse(url).query)
+            return {
+                "client": parsed.get("c", ["?"])[0],
+                "clen": parsed.get("clen", ["?"])[0],
+                "dur": parsed.get("dur", ["?"])[0],
+                "itag": parsed.get("itag", ["?"])[0],
+                "mime": parsed.get("mime", ["?"])[0],
+                "expire": parsed.get("expire", ["?"])[0],
+            }
+        except Exception:
+            return {}
+
+    def _refresh_stream_url(self, song_id: str) -> Optional[str]:
+        """Invalidate cached URL/size/byte-ranges and fetch a fresh stream URL."""
+        with self._stream_urls_lock:
+            self._stream_urls.pop(song_id, None)
+        self._stream_sizes.pop(song_id, None)
+        self._chunk_byte_ranges.pop(song_id, None)
+        self._log_streaming(f"Refreshing stream URL for: {song_id}")
+        return self._get_stream_url_cached(song_id)
+
     def _get_url_content_length(self, url: str) -> Optional[int]:
         """
         Get the content length of a URL using multiple strategies.
@@ -721,10 +758,13 @@ class StreamingService:
         output_path: Path,
         start_byte: int,
         end_byte: Optional[int] = None,
-    ) -> bool:
+    ) -> Tuple[bool, int]:
         """
         Download a specific byte range from a URL using HTTP Range requests.
         This allows chunk-by-chunk downloading without ffmpeg.
+        
+        Returns:
+            Tuple of (success: bool, http_status_code: int)
         """
         try:
             os.makedirs(output_path.parent, exist_ok=True)
@@ -747,7 +787,7 @@ class StreamingService:
             
             if response.status_code not in [200, 206]:
                 self._log_streaming(f"HTTP {response.status_code} for byte range {range_header} from {url[:60]}...", "ERROR")
-                return False
+                return False, response.status_code
             self._log_streaming(f"HTTP {response.status_code} for byte range {range_header}")
             
             with open(output_path, 'wb') as f:
@@ -757,14 +797,14 @@ class StreamingService:
             
             if output_path.exists() and output_path.stat().st_size > 0:
                 self._log_streaming(f"Byte range saved: {output_path.name} ({output_path.stat().st_size} bytes)")
-                return True
+                return True, response.status_code
             else:
                 logger.error(f"Downloaded file is empty: {output_path}")
-                return False
+                return False, response.status_code
                 
         except Exception as e:
             logger.error(f"Failed to download byte range: {e}")
-            return False
+            return False, 0
 
 
     def _download_audio(
@@ -1114,6 +1154,12 @@ class StreamingService:
 
         url = self._get_direct_audio_url(song_id)
         if url:
+            meta = self._parse_url_metadata(url)
+            self._log_streaming(
+                f"Stream URL cached: {song_id} | client={meta.get("client","?")} "
+                f"clen={meta.get("clen","?")} dur={meta.get("dur","?")}s "
+                f"itag={meta.get("itag","?")} expire={meta.get("expire","?")}"
+            )
             with self._stream_urls_lock:
                 self._stream_urls[song_id] = url
         return url
@@ -1130,6 +1176,13 @@ class StreamingService:
         """
         if song_id in self._stream_sizes:
             return self._stream_sizes[song_id]
+
+        # Strategy 0: Parse clen from URL query params (instant, no HTTP request)
+        size = self._parse_url_clen(url)
+        if size:
+            self._log_streaming(f"Content length from URL clen param: {size} bytes for {song_id}")
+            self._stream_sizes[song_id] = size
+            return size
 
         # Strategy 1: HTTP content length
         size = self._get_url_content_length(url)
@@ -1293,7 +1346,22 @@ class StreamingService:
             output_path = self._generate_chunk_filename(song_id, chunk_index)
 
             # Download the byte range using HTTP Range request
-            success = self._download_byte_range(stream_url, output_path, start_byte, end_byte)
+            success, http_status = self._download_byte_range(stream_url, output_path, start_byte, end_byte)
+
+            # On 403, the cached URL may be stale - refresh and retry once
+            if not success and http_status == 403:
+                self._log_streaming(f"HTTP 403 for {song_id} [{chunk_index}] - refreshing URL and retrying", "WARNING")
+                fresh_url = self._refresh_stream_url(song_id)
+                if fresh_url and fresh_url != stream_url:
+                    # Recalculate byte range with fresh URL (clen may differ)
+                    self._chunk_byte_ranges.pop(song_id, None)
+                    byte_range = self._get_chunk_byte_range(song_id, chunk_index)
+                    if byte_range:
+                        start_byte, end_byte = byte_range
+                        self._log_streaming(f"Retry byte range for chunk {chunk_index}: {start_byte}-{end_byte} ({end_byte - start_byte + 1} bytes)")
+                        success, http_status = self._download_byte_range(fresh_url, output_path, start_byte, end_byte)
+                else:
+                    self._log_streaming(f"URL refresh did not produce a new URL for {song_id}", "WARNING")
 
             # Clean up downloading state
             if mark_downloading:

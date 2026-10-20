@@ -535,7 +535,7 @@ function App() {
         </button>
         {' | '}
         <a
-          href={`${baseUrl}/dashboard`}
+          href={`${baseUrl}/api/dashboard`}
           target="_blank"
           rel="noopener noreferrer"
           style={{
