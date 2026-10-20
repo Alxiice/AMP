@@ -744,6 +744,48 @@ Served directly from backend at GET /api/dashboard (port 8000). No separate serv
 
 ---
 
-**Last Updated**: 2026-10-20 (fifth round)
+## Phase 3 Fixes (2026-10-20, sixth round) - clen from URL, 403 retry, dashboard fix
+
+### Root Cause: 403 errors from stale cached stream URLs
+
+**Problem**: Browser UI playback failed with HTTP 403 on all chunk downloads for some songs (5dPwBWvmcbQ, jHqkGTDtkOY). The stream URL is cached in memory; if it becomes stale or transiently rejected by the CDN, all subsequent requests fail. Additionally, content-length detection required a separate HTTP request that could also fail, causing inaccurate estimated byte ranges.
+
+**Diagnosis**: Tested CDN requests directly - fresh URLs work (HTTP 206), stale cached URLs fail (HTTP 403). The URL embeds content-length as clen= query parameter.
+
+### Fix 1: Parse clen directly from stream URL (Strategy 0)
+
+YouTube CDN URLs embed the content length as a clen= query parameter (e.g., clen=2442561). Added _parse_url_clen() to extract it instantly without any HTTP request. This is now Strategy 0 in _get_stream_size_cached(), before HTTP HEAD/Range probe.
+
+Result: No more "Could not determine content length" warnings. Byte ranges are always accurate.
+
+### Fix 2: Retry on 403 with URL refresh
+
+Added _refresh_stream_url() which invalidates cached URL/size/byte-ranges and fetches a fresh URL via yt-dlp. In download_chunk(), on HTTP 403, the URL is refreshed and the download retried once with recalculated byte ranges.
+
+_download_byte_range() now returns Tuple[bool, int] - (success, http_status_code) for retry logic.
+
+### Fix 3: URL metadata logging
+
+Added _parse_url_metadata() to extract client (c=), clen, duration, itag, expire from stream URLs. Logged when URL is cached:
+
+    Stream URL cached: LTDxBgP0lqA | client=VISIONOS clen=2406715 dur=148.021s itag=251 expire=1792531436
+
+### Fix 4: Dashboard link fix
+
+Frontend linked to /dashboard but router is mounted at /api prefix. Fixed to /api/dashboard.
+
+### Test Results
+
+    155 passed in 24.12s (116 unit + 39 integration)
+    Integration test: 7/7 steps passed
+      - Content length from URL clen param: 2406715 bytes (no HTTP request)
+      - Chunk 0: 158.8 KB in 2120ms (includes stream URL fetch)
+      - Chunk 1: 158.8 KB in 224ms
+      - Chunk 10: 158.8 KB in 213ms
+    Vite build: OK (341ms)
+
+---
+
+**Last Updated**: 2026-10-20 (sixth round)
 **Current Phase**: Phase 3 Complete (fixed 2026-10-20) — Phase 4 (Frontend Buffering) Next
 **Tests**: 155/155 passing (116 unit + 39 integration)
