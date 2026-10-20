@@ -83,7 +83,9 @@ function App() {
 
   // API monitoring state
   const [apiLogs, setApiLogs] = useState<ApiLogEntry[]>([]);
+  const [showApiLogs, setShowApiLogs] = useState<boolean>(false);
   const apiLogIdRef = useRef<number>(0);
+  const apiLogsPanelRef = useRef<HTMLDivElement>(null);
 
   // Audio element ref
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -121,8 +123,27 @@ function App() {
     const method = options?.method || 'GET';
     const logId = ++apiLogIdRef.current;
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false, fractionalSecondDigits: 3 });
-
+    const shortUrl = url.replace(baseUrl, '');
     const requestBody = options?.body ? String(options.body).substring(0, 500) : undefined;
+
+    // Skip body preview for streaming/binary endpoints to avoid hanging on large responses
+    const skipPreview = shortUrl.includes('/audio') || shortUrl.includes('/chunk/');
+
+    const logAndShare = (status: number | null, duration: number, preview?: string, error?: string) => {
+      const entry: ApiLogEntry = {
+        id: logId,
+        timestamp,
+        method,
+        url: shortUrl,
+        status,
+        duration_ms: duration,
+        requestBody,
+        responsePreview: preview,
+        error,
+      };
+      setApiLogs(prev => [entry, ...prev].slice(0, 200));
+      shareLogsToDashboard(entry);
+    };
 
     try {
       const response = await fetch(url, options);
@@ -130,55 +151,34 @@ function App() {
 
       // Clone response to read body for logging without consuming it
       let responsePreview: string | undefined;
-      try {
-        const clone = response.clone();
-        const text = await clone.text();
-        responsePreview = text.substring(0, 500);
-      } catch {
-        responsePreview = '(binary or unreadable)';
+      if (!skipPreview) {
+        try {
+          const clone = response.clone();
+          const text = await Promise.race([
+            clone.text(),
+            new Promise<string>((_, reject) => setTimeout(() => reject(new Error('timeout')), 2000)),
+          ]);
+          responsePreview = text.substring(0, 500);
+        } catch {
+          responsePreview = '(binary or unreadable)';
+        }
       }
 
-      setApiLogs(prev => {
-        const entry: ApiLogEntry = {
-          id: logId,
-          timestamp,
-          method,
-          url: url.replace(baseUrl, ''),
-          status: response.status,
-          duration_ms: duration,
-          requestBody,
-          responsePreview,
-        };
-        const updated = [entry, ...prev];
-        const sliced = updated.slice(0, 200);
-        shareLogsToDashboard(entry);
-        return sliced;
-      });
-
+      logAndShare(response.status, duration, responsePreview);
       return response;
     } catch (err) {
       const duration = Math.round(performance.now() - startTime);
-      setApiLogs(prev => {
-        const entry: ApiLogEntry = {
-          id: logId,
-          timestamp,
-          method,
-          url: url.replace(baseUrl, ''),
-          status: null,
-          duration_ms: duration,
-          requestBody,
-          error: String(err),
-        };
-        const updated = [entry, ...prev];
-        const sliced = updated.slice(0, 200);
-        shareLogsToDashboard(entry);
-        return sliced;
-      });
+      logAndShare(null, duration, undefined, String(err));
       throw err;
     }
   }, [baseUrl, shareLogsToDashboard]);
 
-  // API logs auto-scroll removed - use external dashboard at http://localhost:8001
+  // Auto-scroll the inline API logs panel to bottom (panel only, not the page)
+  useEffect(() => {
+    if (showApiLogs && apiLogsPanelRef.current) {
+      apiLogsPanelRef.current.scrollTop = apiLogsPanelRef.current.scrollHeight;
+    }
+  }, [apiLogs, showApiLogs]);
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -296,36 +296,28 @@ function App() {
     setCurrentSong(songInfo);
     currentSongIdRef.current = song.id;
 
-    // Start backend playback (triggers chunk buffering)
-    try {
-      await loggedFetch(`${baseUrl}/api/stream/${song.id}/play`, { method: 'POST' });
-    } catch (err) {
+    // Start backend playback and buffering (fire-and-forget, don't block audio setup)
+    loggedFetch(`${baseUrl}/api/stream/${song.id}/play`, { method: 'POST' }).catch(err => {
       console.error('Failed to start backend playback:', err);
-    }
-
-    // Pre-buffer chunks for faster playback start
-    try {
-      await loggedFetch(`${baseUrl}/api/stream/buffer/${song.id}`, { method: 'POST' });
-    } catch (err) {
+    });
+    loggedFetch(`${baseUrl}/api/stream/buffer/${song.id}`, { method: 'POST' }).catch(err => {
       console.error('Failed to start buffering:', err);
-    }
+    });
 
     // Load chunks status
-    await loadChunksStatus(song.id);
+    loadChunksStatus(song.id);
 
-    // Fetch stream info to get duration if not already known
+    // Fetch stream info to get duration if not already known (non-blocking)
     if (!song.duration_ms) {
-      try {
-        const infoRes = await loggedFetch(`${baseUrl}/api/stream/info/${song.id}`);
-        if (infoRes.ok) {
-          const info = await infoRes.json();
-          if (info.duration_ms) {
-            setCurrentSong(prev => prev ? { ...prev, duration_ms: info.duration_ms } : null);
-          }
+      loggedFetch(`${baseUrl}/api/stream/info/${song.id}`).then(res => {
+        if (res.ok) return res.json();
+      }).then(info => {
+        if (info?.duration_ms) {
+          setCurrentSong(prev => prev ? { ...prev, duration_ms: info.duration_ms } : null);
         }
-      } catch (err) {
+      }).catch(err => {
         console.error('Failed to fetch stream info:', err);
-      }
+      });
     }
 
     // Create audio element and start playback
@@ -545,9 +537,34 @@ function App() {
             color: apiLogs.some(l => l.status === null || l.status >= 400) ? '#f44336' : '#4caf50',
             textDecoration: 'none', fontSize: '0.8rem', fontWeight: 500,
           }}
+          title="Open dashboard (requires: npm run dashboard)"
         >
-          API monitor (new tab) ({apiLogs.length})
+          Dashboard ({apiLogs.length})
         </a>
+        {' | '}
+        <button
+          onClick={() => {
+            const blob = new Blob([JSON.stringify(apiLogs, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `amp_api_logs_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+          }}
+          style={{ background: 'none', border: 'none', color: '#8b949e', cursor: 'pointer', fontSize: '0.8rem' }}
+          title="Download API logs as JSON"
+        >
+          Export logs
+        </button>
+        {' | '}
+        <button
+          onClick={() => setShowApiLogs(!showApiLogs)}
+          style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.8rem',
+            color: apiLogs.some(l => l.status === null || l.status >= 400) ? '#f44336' : '#8b949e' }}
+        >
+          {showApiLogs ? 'Hide API logs' : 'API logs'} ({apiLogs.length})
+        </button>
         {' | '}
         <button onClick={() => setShowSettings(!showSettings)} style={{ background: 'none', border: 'none', color: '#61dafb', cursor: 'pointer', fontSize: '0.8rem' }}>
           {showSettings ? 'Hide settings' : 'Settings'}
@@ -613,6 +630,78 @@ function App() {
             </div>
           ))}
           <div ref={logsEndRef} />
+        </div>
+      )}
+
+      {/* Inline API logs panel - fixed height with own scroll, no page scroll */}
+      {showApiLogs && (
+        <div style={{
+          background: '#0d1117',
+          border: '1px solid #30363d',
+          borderRadius: '6px',
+          marginBottom: '1rem',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '200px',
+        }}>
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '0.35rem 0.75rem',
+            borderBottom: '1px solid #30363d',
+            flexShrink: 0,
+          }}>
+            <span style={{ color: '#fff', fontWeight: 600, fontSize: '0.8rem' }}>
+              API Logs ({apiLogs.length})
+            </span>
+            <span style={{ color: '#8b949e', fontSize: '0.7rem' }}>
+              {apiLogs.filter(l => l.status !== null && l.status < 400).length} ok, {apiLogs.filter(l => l.status === null || l.status >= 400).length} err
+            </span>
+          </div>
+          <div
+            ref={apiLogsPanelRef}
+            style={{
+              overflowY: 'auto',
+              flex: 1,
+              fontFamily: 'monospace',
+              fontSize: '0.7rem',
+            }}
+          >
+            {apiLogs.length === 0 && (
+              <div style={{ color: '#484f58', padding: '1rem', textAlign: 'center' }}>
+                No API calls yet.
+              </div>
+            )}
+            {apiLogs.map((log) => {
+              const isError = log.status === null || log.status >= 400;
+              const statusColor = isError ? '#f44336' : log.status! >= 300 ? '#ffc107' : '#4caf50';
+              const methodColor = log.method === 'GET' ? '#61dafb' : log.method === 'POST' ? '#4caf50' : '#ffc107';
+              return (
+                <div
+                  key={log.id}
+                  style={{
+                    padding: '0.2rem 0.75rem',
+                    borderBottom: '1px solid #21262d',
+                    background: isError ? 'rgba(244,67,54,0.05)' : 'transparent',
+                    display: 'flex',
+                    gap: '0.5rem',
+                    alignItems: 'center',
+                  }}
+                >
+                  <span style={{ color: '#484f58', flexShrink: 0 }}>{log.timestamp}</span>
+                  <span style={{ color: methodColor, fontWeight: 600, minWidth: '35px', flexShrink: 0 }}>{log.method}</span>
+                  <span style={{ color: isError ? '#f44336' : '#c9d1d9', wordBreak: 'break-all', flex: 1 }}>{log.url}</span>
+                  <span style={{ color: statusColor, fontWeight: 600, flexShrink: 0 }}>
+                    {log.status !== null ? log.status : 'ERR'}
+                  </span>
+                  {log.duration_ms !== null && (
+                    <span style={{ color: '#8b949e', flexShrink: 0 }}>{log.duration_ms}ms</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
