@@ -1,0 +1,14 @@
+.amp/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+node_modules/
+dist/
+src-tauri/target/
+*.log
+.env
