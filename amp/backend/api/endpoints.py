@@ -7,7 +7,7 @@ P21: Blocking handlers are plain `def`.
 from __future__ import annotations
 
 import threading
-from typing import List
+from typing import List, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -216,61 +216,29 @@ def seek(position_ms: int = Query(..., ge=0)):
 
 @router.get("/stream/info/{song_id}")
 def get_stream_info(song_id: str):
-    """GET /api/stream/info/{id} — segment table summary."""
+    """GET /api/stream/info/{id} — segment table summary. Errors: api/errors.py."""
     validate_song_id(song_id)
-    info = get_streaming_service().get_stream_info_summary(song_id)
-    if not info:
-        raise HTTPException(status_code=404, detail="Stream info not available")
-    return info
-
-
-@router.get("/stream/{song_id}/ready")
-def is_stream_ready(song_id: str):
-    """GET /api/stream/{id}/ready — check if stream info and initial segments are available."""
-    validate_song_id(song_id)
-    from backend.services.streaming import get_streaming_service, validate_song_id as _validate
-    from pathlib import Path
-    from backend.config import settings
-    
-    _validate(song_id)
-    svc = get_streaming_service()
-    info = svc.get_stream_info(song_id)  # Public method validates song_id
-    if not info:
-        return {"ready": False, "reason": "stream_info_not_available"}
-    
-    # Check if at least the init segment (if exists) and first segment are available
-    def get_segment_file_path(song_id: str, index: int) -> Path:
-        """Get the file path for a segment (replicates _segment_path logic)."""
-        if index == -1:
-            return settings.segments_dir / song_id / "init.bin"
-        return settings.segments_dir / song_id / f"{index:04d}.bin"
-    
-    if info.has_init:
-        init_path = get_segment_file_path(song_id, -1)
-        if not init_path.exists():
-            return {"ready": False, "reason": "init_segment_pending", "has_init": True}
-    
-    # Check if first segment is available
-    if len(info.segments) > 0:
-        first_seg_path = get_segment_file_path(song_id, 0)
-        if not first_seg_path.exists():
-            return {"ready": False, "reason": "first_segment_pending"}
-    
-    return {"ready": True, "mime_type": info.mime_type, "is_dash": info.is_dash}
+    return get_streaming_service().get_stream_info_summary(song_id)
 
 
 @router.post("/stream/{song_id}/play")
 def play_song(song_id: str):
-    """POST /api/stream/{id}/play — start session + buffer."""
+    """POST /api/stream/{id}/play — resolve the stream, then start session + buffer.
+
+    Blocks for the extraction on first play. 200 → {song_id, duration_ms,
+    mime_type, segment_count, is_dash, epoch, cached_ahead}; errors use the
+    {detail: {code, message}} shape (api/errors.py).
+    """
     validate_song_id(song_id)
     return get_streaming_service().start_playback(song_id)
 
 
 @router.post("/stream/buffer/{song_id}")
-def buffer_song(song_id: str):
-    """POST /api/stream/buffer/{id} — force buffer-ahead."""
+def buffer_song(song_id: str, mode: Literal["current", "prefetch"] = Query("current")):
+    """POST /api/stream/buffer/{id}?mode= — current: buffer around the playhead;
+    prefetch: resolve + init and 2 segments at LOW, session untouched."""
     validate_song_id(song_id)
-    return get_streaming_service().buffer_ahead(song_id)
+    return get_streaming_service().buffer_ahead(song_id, mode)
 
 
 @router.get("/stream/{song_id}/chunks")

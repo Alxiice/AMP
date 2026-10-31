@@ -29,6 +29,7 @@ from backend.services.streaming.registry import (
 from backend.services.streaming.serving import SegmentUnavailable
 from backend.services.streaming.service import (
     SIDX_HEAD_BYTES,
+    InvalidSongId,
     StreamingService,
     get_streaming_service,
     reset_streaming_service,
@@ -36,7 +37,7 @@ from backend.services.streaming.service import (
 )
 
 __all__ = [
-    "BoundedDict", "CacheStore", "DownloadManager", "LAYOUT_MANIFEST", "PlaybackInfo", "PlaybackSession",
+    "BoundedDict", "CacheStore", "DownloadManager", "InvalidSongId", "LAYOUT_MANIFEST", "PlaybackInfo", "PlaybackSession",
     "Priority", "SIDX_HEAD_BYTES", "SegEntry", "SegState", "SegmentRegistry", "SegmentStatus", "SegmentTask",
     "SegmentUnavailable", "StreamingService", "_Auth403Error", "_PermanentError", "_TransientError",
     "buffer_plan", "fetch_segment", "get_streaming_service", "reset_streaming_service", "validate_song_id",

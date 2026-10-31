@@ -21,11 +21,12 @@
 | Refactor Phase 1 | Single-flight extraction ([plan](improvement-plan/phase-1-extraction.md)) | **DONE** — see Revision 9 |
 | Refactor Phase 2 | Exact segment table from the fMP4 sidx ([plan](improvement-plan/phase-2-segment-table.md)) | **DONE** — see Revision 10 |
 | Refactor Phase 3 | Download pipeline correctness ([plan](improvement-plan/phase-3-download-pipeline.md)) | **DONE** — see Revision 11 |
-| Refactor Phases 4–6 | Playback UX, auth/security, lifecycle | Pending |
+| Refactor Phase 4 | Playback UX & frontend ([plan](improvement-plan/phase-4-playback-ux.md)) | **DONE** — see Revision 12 |
+| Refactor Phases 5–6 | Auth/security, lifecycle | Pending |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–3 are done; Phases 4–6 are pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–4 are done; Phases 5–6 are pending.
 
-**Test results**: 301 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 84% (floor 60%). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 325 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 86% (floor 60%). 10 frontend unit tests pass (`npm test`, vitest). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
 
@@ -220,6 +221,46 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 **Not verified:** the workflows themselves run only on GitHub; the Linux `.deb` bundle step and the Linux PyInstaller build were not run locally (the Windows equivalents were). The Codecov badge needs the `CODECOV_TOKEN` repository secret.
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
+
+### Revision 12 — Phase 4: playback UX & frontend (2026-10-31)
+
+Plan: [improvement-plan/phase-4-playback-ux.md](improvement-plan/phase-4-playback-ux.md) · Branch: `fix/phase-4-playback-ux`
+
+| # | Problem | Fix |
+|---|---|---|
+| F13 | `/ready` polled every 1 s (≤ 30×) before `audio.src`; the loop was never cancelled, so song A could take the element after song B | `POST /play` **resolves the stream** (blocks for the extraction), queues buffer-ahead, returns `{song_id, duration_ms, mime_type, segment_count, is_dash, epoch, cached_ahead}`. PlayerBar `load()`: generation counter + `AbortController` on `/play`; `audio.src` only if still the newest load. `/ready` and `api.isStreamReady` deleted |
+| — | Same race on the backend: a slow `/play` for A finishing after `/play` B took the session back | `_play_seq`: only the newest `/play` starts the session and buffer-ahead; an overtaken one returns `message: "superseded"` |
+| F17 | Invalid `song_id` → `ValueError` → 500 | `InvalidSongId(ValueError)` + handlers in `api/errors.py` (`ApiError`, `InvalidSongId`, `ExtractionError`) → `{"detail": {"code", "message"}}`. `invalid_id` 400, `unavailable`/`no_audio` 404, `auth_required` 401, `node_missing` 503, `extract_failed`/`segment_unavailable` 502. `/audio` and `/stream/info` use the same shape (was `{detail, code}` / plain 404) |
+| — | "Audio error (code 4)" for every failure | `fetchApi` parses the code into `ApiError.code`; `player/errors.ts` `describeError` / `describeMediaError` → e.g. "Sign in required for this track", "Node.js not found. Install it and restart." |
+| — | Queue/volume lost on restart (old "settings persistence: done" was false) | `state.ts` saves `{songs, currentIndex, volume}` to `localStorage` `amp.queue.v1` (debounced 500 ms, try/catch); restored **paused**, play button runs `load()`. `player/persistence.ts` validates what it reads (11-char IDs, clamped index/volume) |
+| — | Next song only extracted after `ended` | `< 20 s` left or `> 80 %` → `POST /buffer/{next}?mode=prefetch` once per song: resolves stream info, queues init + 2 segments at **LOW**, session untouched (`StreamingService.prefetch`) |
+| 3.x | Mid-stream abort (Phase 3) left to the player | One reload per load on `MEDIA_ERR_NETWORK`, resuming at `currentTime` |
+| 4.7 | — | `SegmentBar.tsx` (unused) deleted; segment offsets in a `useMemo` (was O(n²) per render); `duration_ms` from `/play` shown until `loadedmetadata`; spinner on the play button while loading |
+
+**TTFA (G1)**, measured in headless Edge (Chromium, same engine as WebView2) on the real frontend (Vite dev) against a scratch backend, from `load()` to the `playing` event, logged as `TTFA <id> <ms> cached=<bool>` to the API relay (Logs → "API relay"):
+
+| Case | TTFA |
+|---|---|
+| Stream resolved + init/seg 0 on disk (`cached=true`) | **24 ms**, 26 ms (restored song, play clicked), 45 ms (next song after prefetch) |
+| Uncached (`cached=false`): extraction (~1.1 s) + sidx head + seg 0 | 1,354 / 1,363 / 1,571 ms |
+| Segments on disk but backend restarted (`cached=true`, stream info must be re-extracted) | 1,035 ms — the open "cached songs still need an extraction after restart" item |
+
+Target met for the cached case (< 300 ms); uncached ≈ extraction + one segment.
+
+**Verification** (same headless setup; page requests to `:8000` rewritten to the scratch backend over CDP — the user's own backend on :8000 was left running and untouched):
+- 5 songs selected within ~2 s (4 uncached, last cached): relay shows **one** `src` line (`src Tmz3mpOq8aE (resolved in 1121 ms)`), the element plays it, backend session = `Tmz3mpOq8aE`.
+- Unknown ID `aaaaaaaaaaa` → player shows "No audio stream for this track" (backend: 404 `no_audio`).
+- Reload → queue (2 songs), index 1, volume 0.3 restored (`audio.volume` 0.3), no `src`, paused; clicking play → `src` + TTFA 26 ms.
+- 2-song queue, seek to 12 s before the end: the next song was extracted + sidx-indexed at the seek (prefetch), its `/play` took 9 ms and TTFA 45 ms `cached=true`.
+- HTTP: `/api/stream/bad/play` → 400 `invalid_id`; `/ready` → 404; prefetch → `queued: 2` (init already from the head fetch), session unchanged, init + seg 0–1 downloaded.
+- Integration: 11/11 (`BAgTQhR8MLo`), 3/3 download (`Tmz3mpOq8aE`).
+- `grep -rn "isStreamReady\|/ready" frontend/src backend` → nothing.
+
+**Not verified:** the Tauri window itself (WebView2) — only Chromium headless; the network-error reload against a real mid-stream abort; the region-locked case (no region-locked ID at hand; the `unavailable` path is unit-tested).
+
+**New tests:** `test_play_api.py` (24): `test_invalid_song_id_is_400`, invalid ID on 4 routes, every extraction code → status/code (+ unknown → `extract_failed`, failed `/play` doesn't take the session), `test_play_unavailable_is_404_coded`, table-build failure, `test_audio_error_is_json`, `/stream/info` coded, `test_ready_route_removed`, `test_play_returns_summary`, `cached_ahead`, `test_superseded_play_leaves_session_alone`, `test_prefetch_uses_low_priority`, prefetch then play re-ranks LOW → CRITICAL, prefetch error, bad mode 422, default mode. Frontend (new `vitest`, `npm test`, also in Tauri CI): `src/player/player.test.ts` (10: `describeError`, `describeMediaError`, persistence round-trip/junk/clamping, `shouldPrefetch`). `test_serving.py` assertions moved to the new body shape.
+
+**Test results:** 325 unit tests pass, coverage 86% (`api/errors.py` 96%), ruff clean, 10 vitest tests, `npm run build` OK, 14/14 integration.
 
 ### Revision 11 — Phase 3: download pipeline correctness (2026-10-31)
 
@@ -432,9 +473,9 @@ amp/frontend/
 │   ├── state.ts                 # Frontend-owned queue + playback state (useSyncExternalStore)
 │   ├── styles.css               # Dark theme, all components
 │   ├── components/
-│   │   ├── PlayerBar.tsx        # Play/pause/stop/next/prev, seek slider, volume, thumbnail, SegmentBar
-│   │   ├── SegmentBar.tsx       # Segment status cells, click-to-seek, 500ms poll (P12 in-flight guard)
+│   │   ├── PlayerBar.tsx        # Play/pause/stop/next/prev, segment bar (click-to-seek, 500ms poll, P12), volume, load()
 │   │   └── SongList.tsx         # Reusable song list with play-on-click
+│   ├── player/                  # errors.ts, persistence.ts, prefetch.ts + player.test.ts (Revision 12)
 │   └── pages/
 │       ├── Search.tsx           # Query box, results list, play per result
 │       ├── Library.tsx          # Liked songs list
@@ -457,7 +498,7 @@ amp/frontend/
 
 - **Logs page**: Backend stdout/stderr ring buffer, streaming logs, API log relay
 - **Error surfacing**: Backend status indicator in sidebar (starting/running/stopped/error), manual restart button
-- **Settings persistence**: Frontend-owned queue in `state.ts` via `useSyncExternalStore`
+- **Settings persistence**: Frontend-owned queue in `state.ts` via `useSyncExternalStore` *(correction: nothing was persisted until Revision 12)*
 
 ### Phase 5 — Packaging + tests + README (DONE)
 
@@ -517,6 +558,7 @@ amp/frontend/
 13. **CI**: lint + unit tests run from the lock file; coverage config lives in `amp/pyproject.toml`; Tauri CI builds the PyInstaller sidecar before `tauri build` (Revision 8).
 14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
 15. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; request handlers use `ensure_segment()` and never poll; the cache LRU clock is file mtime (Revision 11)
+16. **Play contract**: `/play` resolves the stream before returning, newest `/play` owns the session; the player sets `audio.src` only for its newest load. Streaming errors are `{detail: {code, message}}` (`api/errors.py`) (Revision 12)
 
 ## All 24 Pitfalls Addressed
 
@@ -557,7 +599,8 @@ amp/frontend/
 - [ ] Sidecar runtime not verified: PyInstaller binary builds, but launching it from the packaged app (data dir, `yt_dlp_ejs` data files, Node on PATH) is untested — Phase 6
 - [ ] P7 (Windows encoding of sidecar output) not handled in the frontend
 - [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
-- [ ] MSE upgrade (§8.4) — optional Phase-4 enhancement
+- [ ] MSE upgrade (§8.4) — optional, not done in Phase 4
+- [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
 
 ## Environment Notes
 
@@ -589,6 +632,9 @@ cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m backend.
 
 # Frontend build
 cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run build
+
+# Frontend unit tests (vitest)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm test
 
 # Frontend dev server
 cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run dev

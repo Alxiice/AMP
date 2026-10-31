@@ -37,7 +37,7 @@ from backend.services.streaming.downloader import (
     fetch_segment,
 )
 from backend.services.streaming.playback import PlaybackSession, buffer_plan
-from backend.services.streaming.registry import SegmentRegistry, SegState, to_status
+from backend.services.streaming.registry import Priority, SegmentRegistry, SegState, to_status
 from backend.services.streaming.serving import SegmentUnavailable, serve_audio_range
 from backend.utils.layout import (
     StreamInfo,
@@ -49,6 +49,9 @@ from backend.utils.mp4 import NeedMoreData, parse_fmp4_index
 
 logger = get_logger("backend.services.streaming")
 
+# mode=prefetch: init + this many segments of the next song
+PREFETCH_SEGMENTS = 2
+
 # First request for an fMP4 stream: ftyp + moov + sidx are ~1-2 KB for YouTube audio
 SIDX_HEAD_BYTES = 65536
 
@@ -56,9 +59,13 @@ SIDX_HEAD_BYTES = 65536
 SONG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
+class InvalidSongId(ValueError):
+    """song_id doesn't match SONG_ID_RE (-> 400 invalid_id)."""
+
+
 def validate_song_id(song_id: str) -> str:
     if not SONG_ID_RE.match(song_id):
-        raise ValueError(f"Invalid song_id: {song_id!r}")
+        raise InvalidSongId(f"Invalid song_id: {song_id!r}")
     return song_id
 
 
@@ -80,6 +87,8 @@ class StreamingService:
         self._info_flight: SingleFlight[str, Optional[StreamInfo]] = SingleFlight()
         self._epochs: Dict[str, int] = {}
         self._epochs_lock = threading.Lock()
+        self._play_seq = 0  # bumped by every /play; only the newest one takes the session
+        self._play_lock = threading.Lock()
 
         # HTTP session for CDN requests
         self._http = requests.Session()
@@ -110,15 +119,46 @@ class StreamingService:
     # --- Playback session ---
 
     def start_playback(self, song_id: str) -> Dict[str, Any]:
+        """Resolve the stream (blocks for the extraction on first play), then start
+        the session and its buffer-ahead. Raises ExtractionError.
+
+        A /play overtaken by a newer one while it resolved (the user clicked
+        another song) returns its summary but leaves the session alone.
+        """
         validate_song_id(song_id)
+        with self._play_lock:
+            self._play_seq += 1
+            seq = self._play_seq
+        info = self.require_stream_info(song_id)
         epoch = self.get_epoch(song_id)
-        self._playback.start(song_id, epoch)
-        # Leftovers queued for other songs would compete with this one
-        for other in self._registry.queued_songs():
-            if other != song_id:
-                self._registry.unqueue(other)
-        self._queue_buffer_ahead(song_id, start_index=0, epoch=epoch)
-        return {"message": "playback started", "song_id": song_id, "epoch": epoch}
+        cached_ahead = self._cached_ahead(info)
+        with self._play_lock:
+            superseded = seq != self._play_seq
+            if not superseded:
+                self._playback.start(song_id, epoch)
+        if superseded:
+            logger.info("Play %s superseded by a newer /play; session unchanged", song_id)
+        else:
+            # Leftovers queued for other songs would compete with this one
+            for other in self._registry.queued_songs():
+                if other != song_id:
+                    self._registry.unqueue(other)
+            self._queue_buffer_ahead(song_id, start_index=0, epoch=epoch)
+        return {
+            "message": "superseded" if superseded else "playback started",
+            "song_id": song_id,
+            "duration_ms": info.duration_ms,
+            "mime_type": info.mime_type,
+            "segment_count": len(info.segments),
+            "is_dash": info.is_dash,
+            "epoch": epoch,
+            "cached_ahead": cached_ahead,
+        }
+
+    def _cached_ahead(self, info: StreamInfo) -> bool:
+        """Init (if any) and segment 0 on disk: playback starts without a CDN request."""
+        needed = ([-1] if info.has_init else []) + ([0] if info.segments else [])
+        return all(self._registry.get((info.song_id, i)) == SegState.DONE for i in needed)
 
     def pause_playback(self) -> Dict[str, Any]:
         self._playback.set_playing(False)
@@ -157,12 +197,28 @@ class StreamingService:
     def get_playback_state(self) -> Dict[str, Any]:
         return self._playback.snapshot().to_dict()
 
-    def buffer_ahead(self, song_id: str) -> Dict[str, Any]:
+    def buffer_ahead(self, song_id: str, mode: str = "current") -> Dict[str, Any]:
+        """mode=current: buffer around the playhead. mode=prefetch: see prefetch()."""
         validate_song_id(song_id)
+        if mode == "prefetch":
+            return self.prefetch(song_id)
         state = self._playback.snapshot()
         start = state.current_segment_index if state.song_id == song_id else 0
         self._queue_buffer_ahead(song_id, start_index=start, force=True)
-        return {"message": "buffer-ahead triggered", "song_id": song_id}
+        return {"message": "buffer-ahead triggered", "song_id": song_id, "mode": mode}
+
+    def prefetch(self, song_id: str) -> Dict[str, Any]:
+        """Warm up the next song: resolve its stream info, queue init + 2 segments at LOW.
+
+        Doesn't touch the playback session, so it never competes with the
+        current song (whose requests are CRITICAL..NORMAL). Raises ExtractionError.
+        """
+        validate_song_id(song_id)
+        info = self.require_stream_info(song_id)
+        epoch = self.get_epoch(song_id)
+        indices = ([-1] if info.has_init else []) + list(range(min(PREFETCH_SEGMENTS, len(info.segments))))
+        queued = sum(self._dl_manager.enqueue(song_id, i, Priority.LOW, epoch) for i in indices)
+        return {"message": "prefetch queued", "song_id": song_id, "mode": "prefetch", "queued": queued}
 
     def _position_to_index(self, song_id: str, position_ms: int) -> int:
         info = self._get_stream_info(song_id)
@@ -195,6 +251,14 @@ class StreamingService:
         validate_song_id(song_id)
         return self._get_stream_info(song_id)
 
+    def require_stream_info(self, song_id: str) -> StreamInfo:
+        """Stream info, or ExtractionError with the reason it couldn't be built."""
+        info = self._get_stream_info(song_id)
+        if info is None:
+            code = self._stream_errors.get(song_id) or "extract_failed"
+            raise ExtractionError(code, f"No stream for {song_id}")
+        return info
+
     def _get_stream_info(self, song_id: str) -> Optional[StreamInfo]:
         cached = self._stream_info_cache.get(song_id)
         if cached is not None:
@@ -211,6 +275,8 @@ class StreamingService:
             info = self._info_flight.do(song_id, load)
             if info is not None:
                 self._stream_errors.delete(song_id)
+            else:
+                self._stream_errors.set(song_id, "extract_failed")  # extracted, but no usable table
             return info
         except ExtractionError as e:
             logger.warning("No stream for %s: %s (%s)", song_id, e.code, e)
@@ -218,6 +284,7 @@ class StreamingService:
             return None
         except Exception as e:
             logger.error("Failed to build stream info for %s: %s", song_id, e)
+            self._stream_errors.set(song_id, "extract_failed")
             return None
 
     def _store_stream_info(self, song_id: str, info: Optional[StreamInfo]) -> Optional[StreamInfo]:
@@ -621,11 +688,9 @@ class StreamingService:
         """Last ExtractionError code for the song, if its stream info failed."""
         return self._stream_errors.get(song_id)
 
-    def get_stream_info_summary(self, song_id: str) -> Optional[Dict[str, Any]]:
-        """Return a JSON-serializable summary of StreamInfo."""
-        info = self._get_stream_info(song_id)
-        if not info:
-            return None
+    def get_stream_info_summary(self, song_id: str) -> Dict[str, Any]:
+        """JSON-serializable summary of StreamInfo. Raises ExtractionError."""
+        info = self.require_stream_info(song_id)
         return {
             "song_id": info.song_id,
             "title": info.title,

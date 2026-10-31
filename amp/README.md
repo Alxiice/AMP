@@ -144,7 +144,8 @@ User-specific endpoints (`/api/user/likes`, `/api/user/playlists`) require YouTu
 | GET | `/api/stream/info/{id}` | Segment table summary |
 | GET | `/api/stream/{id}/audio` | Audio stream (full Range support) |
 | GET | `/api/stream/{id}/chunks` | Segment status list |
-| POST | `/api/stream/{id}/play` | Start playback + buffer |
+| POST | `/api/stream/{id}/play` | Resolve the stream, start playback + buffer (returns duration, segment count, `cached_ahead`) |
+| POST | `/api/stream/buffer/{id}?mode=current\|prefetch` | Force buffer-ahead, or warm up the next song (LOW priority) |
 | POST | `/api/stream/pause` | Pause |
 | POST | `/api/stream/resume` | Resume |
 | POST | `/api/stream/stop` | Stop |
@@ -165,6 +166,9 @@ pytest -m "not integration"
 
 # Integration tests (network + cookies, ~2 min)
 pytest -m integration
+
+# Frontend unit tests (pure player helpers, vitest)
+cd frontend && npm test
 ```
 
 Pinned songs: `dQw4w9WgXcQ` (Rick Astley), `LTDxBgP0lqA` (The Weeknd).
@@ -178,6 +182,7 @@ amp/
 │   ├── config.py            # pydantic-settings
 │   ├── api/
 │   │   ├── server.py        # FastAPI app, auth middleware, CORS
+│   │   ├── errors.py        # {detail: {code, message}} error model
 │   │   ├── endpoints.py     # Library + streaming + logs routes
 │   │   └── auth_routes.py   # Auth endpoints
 │   ├── services/
@@ -198,7 +203,8 @@ amp/
 │   │   ├── api.ts           # Typed fetch wrapper
 │   │   ├── sidecar.ts       # Backend process management
 │   │   ├── state.ts         # Queue + playback state
-│   │   ├── components/      # PlayerBar, SegmentBar, SongList
+│   │   ├── components/      # PlayerBar, SongList
+│   │   ├── player/          # error text, queue persistence, prefetch (vitest: npm test)
 │   │   └── pages/           # Search, Library, Playlists, Auth, Logs
 │   ├── index.html           # CSP meta
 │   └── src-tauri/           # Tauri v2 config

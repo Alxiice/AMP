@@ -59,6 +59,18 @@ export interface StreamInfoSummary {
   }>;
 }
 
+/** POST /api/stream/{id}/play — the stream is resolved when this returns. */
+export interface PlayResponse {
+  message: string; // "playback started" | "superseded"
+  song_id: string;
+  duration_ms: number;
+  mime_type: string;
+  segment_count: number;
+  is_dash: boolean;
+  epoch: number;
+  cached_ahead: boolean; // init + first segment already on disk
+}
+
 export interface PlaybackState {
   song_id: string;
   current_segment_index: number;
@@ -130,10 +142,28 @@ export interface PlaylistInfo {
 
 class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Backend error code ({detail: {code, message}}), null for string details. */
+  code: string | null;
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
+    this.name = "ApiError";
     this.status = status;
+    this.code = code;
   }
+}
+
+/** {detail: {code, message}} (streaming routes) or {detail: "..."} (others). */
+function parseErrorBody(status: number, text: string): ApiError {
+  try {
+    const detail = JSON.parse(text)?.detail;
+    if (detail && typeof detail === "object" && typeof detail.code === "string") {
+      return new ApiError(status, detail.message || detail.code, detail.code);
+    }
+    if (typeof detail === "string") return new ApiError(status, detail);
+  } catch {
+    // not JSON
+  }
+  return new ApiError(status, text);
 }
 
 async function fetchApi<T>(
@@ -161,7 +191,7 @@ async function fetchApi<T>(
 
   if (!resp.ok) {
     const text = await resp.text().catch(() => resp.statusText);
-    throw new ApiError(resp.status, text);
+    throw parseErrorBody(resp.status, text);
   }
 
   // Handle empty responses
@@ -194,15 +224,11 @@ export const api = {
   // --- Streaming ---
   getStreamInfo: (id: string) => fetchApi<StreamInfoSummary>(`/api/stream/info/${id}`),
   getStreamAudioUrl: (id: string) => `${BASE_URL}/api/stream/${id}/audio`,
-  isStreamReady: (id: string) =>
-    fetchApi<{ ready: boolean; reason?: string; mime_type?: string; is_dash?: boolean }>(`/api/stream/${id}/ready`),
   getSegmentStatuses: (id: string) =>
     fetchApi<{ segments: SegmentStatus[] }>(`/api/stream/${id}/chunks`),
 
-  playSong: (id: string) =>
-    fetchApi<{ message: string; song_id: string; epoch: number }>(`/api/stream/${id}/play`, {
-      method: "POST",
-    }),
+  playSong: (id: string, signal?: AbortSignal) =>
+    fetchApi<PlayResponse>(`/api/stream/${id}/play`, { method: "POST", signal }),
 
   pause: () => fetchApi<{ message: string }>("/api/stream/pause", { method: "POST" }),
   resume: () => fetchApi<{ message: string }>("/api/stream/resume", { method: "POST" }),
@@ -218,8 +244,8 @@ export const api = {
       method: "POST",
     }),
 
-  bufferAhead: (id: string) =>
-    fetchApi<{ message: string }>(`/api/stream/buffer/${id}`, { method: "POST" }),
+  bufferAhead: (id: string, mode: "current" | "prefetch" = "current") =>
+    fetchApi<{ message: string }>(`/api/stream/buffer/${id}?mode=${mode}`, { method: "POST" }),
 
   getPlaybackState: () => fetchApi<PlaybackState>("/api/stream/playback-state"),
   getStreamLogs: (n = 200) =>
