@@ -47,15 +47,12 @@ jobs:
           cache: pip
           cache-dependency-path: amp/requirements.lock
 
-      - name: Build backend sidecar (PyInstaller)
+      - name: Build backend sidecar (PyInstaller) + smoke test
         working-directory: amp
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.lock
-          python -m PyInstaller --noconfirm amp-backend.spec
-          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
-          mkdir -p frontend/src-tauri/binaries
-          cp dist/amp-backend "frontend/src-tauri/binaries/amp-backend-${TRIPLE}"
+          python scripts/build_sidecar.py --smoke
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

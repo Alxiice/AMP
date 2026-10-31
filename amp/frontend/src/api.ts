@@ -1,11 +1,22 @@
 /**
  * Typed fetch wrapper with optional Bearer token auth.
- * All API calls go to http://127.0.0.1:8000/api.
+ * API calls go to the backend's base URL: set once at startup from the Tauri
+ * `backend_info` command (free port, sidecar.ts), http://127.0.0.1:8000 otherwise.
  * If no token is set, requests are sent without Authorization header
  * (backend runs in open mode — search and streaming work without auth).
  */
 
-const BASE_URL = "http://127.0.0.1:8000";
+export const DEFAULT_BASE_URL = "http://127.0.0.1:8000";
+
+let BASE_URL = DEFAULT_BASE_URL;
+
+export function setBaseUrl(url: string): void {
+  BASE_URL = url;
+}
+
+export function getBaseUrl(): string {
+  return BASE_URL;
+}
 
 let authToken: string = "";
 

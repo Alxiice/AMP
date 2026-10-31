@@ -1,11 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for AMP v2 — sidecar spawn only",
+  "description": "Default capabilities for AMP v2: core only. The backend is spawned from Rust (backend.rs), so JS has no shell access.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    "shell:allow-spawn",
-    "shell:allow-stdin-write"
+    "core:default"
   ]
 }

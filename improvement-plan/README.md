@@ -3,7 +3,7 @@
 > **Source**: code review of `feature/auth-auto-cookie-extraction` @ `0397f83` (2026-10-30).
 > **Spec**: `DESIGN_DOC_2.md` stays authoritative. Where a phase deliberately deviates from it, the phase says so and updates the spec.
 > **Progress tracking**: `AGENTS.md`. Add a "Revision N" entry when each phase lands.
-> **Status (2026-10-31)**: Phase 0 **done** (AGENTS.md Revision 7), plus logos/CI/badges and a working Tauri build (Revision 8). Phase 1 **done** (Revision 9), Phase 2 **done** (Revision 10), Phase 3 **done** (Revision 11), Phase 4 **done** (Revision 12), Phase 5 **done** (Revision 13). Next: Phase 6.
+> **Status (2026-10-31)**: Phase 0 **done** (AGENTS.md Revision 7), plus logos/CI/badges and a working Tauri build (Revision 8). Phase 1 **done** (Revision 9), Phase 2 **done** (Revision 10), Phase 3 **done** (Revision 11), Phase 4 **done** (Revision 12), Phase 5 **done** (Revision 13), Phase 6 **done** (Revision 14). Remaining: 5.6 (per-launch token), now unblocked.
 
 This plan fixes the problems the review found, grouped into seven phases. Each phase has its own file: what it fixes, the tasks, the tests to add, and how to tell it is done.
 
@@ -17,7 +17,7 @@ This plan fixes the problems the review found, grouped into seven phases. Each p
 | 3 | [phase-3-download-pipeline.md](phase-3-download-pipeline.md) | Seek drops queued work, truncated audio responses, tmp-file race, FIFO-not-LRU eviction | 1–2 days | 2 | **Done** (Rev. 11) |
 | 4 | [phase-4-playback-ux.md](phase-4-playback-ux.md) | `/ready` polling, stale-load race, opaque errors, no persistence, no next-song prefetch | 1 day | 3 | **Done** (Rev. 12) |
 | 5 | [phase-5-auth-security.md](phase-5-auth-security.md) | Four overlapping sign-in flows, stored foreign cookies, cross-site POSTs | 1 day | 0 (can run in parallel with 2–4) | **Done** (Rev. 13) |
-| 6 | [phase-6-lifecycle-packaging.md](phase-6-lifecycle-packaging.md) | Backend spawn/kill, orphan processes, data dir under PyInstaller, packaging, launchers | 1–2 days | 1, 4 | Pending (part done in Rev. 8) |
+| 6 | [phase-6-lifecycle-packaging.md](phase-6-lifecycle-packaging.md) | Backend spawn/kill, orphan processes, data dir under PyInstaller, packaging, launchers | 1–2 days | 1, 4 | **Done** (Revision 14) |
 
 ```
 0 ──► 1 ──► 2 ──► 3 ──► 4 ──► 6

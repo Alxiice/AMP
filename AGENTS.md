@@ -23,15 +23,17 @@
 | Refactor Phase 3 | Download pipeline correctness ([plan](improvement-plan/phase-3-download-pipeline.md)) | **DONE** — see Revision 11 |
 | Refactor Phase 4 | Playback UX & frontend ([plan](improvement-plan/phase-4-playback-ux.md)) | **DONE** — see Revision 12 |
 | Refactor Phase 5 | Auth simplification & local API hardening ([plan](improvement-plan/phase-5-auth-security.md)) | **DONE** — see Revision 13 |
-| Refactor Phase 6 | Lifecycle & packaging ([plan](improvement-plan/phase-6-lifecycle-packaging.md)) | Pending |
+| Refactor Phase 6 | Lifecycle & packaging ([plan](improvement-plan/phase-6-lifecycle-packaging.md)) | **DONE** — see Revision 14 |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–5 are done; Phase 6 is pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6, all done. Left from the plan: 5.6 (per-launch token), now unblocked.
 
-**Test results**: 357 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 88% (floor 60%). 12 frontend unit tests pass (`npm test`, vitest). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 379 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 87% (floor 60%). 12 frontend unit tests pass (`npm test`, vitest). 1 Rust test (`cargo test`). Integration 11/11 (`BAgTQhR8MLo`). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required, but cross-site requests are refused (Revision 13). Search, browse, and play work immediately. YouTube sign-in (optional, Tauri webview; paste / Firefox import as fallbacks) unlocks liked songs and user playlists. Only youtube.com cookies are stored, with their domains.
 
-**Virtualenv**: The app uses `amp/venv/` — the Tauri frontend spawns `venv/Scripts/python.exe` (Windows) or `venv/bin/python` (Unix).
+**Startup model** (Revision 14): the Tauri app is the entry point. Rust (`src-tauri/src/backend.rs`) spawns the backend on a free port with `--data-dir <app data dir> --parent-watch` and stops it on exit; the frontend only asks `backend_info` for the port. `amp/app.py` is a debugging tool (backend on :8000 with `amp/.amp/`).
+
+**Virtualenv**: dev builds of the Tauri app run `amp/venv/Scripts/python.exe` (Windows) or `amp/venv/bin/python` (Unix), or `AMP_PYTHON`. Release builds run the PyInstaller sidecar.
 
 ### Revision 2 — Bug fixes + control panel + segment visualization (2026-10-27)
 
@@ -49,7 +51,7 @@
 
 | Feature | Files |
 |---------|-------|
-| **Tkinter control panel** | `amp/amp_control.py` — double-click GUI: start/stop/restart backend + frontend, force-kill port 8000/1420, health check, live log |
+| **Tkinter control panel** | `amp/amp_control.py` (deleted in Revision 14; `app.py` remains) — double-click GUI: start/stop/restart backend + frontend, force-kill port 8000/1420, health check, live log |
 | **Segment visualization in player bar** | `PlayerBar.tsx` redesigned — seek bar is now segment-colored rectangles (green=downloaded, yellow=downloading+pulse, gray=pending, red=error), played portion overlaid, click-to-seek |
 | **Cache info display** | New `GET /api/stream/cache-info` endpoint + `getCacheInfo()` in streaming service + cache bar in player (size, usage %, song/segment counts) |
 | **Player bar height** | Increased from 80px to 96px to accommodate cache info row |
@@ -222,6 +224,49 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 **Not verified:** the workflows themselves run only on GitHub; the Linux `.deb` bundle step and the Linux PyInstaller build were not run locally (the Windows equivalents were). The Codecov badge needs the `CODECOV_TOKEN` repository secret.
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
+
+### Revision 14 — Phase 6: lifecycle & packaging (2026-10-31)
+
+Plan: [improvement-plan/phase-6-lifecycle-packaging.md](improvement-plan/phase-6-lifecycle-packaging.md) · Branch: `fix/phase-6-lifecycle`
+
+**6.0 — result.** With the old code, `npm run tauri dev` printed `Scoped command venv/Scripts/python.exe not found` (twice: React StrictMode mounts twice). `shell:allow-spawn` had no scope, so the shell plugin rejected **every** JS spawn (dev `Command.create` and prod `Command.sidecar` alike, `ProgramNotAllowed`), and `sidecar.ts` silently adopted whatever answered on :8000. **The Tauri app never started its own backend**, which explains the past "port already in use" / "works only if app.py runs" reports. Also: without an `env` option the plugin's JS path calls `env_clear()`, so even an allowed spawn would have lost `PATH` (and Node).
+
+| # | Problem | Fix |
+|---|---|---|
+| F14 | JS spawn always failed; no kill on exit; `shell:*` granted to the webview | New `src-tauri/src/backend.rs`: spawned in `setup()` (debug: `amp/venv` python or `AMP_PYTHON`, `-m backend.main`, cwd `amp/`; release: sidecar `amp-backend`), `set_process_group(true)` (Windows job object: the venv launcher and the PyInstaller bootloader each start a second process), env inherited + `PYTHONIOENCODING=utf-8`. `RunEvent::Exit` → `exit` on stdin, ≤ 2 s, then kill the tree. Commands `backend_info → {port, token: null}`, `backend_logs` (1000-line ring, so startup errors aren't lost), `restart_backend`; events `backend-log`, `backend-status`. `capabilities/default.json` = `core:default` only; `@tauri-apps/plugin-shell` removed from `package.json` |
+| — | Backend outlived a killed app | `--parent-watch`: daemon thread reads fd 0; EOF or `exit` → `server.should_exit` (graceful, lifespan shutdown), `os._exit` after 1.5 s at the latest (`backend/lifecycle.py`) |
+| — | Fixed port 8000 | Rust picks a free port (`AMP_PORT` overrides). `backend.main` binds the socket itself (`lifecycle.bind_socket`: `SO_EXCLUSIVEADDRUSE` on Windows instead of uvicorn's `SO_REUSEADDR`; real port known for `--port 0`) and runs `uvicorn.Server.run(sockets=[sock])`. `api.ts` base URL set once by `initBackend()` **before the first render** (`main.tsx`); outside Tauri it stays `http://127.0.0.1:8000`. CSP `connect-src` / `media-src` → `http://127.0.0.1:*` |
+| F16 | PyInstaller one-file: data next to `__file__` = temp extraction dir | `--data-dir` → `configure_paths(data_dir, data_dir/userdb.sqlite)`; Rust passes `app_data_dir()` (`%APPDATA%\com.amp.v2`). Without `--data-dir`: checkout → `amp/.amp/` as before; frozen → `config.app_data_dir()` (same dir as Tauri's). Dev hint logged if the data dir has no sign-in but `amp/.amp/cache/ytm_session.json` exists; credentials are never copied |
+| 6.3 | — | `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit if still ours; startup WARNING if the recorded backend answers `/api/health` with that pid. `/api/health` adds `app: "AMP v2"`, `pid` |
+| 6.5 | Sidecar build steps only inline in CI; spec missing data files | `amp/scripts/build_sidecar.py [--skip-pyinstaller] [--smoke]`: PyInstaller → `rustc -vV` host triple → `binaries/amp-backend-<triple>[.exe]`; `--smoke` starts it on a free port with a temp data dir, checks health + search, closes stdin, expects exit. Tauri CI uses it. Spec: `collect_data_files("yt_dlp_ejs")` (also in yt-dlp's own hook), `ytmusicapi` locales, `collect_submodules("backend")` (the hand-written list lacked `backend.api.errors`), **`console=True`** (pipes must be real for `--parent-watch` / log forwarding; uvicorn's logging breaks on a `None` stdout; Tauri spawns with `CREATE_NO_WINDOW`) |
+| 6.6 | Two launchers | `amp_control.py` deleted. `app.py`: `AMP_PORT`; Force Kill reads `amp/.amp/backend.pid` first (only if `/api/health` on the recorded port answers with that pid: no PID-reuse kills), port scan as fallback; docstring and desktop-mode log say the Tauri app runs its own backend |
+| 6.7 | — | `RotatingFileHandler` 5 MB × 3 (`delay=True`) for `app.log` / `streaming.log`; `configure_logging(console=True)` (from `main`) also logs INFO+ to stderr, which is what the Logs page's "Backend stdout" now shows. `@app.on_event` → `lifespan`. `datetime.utcnow()` → `now(timezone.utc).replace(tzinfo=None)` (stored values stay naive UTC) |
+| 6.8 #6 | Two instances | **Single instance** (`tauri-plugin-single-instance`): a second launch exits and focuses the first window. Two backends sharing one data dir would each own the same segment cache (Phase 3 assumes one owner: eviction / startup reconcile in one deletes files the other serves) |
+| P7 | Windows encoding of sidecar output | Rust `String::from_utf8_lossy` + `PYTHONIOENCODING=utf-8` |
+| — | Sidebar status hidden | Found while smoke-testing: the fixed player bar covered the bottom 96 px of the sidebar, so "Backend: …" and the Phase 5 session badge were never visible. `.sidebar { padding-bottom: var(--player-bar-height) }` |
+
+**Smoke checklist 6.8**: release build `src-tauri/target/release/amp-v2.exe` (sidecar next to it, not installed), `%APPDATA%\com.amp.v2` moved aside first (it only held data from this revision's dev run):
+
+| # | Result |
+|---|---|
+| 1 | Backend healthy **1.5 s** after launch (port 23850); window shows "Backend: running" + "Signed out" (screenshot) |
+| 2 | Search: 20 results. `/play` + first 64 KB of `/audio` (206): uncached `Tmz3mpOq8aE` 3.5 s (first extraction in a fresh frozen process ~3 s, later ones ~1.4 s); `BAgTQhR8MLo` after restart 1.5 s (re-extraction, known open item). Via HTTP, not by clicking |
+| 3 | `CloseMainWindow()` → app exits, `Exit requested by the parent` → clean shutdown; **0** `amp-backend.exe` left, `backend.pid` removed |
+| 4 | `Stop-Process -Force` on the app → both `amp-backend.exe` gone after **0.8 s** (parent watch) |
+| 5 | Relaunch → 5 / 27 entries of `BAgTQhR8MLo` still downloaded, `/play` reports `cached_ahead: true`; data dir holds `cache`, `logs`, `userdb.sqlite`, `backend.pid` |
+| 6 | Second launch exits with code 0; still 1 `amp-v2`, 2 `amp-backend` (one backend) |
+
+Dev (`npm run tauri dev`, with the user's app.py backend still on :8000): backend spawned on free port 25471 with the app data dir, `node` found (PATH kept), window rendered against it; closing the window → `Exit requested by the parent`, nothing left. `app.py` Force Kill tested against a scratch backend on :18001 (killed via `backend.pid`, file removed; falls back to the port scan when nothing is recorded).
+
+**Installers:** `npx tauri build` → `src-tauri/target/release/bundle/msi/AMP v2_2.0.0_x64_en-US.msi` (34 MB) and `bundle/nsis/AMP v2_2.0.0_x64-setup.exe` (32 MB). Not installed.
+
+**Not verified:** installing either installer; the Logs page "Backend stdout" tab and the Restart button inside the window (screenshots only, no clicks); Linux/macOS (CI builds the Linux sidecar + `.deb` and now smoke-tests the sidecar, not run until pushed); the CI smoke's search from a GitHub runner (YouTube may treat it differently).
+
+**New tests:** `test_lifecycle.py` (22): `test_main_data_dir_arg`, defaults unchanged, frozen default = app data dir, identifier; `test_pid_file_written`, foreign PID file kept, junk ×4, live/stale backend detection, probe of a non-AMP port; health `app` + `pid`; `bind_socket` port 0 / port in use; parent watch EOF / `exit` / invalid fd; `test_parent_watch_exits_on_eof` ×2 (real `python -m backend.main --parent-watch --port 0 --data-dir <tmp>`, EOF and `exit`, exits < 3 s); `test_rotating_handlers`. Rust: `free_port_is_bindable`.
+
+**Action for users:** the desktop app now keeps its data in `%APPDATA%\com.amp.v2\` (macOS `~/Library/Application Support/com.amp.v2/`, Linux `~/.local/share/com.amp.v2/`), not `amp/.amp/`: sign in again in the app; songs re-download on first play. `app.py` / manual runs keep using `amp/.amp/`. `amp_control.py` is gone; use `app.py`. Run `python scripts/build_sidecar.py` once: Tauri needs `binaries/amp-backend-<triple>` even for `tauri dev`.
+
+**Test results:** 379 unit tests pass, coverage 87% (`lifecycle.py` 86%; `main.py` 40% in-process, its run path is covered by the subprocess tests), ruff clean, 12 vitest, 1 cargo test, `npm run build` OK, integration 11/11, `build_sidecar.py --smoke` OK.
 
 ### Revision 13 — Phase 5: auth simplification & local API hardening (2026-10-31)
 
@@ -414,7 +459,8 @@ So **`YTDLP_PLAYER_CLIENTS = ["visionos", "default"]`**. This removes the ~5 s f
 amp/
 ├── backend/
 │   ├── __init__.py
-│   ├── main.py                  # entry: argparse --token + uvicorn
+│   ├── main.py                  # entry: argparse (--token, --port, --data-dir, --parent-watch) + uvicorn
+│   ├── lifecycle.py             # socket bind, backend.pid, parent watch (Revision 14)
 │   ├── config.py                # pydantic-settings singleton, creates .amp/ dirs on import
 │   ├── api/
 │   │   ├── __init__.py
@@ -494,10 +540,10 @@ amp/frontend/
 ├── tsconfig.node.json
 ├── index.html                   # CSP meta (§8.5)
 ├── src/
-│   ├── main.tsx                 # React entry with BrowserRouter
+│   ├── main.tsx                 # React entry with BrowserRouter; renders after initBackend() (Revision 14)
 │   ├── App.tsx                  # Sidebar nav, backend status, sidecar lifecycle, PlayerBar
 │   ├── api.ts                   # Typed fetch wrapper, all API methods, TypeScript types
-│   ├── sidecar.ts               # BackendSidecar singleton: spawn dev/prod, health poll 1s (P12), stdout/stderr ring (P6/P7)
+│   ├── sidecar.ts               # Backend client (Revision 14): backend_info → api.ts base URL, health poll 1s (P12), backend-log events + ring
 │   ├── state.ts                 # Frontend-owned queue + playback state (useSyncExternalStore)
 │   ├── styles.css               # Dark theme, all components
 │   ├── components/
@@ -512,12 +558,13 @@ amp/frontend/
 │       └── Logs.tsx             # Backend stdout, streaming logs, API log relay
 └── src-tauri/
     ├── tauri.conf.json          # productName "AMP v2", CSP, externalBin: ["binaries/amp-backend"], icons
-    ├── Cargo.toml               # tauri 2 + shell-sidecar feature + tauri-plugin-shell
+    ├── Cargo.toml               # tauri 2 + tauri-plugin-shell + tauri-plugin-single-instance
     ├── build.rs
-    ├── src/main.rs              # Registers tauri_plugin_shell
-    ├── capabilities/default.json # shell:allow-spawn, shell:allow-stdin-write
+    ├── src/main.rs              # single-instance + shell plugins, backend::start in setup, backend::stop on RunEvent::Exit
+    ├── src/backend.rs           # spawns/owns/stops the backend (Revision 14)
+    ├── capabilities/default.json # core:default only (no shell:* since Revision 14)
     ├── icons/                   # generated from icon/logo-square.svg: icon.png, icon.ico, icon.icns, 32x32, 128x128, 128x128@2x
-    └── binaries/                # gitignored; amp-backend-<target-triple> copied here from PyInstaller dist/ (CI does this)
+    └── binaries/                # gitignored; amp-backend-<target-triple>[.exe] from scripts/build_sidecar.py (CI does this)
 ```
 
 **Build verified**: `npm run build` → TypeScript compiles clean, Vite bundles successfully.
@@ -577,7 +624,7 @@ amp/frontend/
 4. **Proportional fallback**: 5-second segments (SEGMENT_TARGET_SEC=5) from the extracted size + duration
 5. **In-memory caches**: BoundedDict (insertion-order, max 256) instead of functools.lru_cache for mutability
 6. **Tauri shell plugin**: Uses `@tauri-apps/plugin-shell` (v2) instead of deprecated `@tauri-apps/api/shell`; registered as `tauri-plugin-shell` in Cargo.toml
-7. **Sidecar spawn**: `Command.create(venvPython(), ...)` in dev (uses venv), `Command.sidecar("amp-backend", ...)` in prod
+7. **Sidecar spawn** (Revision 14): from Rust only (`backend.rs`): debug → venv python, release → `sidecar("amp-backend")`; free port, `--data-dir <app data dir>`, `--parent-watch`. (Until Revision 14 the JS spawn was rejected by the empty `shell:allow-spawn` scope.)
 8. **TestClient Host header**: Must set `Host: 127.0.0.1:8000` to pass middleware (P17)
 9. **Windows file permissions**: `chmod 0600` not honored on Windows — tests relaxed with `platform.system()` check
 10. **Open mode by default**: No token = no auth required. Token is opt-in for additional security.
@@ -587,6 +634,7 @@ amp/frontend/
 14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
 15. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; request handlers use `ensure_segment()` and never poll; the cache LRU clock is file mtime (Revision 11)
 16. **Play contract**: `/play` resolves the stream before returning, newest `/play` owns the session; the player sets `audio.src` only for its newest load. Streaming errors are `{detail: {code, message}}` (`api/errors.py`) (Revision 12)
+18. **Lifecycle (Revision 14)**: the backend exits when its stdin closes (`--parent-watch`), writes `<data>/backend.pid`, binds its own socket; the app is single-instance; logs rotate 5 MB × 3
 17. **Auth (Revision 13)**: one primary sign-in (Tauri webview → `/tauri-cookies`); credential store v2 keeps `(name, value, domain)`, youtube.com only; v1 files migrated at startup. Cross-site requests are refused by `Origin` / `Sec-Fetch-Site` in every mode; requests without `Origin` stay allowed for non-browser clients
 
 ## All 24 Pitfalls Addressed
@@ -598,8 +646,8 @@ amp/frontend/
 | P3 — Cache expensive lookups | `StreamExtractor`: single-flight + BoundedDict until URL `expire=`; negative cache 5/30 min (Revision 9) |
 | P4 — Stream URLs expire | 403 → `refresh(song_id, stale_url)` + rebuild segment table, once per stale URL (Revision 9) |
 | P5 — Content-Length strategies | Size from extraction (`filesize` / URL `clen=`); HEAD → Range 0-0 probe only if unknown (Revision 9) |
-| P6 — Subprocess pipe deadlock | Separate stdout/stderr `.on("data")` handlers |
-| P7 — Windows encoding | **Not currently handled in the frontend.** The `encoding: "utf-8"` spawn option was removed in Revision 2 (it caused a `transformCallback` error) and nothing replaced it |
+| P6 — Subprocess pipe deadlock | The shell plugin reads stdout/stderr on separate threads; `backend.rs` consumes both from one event channel |
+| P7 — Windows encoding | `String::from_utf8_lossy` in `backend.rs` + `PYTHONIOENCODING=utf-8` for the backend (Revision 14) |
 | P9 — FastAPI route order | Specific routes before parameterized |
 | P11 — localStorage relay | `POST /api/logs` → `GET /api/logs` |
 | P12 — Overlapping polls | In-flight guard on health poll + SegmentBar poll |
@@ -620,18 +668,21 @@ amp/frontend/
 
 - [x] ~~Integration tests not run~~ — all 12 pass (Revision 8)
 - [x] ~~PyInstaller binary not built~~ — builds locally (Windows) and in Tauri CI (Linux)
-- [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). No installer bundle built locally yet
+- [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). MSI + NSIS installers built locally (Revision 14), not installed
 - [x] ~~Icon is a placeholder~~ — generated from the AMP logo (Revision 8)
 - [x] ~~First play of an uncached song waits ~5 s for `available_at`~~ — `visionos` first (Revision 9); the wait remains only when falling back to `default`
 - [x] ~~DASH path never runs~~ — itag 140 gets an exact table from the fMP4 `sidx` (Revision 10); WebM stays proportional
 - [ ] Cached songs still need an extraction after restart (Phase 2's optional `layout.json` bonus not done)
-- [ ] Sidecar runtime not verified: PyInstaller binary builds, but launching it from the packaged app (data dir, `yt_dlp_ejs` data files, Node on PATH) is untested — Phase 6
-- [ ] P7 (Windows encoding of sidecar output) not handled in the frontend
+- [x] ~~Sidecar runtime not verified~~ — release app starts, plays and stops its sidecar (Revision 14 smoke checklist)
+- [x] ~~P7 (Windows encoding of sidecar output) not handled~~ — Revision 14
+- [ ] First extraction in a freshly started sidecar takes ~3 s (frozen yt-dlp imports), later ones ~1.4 s; could be pre-warmed in a startup thread
+- [ ] Installers not installed/tested; Logs page "Backend stdout" and Restart button not clicked in the window; Linux/macOS lifecycle untested (CI builds the Linux sidecar + `.deb` only)
+- [ ] Installers are unsigned (SmartScreen warning); antivirus false positives on the one-file sidecar are possible (switch the spec to one-folder if they happen)
 - [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
 - [ ] MSE upgrade (§8.4) — optional, not done in Phase 4
 - [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
 - [ ] Phase 5 webview sign-in (Google login in the Tauri window → liked songs) not run manually; `youtube_login.rs` user agent still Chrome 125
-- [ ] Phase 5.6 (automatic per-launch token) — after Phase 6
+- [ ] Phase 5.6 (automatic per-launch token) — unblocked: `backend_info` already returns `token` (always `null`); needs `--token` from Rust, `setAuthToken`, and `?t=` on `/audio`
 
 ## Environment Notes
 
@@ -640,8 +691,8 @@ amp/frontend/
 - **Node.js**: v24.16.0, npm 11.15.0
 - **Project root**: `E:/Documents/TRAVAIL/packages/AMP2/`
 - **App root**: `E:/Documents/TRAVAIL/packages/AMP2/amp/`
-- **Runtime data**: `amp/.amp/` (cache, logs — gitignored)
-- **Database**: `amp/userdb.sqlite` (WAL mode)
+- **Runtime data**: desktop app → `%APPDATA%\com.amp.v2\` (cache, logs, `userdb.sqlite`, `backend.pid`); manual / `app.py` runs → `amp/.amp/` (gitignored) + `amp/userdb.sqlite` (WAL mode)
+- **Rust**: 1.99.1, host `x86_64-pc-windows-gnu` (sidecar file `amp-backend-x86_64-pc-windows-gnu.exe`)
 
 ## Verification Commands
 
@@ -676,9 +727,8 @@ cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run tauri dev
 # Integration tests (requires network + cookies)
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m pytest backend/tests/ -m integration
 
-# Build PyInstaller sidecar
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && pyinstaller amp-backend.spec
-# Then copy dist/amp-backend.exe to frontend/src-tauri/binaries/
+# Build the PyInstaller sidecar into frontend/src-tauri/binaries/ (+ smoke: health, search, exit on stdin EOF)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_sidecar.py --smoke
 
 # Lint (from repo root) — same as CI
 amp/venv/Scripts/python.exe -m ruff check amp/backend/
@@ -690,11 +740,13 @@ cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pytest -
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip install -r requirements.lock
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip freeze > requirements.lock
 
-# Local Tauri release build (sidecar first, like CI)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m PyInstaller --noconfirm amp-backend.spec \
-  && cp dist/amp-backend.exe "frontend/src-tauri/binaries/amp-backend-$(rustc -vV | sed -n 's/^host: //p').exe" \
-  && cd frontend && npx tauri build --no-bundle
+# Local Tauri release build + installers (sidecar first, like CI)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_sidecar.py \
+  && cd frontend && npx tauri build   # → src-tauri/target/release/bundle/{msi,nsis}/
 
-# Control panel (tkinter GUI — double-click or run)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python amp_control.py
+# Rust unit test
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend/src-tauri && cargo test
+
+# Debug launcher (tkinter: backend on :8000 with amp/.amp/, web/desktop frontend, API tester, chunk viewer)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && python app.py
 ```

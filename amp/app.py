@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""AMP v2 App Launcher — tkinter GUI for managing the full stack.
+"""AMP v2 App Launcher — tkinter GUI for debugging the full stack.
 
-Standard library only. Provides:
+The normal entry point is the Tauri app, which starts and stops its own backend.
+This launcher is a developer tool. Standard library only. Provides:
 
   Top bar:
-    - Backend:  Start / Stop / Restart / Force Kill (port 8000)
+    - Backend:  Start / Stop / Restart / Force Kill (port 8000, or AMP_PORT)
+        Data in amp/.amp/ + amp/userdb.sqlite. Force Kill uses amp/.amp/backend.pid
+        first and port scanning only as a fallback.
     - Frontend: Web app / Desktop app mode + Start / Stop / Restart / Force Kill (port 1420)
         Web app:     Vite dev server, opened in the selected browser once it is up;
                      also starts the backend (a browser can't spawn it)
-        Desktop app: `npm run tauri dev` (Vite + Tauri window; the app spawns its own
-                     backend, or reuses one already on :8000)
+        Desktop app: `npm run tauri dev` (Vite + Tauri window). The app spawns its own
+                     backend on a free port with its data in the per-user app data dir
+                     (%APPDATA%/com.amp.v2 on Windows), separate from the one above
     - Browser selector dropdown + Open in Browser
 
   Tab zone (ttk.Notebook):
@@ -62,13 +66,14 @@ if not VENV_FOUND:
 FRONTEND_DIR = AMP_DIR / "frontend"
 NPM_CMD = "npm.cmd" if os.name == "nt" else "npm"
 
-BACKEND_PORT = 8000
+BACKEND_PORT = int(os.environ.get("AMP_PORT") or 8000)
 FRONTEND_PORT = 1420
 API_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
 FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
 
 DB_PATH = AMP_DIR / "userdb.sqlite"
 APP_LOG_PATH = AMP_DIR / ".amp" / "logs" / "app.log"
+PID_FILE = AMP_DIR / ".amp" / "backend.pid"  # written by backend.main: {"pid", "port", "started_at"}
 SEGMENTS_DIR = AMP_DIR / ".amp" / "cache" / "segments"
 
 FRONTEND_MODES = {"web": "Web app", "desktop": "Desktop app"}
@@ -85,7 +90,7 @@ _SUBPROC_FLAGS = _NO_WINDOW if os.name == "nt" else 0
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 # ---------------------------------------------------------------------------
-# Colour palette (dark theme, matches amp_control.py)
+# Colour palette (dark theme)
 # ---------------------------------------------------------------------------
 
 BG = "#0f0f0f"
@@ -241,6 +246,44 @@ def force_kill_port(port: int) -> str:
         return f"Port {port}: in use but no process found (TIME_WAIT? wait ~30-60s)"
     
     return f"Port {port}: nothing running"
+
+
+def read_pid_file(path: Path = PID_FILE) -> Optional[dict]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if isinstance(data, dict) and isinstance(data.get("pid"), int) and isinstance(data.get("port"), int):
+        return data
+    return None
+
+
+def backend_pid_from_file(path: Path = PID_FILE) -> Optional[dict]:
+    """The PID file's entry if its backend still answers /api/health with that pid (no PID reuse)."""
+    data = read_pid_file(path)
+    if data is None:
+        return None
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{data['port']}/api/health", timeout=1) as resp:
+            health = json.loads(resp.read().decode("utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if health.get("app") == "AMP v2" and health.get("pid") == data["pid"] else None
+
+
+def force_kill_backend(port: int) -> str:
+    """Kill the backend recorded in the PID file; fall back to whatever listens on *port*."""
+    data = backend_pid_from_file()
+    if data is not None:
+        pid = data["pid"]
+        if kill_pid(pid):
+            try:
+                PID_FILE.unlink()
+            except OSError:
+                pass
+            return f"Backend: killed PID {pid} (from {PID_FILE.name}, port {data['port']})"
+        return f"Backend: failed to kill PID {pid} (from {PID_FILE.name})"
+    return force_kill_port(port)
 
 
 def is_port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.3) -> bool:
@@ -708,7 +751,7 @@ class AppLauncher(tk.Tk):
         title.grid(row=0, column=0, rowspan=2, padx=(0, 20), sticky=tk.W)
 
         # --- Backend section ---
-        be_frame = tk.LabelFrame(top, text="  Backend (FastAPI :8000)  ",
+        be_frame = tk.LabelFrame(top, text=f"  Backend (FastAPI :{BACKEND_PORT})  ",
                                  bg=BG_ELEV, fg=FG, font=("Segoe UI", 10, "bold"),
                                  padx=10, pady=8)
         be_frame.grid(row=0, column=1, padx=4, pady=2, sticky=tk.W)
@@ -720,7 +763,7 @@ class AppLauncher(tk.Tk):
         self._cbtn(be_frame, "Start", self._start_backend, SUCCESS)
         self._cbtn(be_frame, "Stop", self._stop_backend, ERROR_CLR)
         self._cbtn(be_frame, "Restart", self._restart_backend, WARNING)
-        self._cbtn(be_frame, "Force Kill Port", self._kill_backend_port, ERROR_CLR)
+        self._cbtn(be_frame, "Force Kill", self._kill_backend, ERROR_CLR)
 
         # --- Frontend section ---
         fe_frame = tk.LabelFrame(top, text="  Frontend (:1420)  ",
@@ -746,7 +789,7 @@ class AppLauncher(tk.Tk):
         self._cbtn(fe_frame, "Start", self._start_frontend, SUCCESS)
         self._cbtn(fe_frame, "Stop", self._stop_frontend, ERROR_CLR)
         self._cbtn(fe_frame, "Restart", self._restart_frontend, WARNING)
-        self._cbtn(fe_frame, "Force Kill Port", self._kill_frontend_port, ERROR_CLR)
+        self._cbtn(fe_frame, "Force Kill", self._kill_frontend_port, ERROR_CLR)
 
         # --- Browser section ---
         br_frame = tk.LabelFrame(top, text="  Browser  ",
@@ -1104,7 +1147,7 @@ class AppLauncher(tk.Tk):
             if not pm.is_running() and is_port_open(port):
                 self._append_log(
                     f"[system] Port {port} is already in use by another process — "
-                    f"use 'Force Kill Port' first")
+                    f"use 'Force Kill' first")
                 return
             pm.start(cmd, cwd)
             self._when_listening(pm, port, on_ready)
@@ -1116,7 +1159,7 @@ class AppLauncher(tk.Tk):
             pm.stop(quiet=True)
             if not wait_port_free(port):
                 self._append_log(
-                    f"[system] Port {port} is still in use — use 'Force Kill Port', then Start")
+                    f"[system] Port {port} is still in use — use 'Force Kill', then Start")
                 return
             pm.start(cmd, cwd)
             self._when_listening(pm, port, on_ready)
@@ -1146,8 +1189,10 @@ class AppLauncher(tk.Tk):
     def _restart_backend(self) -> None:
         self._relaunch(self.backend, self._backend_cmd(), str(AMP_DIR), BACKEND_PORT)
 
-    def _kill_backend_port(self) -> None:
-        self._kill_port_async(BACKEND_PORT)
+    def _kill_backend(self) -> None:
+        def work() -> None:
+            self._append_log(f"[system] {force_kill_backend(BACKEND_PORT)}")
+        threading.Thread(target=work, daemon=True).start()
 
     def _start_frontend(self) -> None:
         if self.frontend.is_running():
@@ -1159,6 +1204,8 @@ class AppLauncher(tk.Tk):
         self._append_log(f"[system] Launching the {FRONTEND_MODES[mode].lower()}")
         if mode == "desktop":
             self._append_log("[system] First desktop launch compiles the Rust shell (a few minutes)")
+            self._append_log("[system] The desktop app runs its own backend (free port, per-user data dir); "
+                             "its output is on the app's Logs page")
             self._launch(self.frontend, self._frontend_cmd(mode), str(FRONTEND_DIR), FRONTEND_PORT)
             return
         self._ensure_backend()
