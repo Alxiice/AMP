@@ -18,11 +18,12 @@
 | Revision | Open mode (no token) + venv support | **DONE** |
 | Refactor Phase 0 | Safety net + hotfixes ([plan](improvement-plan/phase-0-safety-net.md)) | **DONE** — see Revision 7 |
 | Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
-| Refactor Phases 1–6 | Extraction, segment table, pipeline, playback UX, auth/security, lifecycle | Pending |
+| Refactor Phase 1 | Single-flight extraction ([plan](improvement-plan/phase-1-extraction.md)) | **DONE** — see Revision 9 |
+| Refactor Phases 2–6 | Segment table, pipeline, playback UX, auth/security, lifecycle | Pending |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phase 0 is done; Phases 1–6 are pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–1 are done; Phases 2–6 are pending.
 
-**Test results**: 182 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 63% (floor 60%). All 12 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 2 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 221 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 70% (floor 60%). All 12 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 2 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
 
@@ -218,6 +219,45 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
 
+### Revision 9 — Phase 1: single-flight stream extraction (2026-10-31)
+
+Plan: [improvement-plan/phase-1-extraction.md](improvement-plan/phase-1-extraction.md) · Branch: `fix/phase-1-extraction`
+
+New module **`backend/services/extractor.py`** (no FastAPI, no segments): `build_ydl_opts`, `select_audio_format` (pure), `ExtractedStream` / `ExtractionError`, `SingleFlight`, `BoundedDict` (moved here, re-exported by `streaming.py`), `StreamExtractor.get()` / `refresh(song_id, stale_url)`, `get_extraction_dependencies()`. `streaming.py` no longer imports yt-dlp (1,633 → 1,269 lines).
+
+| # | Problem | Fix |
+|---|---------|-----|
+| F2 | Up to 24 extractions for a failing song (15 client × format strategies + retry without format) | One extraction per client in `YTDLP_PLAYER_CLIENTS`, `format="bestaudio/best"` + `ignore_no_formats_error`, format chosen in Python. "Video unavailable"/"Private video" stops the rotation; "Sign in to confirm"/age-gate tries the next client and is reported as `auth_required` |
+| F4 | Duration always 180 s (DB never filled), size from a `clen=1` probe that appended a parameter, MIME hard-coded | `ExtractedStream` carries `duration_ms` (`info["duration"]`), `filesize` (`filesize` or URL `clen=`), `mime_type`, `title`, `expires_at` (URL `expire=` − 300 s). `_get_song_duration` / `_get_song_title` and the 180 s fallback removed; HEAD / `Range: 0-0` probe only when size is unknown |
+| F5 | `/play`, `/chunks`, `/info`, `/audio` and 4 workers each built the stream; each 403'd worker re-extracted | `SingleFlight` around extraction **and** around stream-info building. 403 refresh passes the URL that failed: N workers → one re-extraction, late workers reuse the rebuilt table |
+| — | `best`/`worst` could return muxed video (itag 18) | `select_audio_format` only returns audio-only formats (itag `STREAM_FORMAT` > m4a/mp4 by bitrate > any, e.g. 251). Muxed fallback is a commented-out hook |
+| — | `_extract_failures` unbounded and unlocked | Negative cache is a `BoundedDict` of `(failed_at, ExtractionError)`: 5 min, 30 min for `unavailable`; `node_missing` not cached; `refresh()` clears it |
+| 1.7 | — | `/api/health` → `services.extractor: {node, ejs, yt_dlp}` (computed once at startup). No `node` → `ExtractionError("node_missing")` without running yt-dlp |
+
+**Client list — measured 2026-10-31, yt-dlp 2026.10.26, songs `BAgTQhR8MLo` / `Tmz3mpOq8aE`, signed out:**
+
+| Client | Audio-only formats | itag 140 `available_at` delay | Extract time |
+|---|---|---|---|
+| `visionos` | 139, 140, 249, 250, 251 | none | ~1.0 s |
+| `default` (tv_samsung + visionos + web) | 139, 140, 249–251 | ~5 s (URL is tv_samsung's) | ~1.8 s |
+| `tv_samsung` | 140, 249–251 | ~5 s | ~1.6 s |
+| `web`, `web_music`, `web_safari`, `tv`, `ios`, `mweb`, `android_vr` | none | — | — |
+
+So **`YTDLP_PLAYER_CLIENTS = ["visionos", "default"]`**. This removes the ~5 s first-play wait (F20). `visionos` has `SUPPORTS_COOKIES=False`, and yt-dlp silently drops such clients when a cookie file is passed, so the extractor runs cookie-less clients **anonymously** and passes cookies only to clients that support them (`default`). Env override is JSON: `YTDLP_PLAYER_CLIENTS='["default"]'`. Re-measure after yt-dlp upgrades (extract with each client, list audio-only itags and `available_at`).
+
+**Other changes:** `streaming.log` also receives `backend.services.extractor`; `amp-backend.spec` hidden import added; `refresh_stream_url(song_id, stale_url=None)` is a thin wrapper over `StreamExtractor.refresh`; `ExtractedStream` is never persisted (P24).
+
+**Verification:**
+- Live backend (scratch data dir), `/play` + 5× `/chunks` + 5× `/info` + `/audio` concurrently, then 6 more `/chunks` polls: **one** `Extracted stream` line (`client=visionos: itag=140 audio/mp4 mp4a.40.2, 3797479 bytes, 234.0s`); first 64 KB of audio in 1.3 s; `googlevideo` / `SAPISID=` in logs: 0. Not clicked through the Tauri UI.
+- `GET /api/stream/info`: `Tmz3mpOq8aE` 234.0 s / 47 segments, `BAgTQhR8MLo` 258.0 s / 52 segments (both previously 37 from the fake 180 s); durations equal yt-dlp's.
+- Integration: 10/10 (`test_integration.py` 8 + download 2) for `BAgTQhR8MLo`, 2/2 download for `Tmz3mpOq8aE`; stream info built in 1.2–1.3 s.
+
+**Not verified:** the signed-in path with real cookies (anonymous `visionos` URL fetched with Cookie headers) — unit-tested with mocks only.
+
+**New tests:** `test_extractor.py` (43): format selection (itag 140, rejects muxed 18/22, opus fallback, mp4-over-bitrate, empty/URL-less formats, `clen=`, `expire=`, metadata), error classification, `build_ydl_opts` (moved), `SingleFlight`, `StreamExtractor` (single-flight 10 threads → 1 extraction, error propagation, positive/expired/negative caches, 30 min `unavailable`, refresh dedup by stale URL, layout-change warning, rotation stop/next/no-audio/auth_required, `node_missing`, cookie file only for cookie clients and deleted), `available_at` (moved). `test_streaming.py`: `TestCdn403` rewritten + `test_concurrent_403s_rebuild_once`, `TestStreamInfo` (extracted duration → 49 × 5 s for 245 s, probe only without size, no 180 s fallback, stream-info single-flight, `ExtractionError` → `None`). `test_endpoints.py`: health reports extractor prerequisites. Removed: `TestTryExtract`, old `TestAvailableAt` / `TestBuildYdlOpts` in `test_streaming.py`.
+
+**Test results:** 221 unit tests pass, coverage 69.9% (`extractor.py` 95%), ruff clean.
+
 ## Completed Work
 
 ### Phase 1 — Backend core + auth (DONE)
@@ -289,7 +329,7 @@ amp/
 - Epoch-based seek cancellation (P18): bump per-song epoch, stale workers discard results
 - Buffer-ahead: CRITICAL (init + seg 0), HIGH (next 2), NORMAL (within 30s)
 - Progressive fallback (P5): 3-strategy content-length probe (clen= param → HEAD → Range 0-0)
-- yt-dlp extraction (P2): `js_runtimes=node`, Netscape cookie file (P23: 0600, deleted in finally)
+- yt-dlp extraction (P2): moved to `services/extractor.py` in Revision 9 — `js_runtimes=node`, Netscape cookie file (P23: 0600, deleted in finally)
 - BoundedDict for in-memory caches (P19: max 256 entries)
 
 **Pitfalls addressed:** P1–P5, P13–P24 (see design doc §10)
@@ -393,18 +433,19 @@ amp/frontend/
 9. **Windows file permissions**: `chmod 0600` not honored on Windows — tests relaxed with `platform.system()` check
 10. **Open mode by default**: No token = no auth required. Token is opt-in for additional security.
 11. **Settings paths**: tests redirect storage with `settings.configure_paths()` / `restore_paths()`, never by monkeypatching private attrs (Revision 7).
-12. **yt-dlp client order**: default client first; it needs `available_at` respected (~5 s on first play). Phase 1 makes the strategy list a setting (Revision 7).
+12. **yt-dlp client order**: `YTDLP_PLAYER_CLIENTS = ["visionos", "default"]` — visionos (no `available_at` delay, runs anonymously since it can't take cookies), then yt-dlp's default (~5 s `available_at` wait, uses cookies). One extraction per client (Revision 9).
 13. **CI**: lint + unit tests run from the lock file; coverage config lives in `amp/pyproject.toml`; Tauri CI builds the PyInstaller sidecar before `tauri build` (Revision 8).
+14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
 
 ## All 24 Pitfalls Addressed
 
 | Pitfall | Implementation |
 |---------|---------------|
 | P1 — CDN requires Cookie | Cookie sent when authenticated; omitted when signed out (most URLs work without it) |
-| P2 — yt-dlp needs JS runtime | Top-level `js_runtimes={"node": {}}` + `yt-dlp-ejs` solver (Revision 7; the earlier extractor_args form was ignored) |
-| P3 — Cache expensive lookups | BoundedDict with TTL for stream URLs and info |
-| P4 — Stream URLs expire | 403 → refresh URL + rebuild segment table |
-| P5 — Content-Length strategies | 3-strategy probe: clen= → HEAD → Range 0-0 |
+| P2 — yt-dlp needs JS runtime | Top-level `js_runtimes={"node": {}}` + `yt-dlp-ejs` solver (Revision 7; the earlier extractor_args form was ignored). `/api/health` reports node/ejs/yt-dlp; no node → `node_missing` (Revision 9) |
+| P3 — Cache expensive lookups | `StreamExtractor`: single-flight + BoundedDict until URL `expire=`; negative cache 5/30 min (Revision 9) |
+| P4 — Stream URLs expire | 403 → `refresh(song_id, stale_url)` + rebuild segment table, once per stale URL (Revision 9) |
+| P5 — Content-Length strategies | Size from extraction (`filesize` / URL `clen=`); HEAD → Range 0-0 probe only if unknown (Revision 9) |
 | P6 — Subprocess pipe deadlock | Separate stdout/stderr `.on("data")` handlers |
 | P7 — Windows encoding | **Not currently handled in the frontend.** The `encoding: "utf-8"` spawn option was removed in Revision 2 (it caused a `transformCallback` error) and nothing replaced it |
 | P9 — FastAPI route order | Specific routes before parameterized |
@@ -429,8 +470,8 @@ amp/frontend/
 - [x] ~~PyInstaller binary not built~~ — builds locally (Windows) and in Tauri CI (Linux)
 - [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). No installer bundle built locally yet
 - [x] ~~Icon is a placeholder~~ — generated from the AMP logo (Revision 8)
-- [ ] First play of an uncached song waits ~5 s for `available_at` (default yt-dlp client = TVHTML5) — Phase 1
-- [ ] DASH path never runs: every stream is progressive, 37 × 5 s segments from a fake 180 s duration (F4) — Phases 1–2
+- [x] ~~First play of an uncached song waits ~5 s for `available_at`~~ — `visionos` first (Revision 9); the wait remains only when falling back to `default`
+- [ ] DASH path never runs: every stream is progressive (5 s proportional segments, now from the real duration and size — Revision 9) — Phase 2
 - [ ] Sidecar runtime not verified: PyInstaller binary builds, but launching it from the packaged app (data dir, `yt_dlp_ejs` data files, Node on PATH) is untested — Phase 6
 - [ ] P7 (Windows encoding of sidecar output) not handled in the frontend
 - [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -49,6 +49,11 @@ class Settings(BaseSettings):
 
     # --- Streaming ---
     STREAM_FORMAT: str = "140"  # itag; 140 (AAC/MP4) or 251 (Opus/WebM)
+    # yt-dlp player clients, tried in order; "default" = yt-dlp's own choice.
+    # visionos (2026-10-31): itag 140, no available_at delay, but no cookie support,
+    # so it runs anonymously. default (tv_samsung): itag 140 after a ~5 s delay.
+    # Env override is JSON: YTDLP_PLAYER_CLIENTS='["default"]'
+    YTDLP_PLAYER_CLIENTS: List[str] = ["visionos", "default"]
     DOWNLOAD_WORKERS: int = 4
     HTTP_TIMEOUT_CONNECT_S: float = 5.0
     HTTP_TIMEOUT_READ_S: float = 30.0
