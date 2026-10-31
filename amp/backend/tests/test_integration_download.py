@@ -119,11 +119,11 @@ class TestDownloadChunks:
         if info.has_init:
             print(f"\n[3/6] Downloading init segment...")
             t0 = time.time()
-            ok = streaming_service.download_segment_sync(song_id, -1)
+            ok = streaming_service.ensure_segment(song_id, -1).exists()
             t1 = time.time()
             assert ok, "FAILED: init segment download returned False"
 
-            init_path = streaming_service._segment_path(song_id, -1)
+            init_path = streaming_service._cache.segment_path(song_id, -1)
             assert init_path.exists(), f"FAILED: init segment file not found at {init_path}"
             init_size = init_path.stat().st_size
             expected_init = info.init_range[1] - info.init_range[0] + 1
@@ -145,13 +145,13 @@ class TestDownloadChunks:
         downloaded_bytes = init_size
 
         for i in range(total_segments):
-            seg_ok = streaming_service.download_segment_sync(song_id, i)
+            seg_ok = streaming_service.ensure_segment(song_id, i).exists()
             if not seg_ok:
                 failed.append(i)
                 print(f"  FAIL: segment {i} download failed")
                 continue
 
-            path = streaming_service._segment_path(song_id, i)
+            path = streaming_service._cache.segment_path(song_id, i)
             if path.exists():
                 seg_size = path.stat().st_size
                 downloaded_bytes += seg_size
@@ -183,7 +183,7 @@ class TestDownloadChunks:
         size_mismatches: list[tuple[int, int, int]] = []
 
         for i in range(total_segments):
-            path = streaming_service._segment_path(song_id, i)
+            path = streaming_service._cache.segment_path(song_id, i)
             seg = info.segments[i]
             expected = seg.byte_end - seg.byte_start + 1
             total_expected += expected
@@ -200,7 +200,7 @@ class TestDownloadChunks:
                 all_ok = False
 
         # Also check init
-        init_path = streaming_service._segment_path(song_id, -1)
+        init_path = streaming_service._cache.segment_path(song_id, -1)
         if init_path.exists():
             total_actual += init_path.stat().st_size
         elif info.has_init:
@@ -300,9 +300,9 @@ class TestDownloadChunks:
         # Download init + first 5
         targets = ([-1] if info.has_init else []) + list(range(min(5, len(info.segments))))
         for idx in targets:
-            ok = streaming_service.download_segment_sync(song_id, idx)
+            ok = streaming_service.ensure_segment(song_id, idx).exists()
             assert ok, f"Failed to download segment {idx}"
-            path = streaming_service._segment_path(song_id, idx)
+            path = streaming_service._cache.segment_path(song_id, idx)
             assert path.exists(), f"Segment {idx} file not found"
             size = path.stat().st_size
             if idx == -1:
@@ -331,8 +331,8 @@ class TestConcatEqualsCdnFile:
 
         local = hashlib.sha256()
         for idx in [-1] + list(range(len(info.segments))):
-            assert streaming_service.download_segment_sync(song_id, idx), f"segment {idx} failed"
-            local.update(streaming_service._segment_path(song_id, idx).read_bytes())
+            assert streaming_service.ensure_segment(song_id, idx).exists(), f"segment {idx} failed"
+            local.update(streaming_service._cache.segment_path(song_id, idx).read_bytes())
 
         # One request for the whole file (googlevideo wants a Range for large reads)
         resp = requests.get(

@@ -126,6 +126,7 @@ All settings via environment variables or `.env`:
 | `YTDLP_PLAYER_CLIENTS` | `["visionos","default"]` | yt-dlp player clients tried in order (JSON in env); `default` = yt-dlp's choice |
 | `DOWNLOAD_WORKERS` | `4` | Download thread pool size |
 | `MAX_RETRIES` | `3` | Retry attempts per segment |
+| `SEGMENT_SYNC_TIMEOUT_S` | `15` | How long `/audio` waits for a segment before failing |
 
 ## API
 
@@ -182,7 +183,8 @@ amp/
 │   ├── services/
 │   │   ├── auth.py          # AuthService, CredentialStore, SAPISIDHASH
 │   │   ├── youtube.py       # YouTubeService (ytmusicapi)
-│   │   └── streaming.py     # StreamingService, DownloadManager, cache
+│   │   ├── extractor.py     # StreamExtractor (single-flight yt-dlp)
+│   │   └── streaming/       # facade, registry, downloader, cache, serving, playback
 │   ├── database/
 │   │   ├── models.py        # SQLAlchemy models
 │   │   └── session.py       # Engine (WAL), session factory
