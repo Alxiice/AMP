@@ -15,51 +15,70 @@
 
 ---
 
-AMP v2 is a desktop app (Tauri + React) with a local FastAPI backend. It streams
-YouTube Music audio as cached byte-range segments, so playback starts fast and
-seeking works on partially downloaded songs. Search, browse and play work
-without an account; signing in with YouTube cookies (optional) unlocks liked
-songs and playlists.
+AMP is a desktop app that plays music from the YouTube Music library. Songs are downloaded in
+small segments and cached on disk, so playback starts fast and you can seek right away. Search and
+playback work without an account; signing in with YouTube adds your liked songs and playlists.
 
-## Quick start
+## Requirements
+
+- **Python** 3.10 or newer
+- **Node.js** 18 or newer, on your `PATH`. AMP needs it at runtime too, not just to build.
+- **Rust** toolchain ([rustup.rs](https://rustup.rs))
+
+## Launch the app
+
+From the repository root:
 
 ```bash
 cd amp
 python -m venv venv
-venv/Scripts/activate          # Unix: source venv/bin/activate
+venv\Scripts\activate              # Linux/macOS: source venv/bin/activate
 pip install -r requirements.lock
+python scripts/build_sidecar.py    # first time only
 
-python scripts/build_sidecar.py  # sidecar binary (Tauri requires the file, even in dev)
-
-cd frontend && npm install
-npm run tauri dev               # desktop app (needs the Rust toolchain); starts its own backend
-npx tauri build                 # installers: src-tauri/target/release/bundle/{msi,nsis}/
+cd frontend
+npm install
+npm run tauri dev
 ```
 
-The desktop app is the normal entry point: it runs the backend on a free port with its data in
-the per-user app data dir and stops it on exit. For the browser-only setup, run
-`python -m backend.main --debug` (backend on http://127.0.0.1:8000) and `npm run dev`, or use the
-`amp/app.py` debug launcher. Node.js must be on `PATH`: yt-dlp uses it to solve YouTube's JS challenges.
-Full setup, configuration and API reference: [amp/README.md](amp/README.md).
+The AMP window opens. The first run takes a few minutes while Rust compiles. The app starts its
+own backend and stops it when you close the window.
 
-## Quality checks
-
-The same checks run in CI on every push ([Python CI](.github/workflows/python-ci.yml),
-[Tauri Build](.github/workflows/tauri-build.yml)):
+Later launches only need the last command:
 
 ```bash
-ruff check amp/backend/                                     # from the repo root
-cd amp && python -m pytest -m "not integration" --cov=backend   # unit tests + coverage
+cd amp/frontend
+npm run tauri dev
 ```
 
-Integration tests hit the real network and are run manually:
-`python -m pytest backend/tests/test_integration_download.py -m integration -v -s`.
+## Build an installer
+
+```bash
+cd amp
+python scripts/build_sidecar.py
+cd frontend
+npx tauri build
+```
+
+The installers are written to `amp/frontend/src-tauri/target/release/bundle/` (`.msi` and
+`.exe` on Windows, `.deb` on Linux).
 
 ## Documentation
 
-| Document | Contents |
+The full documentation (usage guide and code reference) is in [`docs/`](docs/index.md), built
+with MkDocs:
+
+```bash
+pip install -r docs/requirements.txt
+mkdocs serve                       # then open http://127.0.0.1:8000
+```
+
+| | |
 |---|---|
-| [DESIGN_DOC_2.md](DESIGN_DOC_2.md) | Architecture and design (authoritative spec) |
-| [AGENTS.md](AGENTS.md) | Progress tracker: revisions, decisions, known issues |
-| [improvement-plan/](improvement-plan/README.md) | Refactoring plan, phases 0–6 |
-| [amp/README.md](amp/README.md) | Setup, configuration, API reference |
+| [Install & launch](docs/usage/install.md) | prerequisites, setup, installers, updating yt-dlp |
+| [Using the app](docs/usage/using-the-app.md) | search, player, queue, logs |
+| [Troubleshooting](docs/usage/troubleshooting.md) | when a song won't play, the app won't start… |
+| [Code](docs/code/index.md) | architecture, backend, frontend, tests, CI |
+
+> **Personal prototype, not for distribution.** Fetching YouTube streams this way goes against
+> YouTube's Terms of Service.
