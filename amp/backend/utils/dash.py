@@ -138,7 +138,9 @@ def parse_mpd(
         xml_data = xml_data.decode("utf-8")
 
     try:
-        root = ET.fromstring(xml_data)
+        # MPD comes from the googlevideo CDN over TLS; ElementTree does not
+        # resolve external entities and expat >= 2.4.1 caps entity expansion.
+        root = ET.fromstring(xml_data)  # noqa: S314
     except ET.ParseError as e:
         raise ValueError(f"Invalid MPD XML: {e}") from e
 

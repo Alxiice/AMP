@@ -9,6 +9,18 @@ __pycache__/
 venv/
 node_modules/
 dist/
-src-tauri/target/
+frontend/src-tauri/target/
+frontend/src-tauri/gen/schemas/
 *.log
 .env
+
+# Coverage / lint outputs
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.ruff_cache/
+
+# PyInstaller build output and the sidecar copied into Tauri
+/build/
+frontend/src-tauri/binaries/amp-backend*

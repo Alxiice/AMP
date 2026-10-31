@@ -23,6 +23,8 @@ dev = [
     "pytest>=7.4.0,<10",
     "pytest-asyncio>=0.23.0,<2",
     "httpx>=0.26.0,<1",
+    "pytest-cov>=5,<8",
+    "ruff>=0.5",
 ]
 packaging = [
     "pyinstaller>=6.3.0,<7",
@@ -33,6 +35,24 @@ markers = [
     "integration: marks tests as integration (network + cookies required)",
 ]
 testpaths = ["backend/tests"]
+
+# Coverage: pytest -m "not integration" --cov=backend --cov-report=term-missing
+[tool.coverage.run]
+source = ["backend"]
+omit = ["backend/tests/*"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 60  # regression floor (63% at Revision 8); raise as coverage grows
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 [tool.setuptools.packages.find]
 where = ["."]

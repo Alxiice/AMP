@@ -1,0 +1,63 @@
+# Ruff Configuration for AMP Project
+# https://docs.astral.sh/ruff/configuration/
+# Minimal configuration - enforces only critical issues
+# CI runs: ruff check amp/backend/
+
+[lint]
+# Enable only critical rule groups
+select = [
+    "F",    # pyflakes - catches actual errors (unused imports, undefined names)
+    "E",    # pycodestyle errors - syntax-level issues
+    "B",    # flake8-bugbear - catches bugs
+    "S",    # flake8-bandit - security issues
+]
+
+# Disable rules that are too noisy or not critical for this codebase
+ignore = [
+    "E402",   # Module level import not at top - existing pattern in FastAPI apps
+    "E501",   # Line too long - we'll handle this gradually
+    "W293",   # Blank line contains whitespace - minor formatting
+    "F401",   # Unused imports - existing code has these, fix gradually
+    "F811",   # Redefinition of unused - existing pattern
+    "F841",   # Local variable assigned but never used - existing pattern
+    "B007",   # Loop control variable not used - existing pattern
+    "B904",   # Raise from in except - existing pattern, fix gradually
+    "S104",   # Possible binding to all interfaces - intentional for server
+    "S110",   # try-except-pass - existing pattern
+    "S112",   # try-except-continue - existing pattern, fix gradually
+    "S324",   # Insecure hash functions - SAPISIDHASH is SHA1 by protocol
+    "S603",   # subprocess call with untrusted input - known safe usage
+    "S607",   # subprocess without shell=True - known safe usage
+]
+
+# File patterns to exclude
+exclude = [
+    "amp/backend/tests/*",
+    "**/__pycache__/*",
+    "amp/venv/*",
+    "venv/*",
+    "amp/frontend/*",
+    ".git/*",
+]
+
+[lint.flake8-bugbear]
+# FastAPI dependency injection uses calls in argument defaults by design
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query", "fastapi.Header"]
+
+# isort settings
+[lint.isort]
+known-first-party = ["backend"]
+known-third-party = [
+    "fastapi",
+    "sqlalchemy",
+    "pydantic",
+    "ytmusicapi",
+    "yt_dlp",
+    "pytest",
+    "httpx",
+    "uvicorn",
+]
+
+# pycodestyle settings
+[lint.pycodestyle]
+max-line-length = 120

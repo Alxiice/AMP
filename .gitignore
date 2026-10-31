@@ -1,0 +1,3 @@
+# Tool caches at the repo root (app-specific ignores live in amp/.gitignore)
+.ruff_cache/
+__pycache__/

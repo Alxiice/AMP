@@ -1,0 +1,80 @@
+name: Tauri Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Tauri App (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libxdo-dev \
+            libssl-dev \
+            pkg-config
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: amp/frontend/src-tauri
+
+      # The app bundles the backend as a sidecar (tauri.conf.json externalBin),
+      # so the PyInstaller binary must exist before tauri build.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: amp/requirements.lock
+
+      - name: Build backend sidecar (PyInstaller)
+        working-directory: amp
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+          python -m PyInstaller --noconfirm amp-backend.spec
+          TRIPLE=$(rustc -vV | sed -n 's/^host: //p')
+          mkdir -p frontend/src-tauri/binaries
+          cp dist/amp-backend "frontend/src-tauri/binaries/amp-backend-${TRIPLE}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: amp/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: amp/frontend
+        run: npm ci
+
+      - name: Build Tauri app (.deb)
+        working-directory: amp/frontend
+        run: npx tauri build --bundles deb
+
+      - name: Upload .deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: amp-linux-deb
+          path: amp/frontend/src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: error
