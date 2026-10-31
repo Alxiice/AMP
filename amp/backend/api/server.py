@@ -16,7 +16,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from backend.config import settings
 from backend.database.session import init_db
-from backend.services.streaming import get_streaming_service, log_extraction_dependencies
+from backend.services.extractor import get_extraction_dependencies
+from backend.services.streaming import get_streaming_service
 from backend.utils.logger import configure_logging, get_logger
 
 logger = get_logger("backend.api.server")
@@ -81,7 +82,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
     @app.on_event("startup")
     def _startup() -> None:
         init_db()
-        log_extraction_dependencies()
+        get_extraction_dependencies()  # computed once, logged (P2)
         svc = get_streaming_service()
         svc.start()
         auth_mode = "token required" if token else "open (no token)"
@@ -108,6 +109,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
                 "auth": auth.state.value,
                 "streaming": "running",
                 "database": "connected",
+                "extractor": get_extraction_dependencies(),
             },
         }
 

@@ -145,12 +145,14 @@ All tests mock `YoutubeDL`; none use the network.
 
 ## 5. Acceptance criteria
 
-- [ ] Unit suite green. `extractor.py` has its own test file, `test_extractor.py`.
-- [ ] `grep -n "YoutubeDL" backend/services/streaming.py` returns nothing.
-- [ ] Playing a song from the UI logs exactly **one** "Extracted stream" line for that song, even with the segment bar polling.
-- [ ] Two songs with different lengths produce different segment counts in `GET /api/stream/info/{id}`, and `duration_ms` matches YouTube's within 1 s.
-- [ ] `test_integration_download.py` passes for both pinned songs.
-- [ ] No googlevideo URL or cookie value appears in `app.log` or `streaming.log` (P24). Grep for `googlevideo` and `SAPISID=`.
+> **Done 2026-10-31** (AGENTS.md Revision 9). Default client list is `["visionos", "default"]` — see Revision 9 for the measurements.
+
+- [x] Unit suite green. `extractor.py` has its own test file, `test_extractor.py`.
+- [x] `grep -n "YoutubeDL" backend/services/streaming.py` returns nothing.
+- [x] Playing a song from the UI logs exactly **one** "Extracted stream" line for that song, even with the segment bar polling. *(Verified against the live backend with `/play` + 10 concurrent `/chunks`/`/info` + `/audio` — not clicked through the Tauri UI.)*
+- [x] Two songs with different lengths produce different segment counts in `GET /api/stream/info/{id}`, and `duration_ms` matches YouTube's within 1 s.
+- [x] `test_integration_download.py` passes for both pinned songs.
+- [x] No googlevideo URL or cookie value appears in `app.log` or `streaming.log` (P24). Grep for `googlevideo` and `SAPISID=`.
 
 ## 6. Risks and notes
 

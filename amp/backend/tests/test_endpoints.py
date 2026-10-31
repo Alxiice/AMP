@@ -20,6 +20,12 @@ class TestAuthMiddleware:
         data = resp.json()
         assert data["status"] == "ok"
 
+    def test_health_reports_extractor_prerequisites(self, client):
+        extractor = client.get("/api/health").json()["services"]["extractor"]
+        assert set(extractor) == {"node", "ejs", "yt_dlp"}
+        assert isinstance(extractor["node"], bool)
+        assert isinstance(extractor["ejs"], bool)
+
     def test_root_no_auth_required(self, client):
         resp = client.get("/")
         assert resp.status_code == 200
