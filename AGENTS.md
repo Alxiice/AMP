@@ -2,6 +2,7 @@
 
 > **Project**: AMP v2 — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
 > **Spec**: `DESIGN_DOC_2.md` (authoritative)
+> **Docs**: `docs/` (MkDocs Material, `mkdocs.yml` at the root): usage guide + code reference. Update the matching page when behaviour changes; `mkdocs build --strict` must pass
 > **Last updated**: 2026-10-31
 
 ---
@@ -16,16 +17,25 @@
 | Phase 4 | Polish (Logs page, error surfacing, settings) | **DONE** |
 | Phase 5 | Packaging + tests + README | **DONE** |
 | Revision | Open mode (no token) + venv support | **DONE** |
-| Refactor Phase 0 | Safety net + hotfixes ([plan](improvement-plan/phase-0-safety-net.md)) | **DONE** — see Revision 7 |
+| Refactor Phase 0 | Safety net + hotfixes | **DONE** — see Revision 7 |
 | Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
-| Refactor Phase 1 | Single-flight extraction ([plan](improvement-plan/phase-1-extraction.md)) | **DONE** — see Revision 9 |
-| Refactor Phase 2 | Exact segment table from the fMP4 sidx ([plan](improvement-plan/phase-2-segment-table.md)) | **DONE** — see Revision 10 |
-| Refactor Phase 3 | Download pipeline correctness ([plan](improvement-plan/phase-3-download-pipeline.md)) | **DONE** — see Revision 11 |
-| Refactor Phase 4 | Playback UX & frontend ([plan](improvement-plan/phase-4-playback-ux.md)) | **DONE** — see Revision 12 |
-| Refactor Phase 5 | Auth simplification & local API hardening ([plan](improvement-plan/phase-5-auth-security.md)) | **DONE** — see Revision 13 |
-| Refactor Phase 6 | Lifecycle & packaging ([plan](improvement-plan/phase-6-lifecycle-packaging.md)) | **DONE** — see Revision 14 |
+| Refactor Phase 1 | Single-flight extraction | **DONE** — see Revision 9 |
+| Refactor Phase 2 | Exact segment table from the fMP4 sidx | **DONE** — see Revision 10 |
+| Refactor Phase 3 | Download pipeline correctness | **DONE** — see Revision 11 |
+| Refactor Phase 4 | Playback UX & frontend | **DONE** — see Revision 12 |
+| Refactor Phase 5 | Auth simplification & local API hardening | **DONE** — see Revision 13 |
+| Refactor Phase 6 | Lifecycle & packaging | **DONE** — see Revision 14 |
+| Revision 15 | MkDocs documentation, simpler READMEs, plan files removed | **DONE** — see Revision 15 |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6, all done. Left from the plan: 5.6 (per-launch token), now unblocked.
+**Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 15 — Documentation (2026-10-31)
+
+- New MkDocs Material site: `mkdocs.yml` + `docs/` (`docs/requirements.txt`). **Usage**: install & launch, using the app, signing in, configuration, troubleshooting, debug launcher. **Code**: architecture, repository layout, backend (API, extraction, segment table, pipeline, cache, serving, auth, lifecycle), frontend (overview, player, Tauri shell), development (testing, CI & packaging, pitfalls). Collapsible sections for details. `mkdocs build --strict` passes (mkdocs 1.6.1, material 9.8.0).
+- Root `README.md` cut down to requirements, launch, installer build and links to the docs; `amp/README.md` is now a short index (its configuration/API/structure content moved to the docs).
+- Removed `improvement-plan/` (all phases done) and `amp/AUTH_AUTO_EXTRACTION_DESIGN.md` (still described the browser-polling sign-in removed in Revision 13). Links in this file and `DESIGN_DOC_2.md` updated.
+- Found while writing the docs: the Playlists page lists playlists as cards only; clicking a card does nothing (no track view). The Phase 3 note "user playlists + tracks" was inaccurate. Added to Known Issues.
+- No code changes; tests not rerun.
 
 **Test results**: 379 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 87% (floor 60%). 12 frontend unit tests pass (`npm test`, vitest). 1 Rust test (`cargo test`). Integration 11/11 (`BAgTQhR8MLo`). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
@@ -172,7 +182,7 @@ AMP_TEST_SONG_ID=Tmz3mpOq8aE venv/Scripts/python.exe -m pytest backend/tests/tes
 
 ### Revision 7 — Phase 0: safety net + hotfixes (2026-10-31)
 
-Plan: [improvement-plan/phase-0-safety-net.md](improvement-plan/phase-0-safety-net.md) · Branch: `fix/phase-0-safety-net`
+Plan: `improvement-plan/phase-0-safety-net.md` (removed, see git history) · Branch: `fix/phase-0-safety-net`
 
 | # | Problem | Fix |
 |---|---------|-----|
@@ -227,7 +237,7 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 
 ### Revision 14 — Phase 6: lifecycle & packaging (2026-10-31)
 
-Plan: [improvement-plan/phase-6-lifecycle-packaging.md](improvement-plan/phase-6-lifecycle-packaging.md) · Branch: `fix/phase-6-lifecycle`
+Plan: `improvement-plan/phase-6-lifecycle-packaging.md` (removed, see git history) · Branch: `fix/phase-6-lifecycle`
 
 **6.0 — result.** With the old code, `npm run tauri dev` printed `Scoped command venv/Scripts/python.exe not found` (twice: React StrictMode mounts twice). `shell:allow-spawn` had no scope, so the shell plugin rejected **every** JS spawn (dev `Command.create` and prod `Command.sidecar` alike, `ProgramNotAllowed`), and `sidecar.ts` silently adopted whatever answered on :8000. **The Tauri app never started its own backend**, which explains the past "port already in use" / "works only if app.py runs" reports. Also: without an `env` option the plugin's JS path calls `env_clear()`, so even an allowed spawn would have lost `PATH` (and Node).
 
@@ -270,7 +280,7 @@ Dev (`npm run tauri dev`, with the user's app.py backend still on :8000): backen
 
 ### Revision 13 — Phase 5: auth simplification & local API hardening (2026-10-31)
 
-Plan: [improvement-plan/phase-5-auth-security.md](improvement-plan/phase-5-auth-security.md) · Branch: `fix/phase-5-auth-security`
+Plan: `improvement-plan/phase-5-auth-security.md` (removed, see git history) · Branch: `fix/phase-5-auth-security`
 
 | # | Problem | Fix |
 |---|---|---|
@@ -297,7 +307,7 @@ Plan: [improvement-plan/phase-5-auth-security.md](improvement-plan/phase-5-auth-
 
 ### Revision 12 — Phase 4: playback UX & frontend (2026-10-31)
 
-Plan: [improvement-plan/phase-4-playback-ux.md](improvement-plan/phase-4-playback-ux.md) · Branch: `fix/phase-4-playback-ux`
+Plan: `improvement-plan/phase-4-playback-ux.md` (removed, see git history) · Branch: `fix/phase-4-playback-ux`
 
 | # | Problem | Fix |
 |---|---|---|
@@ -337,7 +347,7 @@ Target met for the cached case (< 300 ms); uncached ≈ extraction + one segment
 
 ### Revision 11 — Phase 3: download pipeline correctness (2026-10-31)
 
-Plan: [improvement-plan/phase-3-download-pipeline.md](improvement-plan/phase-3-download-pipeline.md) · Branch: `fix/phase-3-download-pipeline`
+Plan: `improvement-plan/phase-3-download-pipeline.md` (removed, see git history) · Branch: `fix/phase-3-download-pipeline`
 
 `services/streaming.py` is now a package (public imports unchanged, `from backend.services.streaming import …`):
 
@@ -375,7 +385,7 @@ Plan: [improvement-plan/phase-3-download-pipeline.md](improvement-plan/phase-3-d
 
 ### Revision 10 — Phase 2: exact segment table from the fMP4 sidx (2026-10-31)
 
-Plan: [improvement-plan/phase-2-segment-table.md](improvement-plan/phase-2-segment-table.md) · Branch: `fix/phase-2-segment-table`
+Plan: `improvement-plan/phase-2-segment-table.md` (removed, see git history) · Branch: `fix/phase-2-segment-table`
 
 **Spike 2.0 — GO.** `scripts/dump_boxes.py` (kept as a dev tool) on itag 140, first 64 KB:
 
@@ -413,7 +423,7 @@ Plan: [improvement-plan/phase-2-segment-table.md](improvement-plan/phase-2-segme
 
 ### Revision 9 — Phase 1: single-flight stream extraction (2026-10-31)
 
-Plan: [improvement-plan/phase-1-extraction.md](improvement-plan/phase-1-extraction.md) · Branch: `fix/phase-1-extraction`
+Plan: `improvement-plan/phase-1-extraction.md` (removed, see git history) · Branch: `fix/phase-1-extraction`
 
 New module **`backend/services/extractor.py`** (no FastAPI, no segments): `build_ydl_opts`, `select_audio_format` (pure), `ExtractedStream` / `ExtractionError`, `SingleFlight`, `BoundedDict` (moved here, re-exported by `streaming.py`), `StreamExtractor.get()` / `refresh(song_id, stale_url)`, `get_extraction_dependencies()`. `streaming.py` no longer imports yt-dlp (1,633 → 1,269 lines).
 
@@ -553,7 +563,7 @@ amp/frontend/
 │   └── pages/
 │       ├── Search.tsx           # Query box, results list, play per result
 │       ├── Library.tsx          # Liked songs list
-│       ├── Playlists.tsx        # User playlists + tracks
+│       ├── Playlists.tsx        # User playlists (cards; no track view yet)
 │       ├── Auth.tsx             # Import-from-browser, sign-in, status, logout
 │       └── Logs.tsx             # Backend stdout, streaming logs, API log relay
 └── src-tauri/
@@ -682,7 +692,8 @@ amp/frontend/
 - [ ] MSE upgrade (§8.4) — optional, not done in Phase 4
 - [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
 - [ ] Phase 5 webview sign-in (Google login in the Tauri window → liked songs) not run manually; `youtube_login.rs` user agent still Chrome 125
-- [ ] Phase 5.6 (automatic per-launch token) — unblocked: `backend_info` already returns `token` (always `null`); needs `--token` from Rust, `setAuthToken`, and `?t=` on `/audio`
+- [ ] Phase 5.6 (automatic per-launch token) — unblocked: `backend_info` already returns `token` (always `null`); needs a random token from Rust passed as `--token`, `setAuthToken` in the frontend, and `?t=<token>` accepted on `/audio` (`<audio>` can't send headers; compare with `hmac.compare_digest`). Manual runs (curl, `app.py`, browser dev) keep open mode
+- [ ] Playlists page: clicking a playlist does nothing — no track view (`GET /api/playlist/{id}` exists)
 
 ## Environment Notes
 
