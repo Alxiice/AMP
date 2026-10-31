@@ -3,6 +3,7 @@
 Fully mocked, no network.
 """
 
+import json
 import os
 import time
 from pathlib import Path
@@ -383,7 +384,7 @@ class TestCacheEviction:
 
 
 def _make_stream_info(song_id, n_segments, seg_ms=5000, url="https://cdn.example.com/a"):
-    from backend.utils.dash import SegmentInfo, StreamInfo
+    from backend.utils.layout import SegmentInfo, StreamInfo
 
     seg_bytes = 1000
     segments = [
@@ -483,11 +484,7 @@ class TestCdn403:
 
 
 class TestStreamInfo:
-    def _probe_response(self):
-        resp = MagicMock()
-        resp.headers = {"Content-Type": "audio/mp4"}
-        resp.content = b"\x00\x00\x00\x18ftypdash"
-        return resp
+    """Proportional fallback (WebM, or no sidx): real size + duration, no network."""
 
     def test_stream_info_uses_extracted_duration(self, temp_dirs, monkeypatch):
         from backend.config import settings
@@ -497,12 +494,12 @@ class TestStreamInfo:
         svc = StreamingService()
         stream = _extracted(song_id, duration_ms=245_000, filesize=245 * 16_000,
                             mime_type="audio/webm", ext="webm", itag="251", title="Real title")
-        with patch.object(svc._extractor, "get", return_value=stream), \
-             patch.object(svc._http, "get", return_value=self._probe_response()), \
-             patch.object(svc, "_probe_content_length") as probe:
+        with patch.object(svc._extractor, "get", return_value=stream),              patch.object(svc._http, "get") as http_get,              patch.object(svc, "_probe_content_length") as probe:
             info = svc.get_stream_info(song_id)
 
         probe.assert_not_called()  # filesize came from extraction
+        http_get.assert_not_called()  # webm: no sidx head fetch
+        assert info.is_dash is False
         assert info.duration_ms == 245_000
         assert len(info.segments) == 49
         assert abs(sum(s.duration_ms for s in info.segments) - 245_000) < 50
@@ -513,9 +510,8 @@ class TestStreamInfo:
     def test_probe_only_when_filesize_unknown(self, temp_dirs):
         song_id = "dQw4w9WgXcQ"
         svc = StreamingService()
-        with patch.object(svc._extractor, "get", return_value=_extracted(song_id, filesize=None)), \
-             patch.object(svc._http, "get", return_value=self._probe_response()), \
-             patch.object(svc, "_probe_content_length", return_value=2_880_000) as probe:
+        stream = _extracted(song_id, filesize=None, ext="webm", mime_type="audio/webm", itag="251")
+        with patch.object(svc._extractor, "get", return_value=stream),              patch.object(svc, "_probe_content_length", return_value=2_880_000) as probe:
             info = svc.get_stream_info(song_id)
         probe.assert_called_once()
         assert info.total_bytes == 2_880_000
@@ -523,8 +519,8 @@ class TestStreamInfo:
     def test_unknown_duration_gives_no_info(self, temp_dirs):
         song_id = "dQw4w9WgXcQ"
         svc = StreamingService()
-        with patch.object(svc._extractor, "get", return_value=_extracted(song_id, duration_ms=0, filesize=1000)), \
-             patch.object(svc._http, "get", return_value=self._probe_response()):
+        stream = _extracted(song_id, duration_ms=0, filesize=1000, ext="webm")
+        with patch.object(svc._extractor, "get", return_value=stream):
             assert svc.get_stream_info(song_id) is None  # no 180 s fallback
 
     def test_stream_info_single_flight(self, temp_dirs):
@@ -596,3 +592,227 @@ class TestBufferAhead:
         assert indices == [-1, 58, 59]
 
 
+
+
+# ---------------------------------------------------------------------------
+# Exact segment table from the fMP4 sidx + cache identity (Phase 2)
+# ---------------------------------------------------------------------------
+
+FIXTURE_HEAD = Path(__file__).parent / "fixtures" / "itag140_head.bin"
+FIXTURE_FILESIZE = 4_172_237
+
+
+def _cdn_response(body: bytes, status: int = 206):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.headers = {}
+    resp.iter_content.side_effect = lambda chunk_size=65536: iter(
+        [body[i:i + chunk_size] for i in range(0, len(body), chunk_size)])
+    return resp
+
+
+def _sidx_stream(song_id="BAgTQhR8MLo", **kw):
+    fields = dict(filesize=FIXTURE_FILESIZE, duration_ms=258_000, url="https://cdn.example.com/140")
+    fields.update(kw)
+    return _extracted(song_id, **fields)
+
+
+def _build(svc, stream, *bodies):
+    """Build stream info with the CDN head fetch(es) answered by bodies."""
+    responses = [_cdn_response(b) for b in bodies]
+    with patch.object(svc._extractor, "get", return_value=stream), \
+         patch.object(svc._http, "get", side_effect=responses) as http_get:
+        info = svc.get_stream_info(stream.song_id)
+    return info, http_get
+
+
+class TestSidxTable:
+    def test_exact_table_from_sidx(self, temp_dirs):
+        head = FIXTURE_HEAD.read_bytes()
+        svc = StreamingService()
+        info, http_get = _build(svc, _sidx_stream(), head + b"\0" * (65536 - len(head)))
+
+        assert http_get.call_count == 1
+        assert http_get.call_args.kwargs["headers"]["Range"] == "bytes=0-65535"
+        assert info.is_dash is True
+        assert info.method == "sidx"
+        assert info.init_range == (0, len(head) - 1)
+        assert len(info.segments) == 26
+        assert info.total_bytes == FIXTURE_FILESIZE
+        assert abs(info.duration_ms - 258_000) <= 1000
+        assert info.itag == "140"
+
+        # Head bytes already cover the init segment: cached as init.bin
+        init = svc._segment_path("BAgTQhR8MLo", -1)
+        assert init.read_bytes() == head
+        assert svc.get_segment_status("BAgTQhR8MLo", -1) == SegmentStatus.DOWNLOADED
+
+        manifest = json.loads(svc._layout_path("BAgTQhR8MLo").read_text())
+        assert manifest["layout_id"] == info.layout_id
+        assert manifest["method"] == "sidx"
+        assert manifest["total_bytes"] == FIXTURE_FILESIZE
+        assert len(manifest["segments"]) == 26
+
+    def test_position_maps_to_exact_segment(self, temp_dirs):
+        from backend.utils.layout import position_ms_to_segment_index
+
+        head = FIXTURE_HEAD.read_bytes()
+        svc = StreamingService()
+        info, _ = _build(svc, _sidx_stream(), head)
+        # 50 %: the segment whose [start, end) contains 129 s
+        target = info.duration_ms // 2
+        idx = position_ms_to_segment_index(info, target)
+        start = sum(s.duration_ms for s in info.segments[:idx])
+        assert start <= target < start + info.segments[idx].duration_ms
+
+    def test_need_more_data_refetches(self, temp_dirs):
+        from backend.tests.test_mp4 import fmp4_head
+
+        refs = [(10_000, 441_000)] * 3  # 3 x 10 s
+        head = fmp4_head(refs, moov_len=70_000)  # moov alone is past the first 64 KB
+        sidx_end = len(head) - 16  # minus the trailing moof box
+        stream = _sidx_stream("dQw4w9WgXcQ", filesize=sidx_end + 30_000, duration_ms=30_000)
+        svc = StreamingService()
+        info, http_get = _build(svc, stream, head[:65536], head)
+
+        assert http_get.call_count == 2
+        moov_end = 24 + 70_008
+        second = http_get.call_args_list[1].kwargs["headers"]["Range"]
+        assert second == f"bytes=0-{moov_end + 8 + 65536 - 1}"  # next header + room for the sidx
+        assert info.is_dash is True
+        assert info.init_range == (0, sidx_end - 1)
+        assert len(info.segments) == 3
+
+    def test_short_file_without_sidx_does_not_loop(self, temp_dirs):
+        from backend.tests.test_mp4 import box
+
+        head = box(b"ftyp", b"x" * 8) + box(b"moov", bytes(20))  # file ends, no sidx
+        svc = StreamingService()
+        info, http_get = _build(svc, _sidx_stream(filesize=500_000, duration_ms=30_000), head)
+        assert http_get.call_count == 1
+        assert info.is_dash is False
+
+    def test_filesize_mismatch_falls_back(self, temp_dirs):
+        head = FIXTURE_HEAD.read_bytes()
+        svc = StreamingService()
+        info, _ = _build(svc, _sidx_stream(filesize=FIXTURE_FILESIZE + 1), head)
+        assert info.is_dash is False
+        assert not svc._segment_path("BAgTQhR8MLo", -1).exists()
+
+    def test_no_sidx_falls_back(self, temp_dirs):
+        from backend.tests.test_mp4 import box
+
+        head = box(b"ftyp", b"x" * 8) + box(b"moov", b"\0" * 20) + box(b"moof", b"\0" * 8)
+        svc = StreamingService()
+        info, _ = _build(svc, _sidx_stream(filesize=500_000, duration_ms=30_000), head)
+        assert info.is_dash is False
+
+    def test_head_http_error_falls_back(self, temp_dirs):
+        svc = StreamingService()
+        with patch.object(svc._extractor, "get", return_value=_sidx_stream()), \
+             patch.object(svc._http, "get", return_value=_cdn_response(b"", status=403)):
+            info = svc.get_stream_info("BAgTQhR8MLo")
+        assert info.is_dash is False
+
+
+class TestLayoutIdentity:
+    def test_layout_change_purges_song(self, temp_dirs):
+        from backend.config import settings
+
+        song_id = "BAgTQhR8MLo"
+        svc = StreamingService()
+        # Layout A: proportional (e.g. an earlier itag 251 extraction)
+        info_a = svc._build_from_stream(song_id, _extracted(
+            song_id, ext="webm", itag="251", mime_type="audio/webm", filesize=4_000_000, duration_ms=258_000))
+        svc._atomic_write_segment(song_id, 0, b"old layout bytes")
+        svc._record_segment_db(song_id, 0, 0, 15, 16, 5000, info_a.layout_id)
+        svc.set_segment_status(song_id, 0, SegmentStatus.DOWNLOADED)
+
+        # Layout B: sidx
+        head = FIXTURE_HEAD.read_bytes()
+        with patch.object(svc._http, "get", return_value=_cdn_response(head)):
+            info_b = svc._build_from_stream(song_id, _sidx_stream())
+
+        assert info_b.layout_id != info_a.layout_id
+        assert not svc._segment_path(song_id, 0).exists()
+        assert svc.get_segment_status(song_id, 0) == SegmentStatus.PENDING
+        assert svc._read_layout_id(song_id) == info_b.layout_id
+        assert svc._segment_path(song_id, -1).exists()  # new init cached after the purge
+        from backend.database.models import Segment
+        from backend.database.session import session_scope
+        with session_scope() as session:
+            assert session.get(Segment, (song_id, 0)) is None
+        assert (settings.segments_dir / song_id).is_dir()
+
+    def test_same_layout_keeps_cache(self, temp_dirs):
+        song_id = "BAgTQhR8MLo"
+        svc = StreamingService()
+        stream = _extracted(song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000)
+        info = svc._build_from_stream(song_id, stream)
+        svc._atomic_write_segment(song_id, 0, b"keep me")
+        assert svc._build_from_stream(song_id, stream).layout_id == info.layout_id
+        assert svc._segment_path(song_id, 0).read_bytes() == b"keep me"
+
+    def test_reconcile_deletes_dir_without_manifest(self, temp_dirs):
+        from backend.config import settings
+
+        legacy = settings.segments_dir / "dQw4w9WgXcQ"
+        legacy.mkdir(parents=True)
+        (legacy / "0000.bin").write_bytes(b"pre-phase-2 proportional segment")
+        svc = StreamingService()
+        svc._record_segment_db("dQw4w9WgXcQ", 0, 0, 31, 32, 5000, None)
+        svc.reconcile_cache()
+        assert not legacy.exists()
+        from backend.database.models import Segment
+        from backend.database.session import session_scope
+        with session_scope() as session:
+            assert session.get(Segment, ("dQw4w9WgXcQ", 0)) is None
+
+    def test_reconcile_keeps_matching_and_drops_foreign_layout_rows(self, temp_dirs):
+        song_id = "BAgTQhR8MLo"
+        svc = StreamingService()
+        info = svc._build_from_stream(song_id, _extracted(
+            song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000))
+        svc._atomic_write_segment(song_id, 0, b"a" * 10)
+        svc._record_segment_db(song_id, 0, 0, 9, 10, 5000, info.layout_id)
+        svc._atomic_write_segment(song_id, 1, b"b" * 10)
+        svc._record_segment_db(song_id, 1, 10, 19, 10, 5000, "someotherlayout0")
+
+        fresh = StreamingService()
+        fresh.reconcile_cache()
+        assert svc._segment_path(song_id, 0).exists()
+        assert fresh.get_segment_status(song_id, 0) == SegmentStatus.DOWNLOADED
+        assert not svc._segment_path(song_id, 1).exists()
+        assert svc._layout_path(song_id).exists()
+
+    def test_manifest_not_counted_or_evicted(self, temp_dirs):
+        song_id = "BAgTQhR8MLo"
+        svc = StreamingService()
+        svc._build_from_stream(song_id, _extracted(
+            song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000))
+        info = svc.get_cache_info()
+        assert info["file_count"] == 0
+        svc._atomic_write_segment(song_id, 0, b"\0" * 1_200_000)  # over the 1 MB test limit
+        svc.cleanup_cache()
+        assert svc._layout_path(song_id).exists()
+
+
+class TestSegmentsTableMigration:
+    def test_old_segments_table_recreated(self, temp_dirs):
+        from sqlalchemy import inspect, text
+
+        import backend.database.session as session_mod
+
+        engine = session_mod.get_engine()
+        with engine.begin() as conn:
+            conn.execute(text("DROP TABLE segments"))
+            conn.execute(text(
+                "CREATE TABLE segments (song_id VARCHAR(32), \"index\" INTEGER, byte_start INTEGER, "
+                "byte_end INTEGER, size_bytes INTEGER, duration_ms INTEGER, status VARCHAR(16), "
+                "file_path TEXT, last_accessed DATETIME, PRIMARY KEY (song_id, \"index\"))"))
+            conn.execute(text("INSERT INTO segments (song_id, \"index\") VALUES ('dQw4w9WgXcQ', 0)"))
+        session_mod.init_db()
+        cols = {c["name"] for c in inspect(engine).get_columns("segments")}
+        assert "layout_id" in cols
+        with engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM segments")).scalar() == 0

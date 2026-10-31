@@ -313,3 +313,36 @@ class TestDownloadChunks:
             print(f"  OK — segment {idx}: {size:,} bytes")
 
         print(f"\n  PASSED: {len(targets)} chunks verified\n")
+
+
+class TestConcatEqualsCdnFile:
+    """Phase 2: the exact (sidx) segment table reassembles the CDN file byte for byte."""
+
+    def test_concat_equals_cdn_file(self, streaming_service, temp_dirs):
+        import hashlib
+
+        import requests
+
+        song_id = SONG_ID
+        info = streaming_service._get_stream_info(song_id)
+        assert info is not None, f"Could not get stream info for {song_id}"
+        assert info.is_dash, f"Expected an exact sidx table for {song_id}, got {info.method}"
+        assert abs(sum(s.duration_ms for s in info.segments) - info.duration_ms) <= 1000
+
+        local = hashlib.sha256()
+        for idx in [-1] + list(range(len(info.segments))):
+            assert streaming_service.download_segment_sync(song_id, idx), f"segment {idx} failed"
+            local.update(streaming_service._segment_path(song_id, idx).read_bytes())
+
+        # One request for the whole file (googlevideo wants a Range for large reads)
+        resp = requests.get(
+            info.base_url,
+            headers={**streaming_service._auth.get_cdn_headers(), "Range": f"bytes=0-{info.total_bytes - 1}"},
+            timeout=60,
+        )
+        assert resp.status_code in (200, 206), f"CDN returned {resp.status_code}"
+        assert len(resp.content) == info.total_bytes
+        remote = hashlib.sha256(resp.content)
+        print(f"\n  {song_id}: {len(info.segments)} sidx segments + init, {info.total_bytes:,} B, "
+              f"sha256 {local.hexdigest()[:16]}")
+        assert local.hexdigest() == remote.hexdigest()

@@ -19,11 +19,12 @@
 | Refactor Phase 0 | Safety net + hotfixes ([plan](improvement-plan/phase-0-safety-net.md)) | **DONE** — see Revision 7 |
 | Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
 | Refactor Phase 1 | Single-flight extraction ([plan](improvement-plan/phase-1-extraction.md)) | **DONE** — see Revision 9 |
-| Refactor Phases 2–6 | Segment table, pipeline, playback UX, auth/security, lifecycle | Pending |
+| Refactor Phase 2 | Exact segment table from the fMP4 sidx ([plan](improvement-plan/phase-2-segment-table.md)) | **DONE** — see Revision 10 |
+| Refactor Phases 3–6 | Pipeline, playback UX, auth/security, lifecycle | Pending |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–1 are done; Phases 2–6 are pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–2 are done; Phases 3–6 are pending.
 
-**Test results**: 221 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 70% (floor 60%). All 12 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 2 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 228 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 72% (floor 60%). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
 
@@ -219,6 +220,44 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
 
+### Revision 10 — Phase 2: exact segment table from the fMP4 sidx (2026-10-31)
+
+Plan: [improvement-plan/phase-2-segment-table.md](improvement-plan/phase-2-segment-table.md) · Branch: `fix/phase-2-segment-table`
+
+**Spike 2.0 — GO.** `scripts/dump_boxes.py` (kept as a dev tool) on itag 140, first 64 KB:
+
+| Song | ftyp | moov | sidx | first moof | sidx refs |
+|---|---|---|---|---|---|
+| `BAgTQhR8MLo` (4,172,237 B) | 0 / 24 | 24 / 644 | 668 / 344 | 1012 | 26 × ~10 s |
+| `Tmz3mpOq8aE` (3,797,479 B) | 0 / 24 | 24 / 735 | 759 / 320 | 1079 | 24 × ~10 s |
+
+(offset / size in bytes.) The first 1,012 B of `BAgTQhR8MLo` (ftyp + moov + sidx, metadata only) are the fixture `backend/tests/fixtures/itag140_head.bin`.
+
+| Area | Change |
+|---|---|
+| **2.1 `utils/mp4.py`** (new, pure) | `iter_boxes` (largesize, size 0), `parse_sidx` (v0/v1, rejects hierarchical), `parse_fmp4_index` → `Mp4Index(init_end, timescale, segments)`, `NeedMoreData(required_len)`. Durations rounded cumulatively so they sum exactly. `init_end` = first fragment − 1, so the virtual file **is** the CDN file (`total_bytes == filesize`) |
+| **2.2 `_build_from_stream`** | m4a/mp4: `Range: bytes=0-65535` (reads at most that even if Range is ignored), parse sidx; on `NeedMoreData` re-fetch `required_len + 64 KB` (≤ 2 re-fetches, stops on a short read). Falls back to proportional on no sidx / HTTP error / sidx total ≠ extracted filesize; WARNING if durations differ from yt-dlp's by > 1 s. Head bytes stored as `init.bin` (no extra request on first play). `is_dash` kept for the API, now means "exact table" |
+| **2.3 MPD removed** | `parse_mpd` and helpers deleted; `utils/dash.py` → `utils/layout.py` (`SegmentInfo`, `StreamInfo`, Range math), `test_dash.py` → `test_layout.py` (MPD tests dropped, layout/Range tests kept on a hand-built table). XML sniffing removed. Proportional builder renamed `_build_proportional_info` |
+| **2.4 Cache identity** | `StreamInfo.itag` + `layout_id` = sha256(`itag|total_bytes|n_segments|method`)[:16]. `segments/{song_id}/layout.json` (atomic). Different `layout_id` → purge the song's dir, DB rows and in-memory statuses, log INFO, write the new manifest. `reconcile_cache()` deletes dirs without `layout.json` and rows whose `layout_id` ≠ the manifest's. LRU/cache-info ignore `layout.json` |
+| **2.5 DB** | `Segment.layout_id` (String(16), nullable). `init_db()` drops + recreates `segments` if a column is missing (cache only) |
+| **2.6 Spec** | DESIGN_DOC_2.md §6.1–6.4, §6.6, module tree, tests, glossary; READMEs |
+| API | `/api/stream/info/{id}` adds `method`, `itag`, `layout_id` |
+
+**Not done:** the optional 2.4 bonus (serve a cached song from `layout.json` without extracting after restart) — every first request after restart still extracts (~1 s with visionos). Workers already downloading under an old layout when a refresh changes it can still write one stale file after the purge (Phase 3 pipeline work).
+
+**Verification:**
+- Live backend on the Phase 1 scratch data dir (old `segments` table, pre-Phase-2 segments for `Tmz3mpOq8aE`): startup logged `segments table lacks ['layout_id']; recreating it` and `… 1 song dirs without layout.json removed`.
+- `GET /api/stream/info/BAgTQhR8MLo`: `is_dash: true`, `method: sidx`, 26 segments (9,948 / 9,984 / 9,985 … ms), sum 257,613 ms (yt-dlp: 258 s), `total_bytes` 4,172,237, `init_range` [0, 1011].
+- Seek to 50 % (`POST /api/stream/seek?position_ms=128806`) → `current_segment_index` 12 (segment 12 spans ~119.8–129.8 s); segments 12–15 downloaded. Via the API, not the Tauri UI.
+- Integration `test_concat_equals_cdn_file`: sha256(init + segments) == sha256(one GET of the URL) for **both** pinned songs (26 and 24 segments). All 14 integration tests pass.
+- `grep -rn parse_mpd backend` → nothing. `googlevideo` / `SAPISID=` in logs: 0.
+
+**New tests:** `test_mp4.py` (18: boxes basic/largesize/size-0/offset/partial/invalid, sidx v0/v1/hierarchical/not-sidx/truncated, synthetic index, `first_offset`, cumulative rounding, `NeedMoreData`, no sidx before fragment, real fixture, virtual layout == file offsets). `test_layout.py` (layout_id stability/identity). `test_streaming.py`: `TestSidxTable` (exact table + init cached + manifest, 50 % maps to the right segment, big-moov re-fetch, short file doesn't loop, filesize mismatch / no sidx / HTTP 403 fall back), `TestLayoutIdentity` (layout change purges, same layout keeps cache, legacy dir deleted, foreign-layout rows dropped, manifest not counted/evicted), `TestSegmentsTableMigration`. Integration: `TestConcatEqualsCdnFile`.
+
+**Action for users:** the first start after this revision deletes the whole segment cache (pre-Phase-2 dirs have no `layout.json`). Songs re-download on next play.
+
+**Test results:** 228 unit tests pass, coverage 72% (`mp4.py` 84%, `layout.py` 96%), ruff clean, 14/14 integration.
+
 ### Revision 9 — Phase 1: single-flight stream extraction (2026-10-31)
 
 Plan: [improvement-plan/phase-1-extraction.md](improvement-plan/phase-1-extraction.md) · Branch: `fix/phase-1-extraction`
@@ -286,7 +325,8 @@ amp/
 │   ├── utils/
 │   │   ├── __init__.py
 │   │   ├── logger.py            # app.log + streaming.log + in-memory ring buffer (1000 lines)
-│   │   └── dash.py              # MPD parser (pure functions, unit-testable)
+│   │   ├── mp4.py               # fMP4 box + sidx parser (pure, Revision 10)
+│   │   └── layout.py            # SegmentInfo/StreamInfo + Range math (was dash.py; MPD parser removed in Revision 10)
 │   └── tests/                   # 127 unit tests + integration tests
 ├── pyproject.toml
 ├── requirements.txt
@@ -308,7 +348,7 @@ amp/
 
 ### Phase 2 — DASH streaming core (DONE)
 
-**`utils/dash.py`** — Pure-function MPD parser:
+**`utils/dash.py`** — Pure-function MPD parser *(historical: removed in Revision 10; replaced by `utils/mp4.py` (sidx) + `utils/layout.py`)*:
 - SegmentList form (YouTube's audio manifests): `SegmentURL@mediaRange` → exact byte ranges
 - SegmentTemplate + SegmentTimeline form: `S@t/d/r` entries → durations, `$Number$` token resolution
 - Init segment: `SegmentList/Initialization@sourceURL` or `SegmentTemplate@initialization` + `@indexRange`
@@ -423,9 +463,9 @@ amp/frontend/
 ## Architecture Decisions Made
 
 1. **Path format**: Files use `E:/Documents/...` (forward slashes) for `write_file` tool compatibility on Windows
-2. **DASH parser**: Handles both SegmentList (YouTube's form) and SegmentTemplate+Timeline
-3. **Segment durations**: When SegmentList@duration is present with timescale, use it; otherwise evenly divide total duration
-4. **Progressive fallback**: 5-second segments (SEGMENT_TARGET_SEC=5) for faster first audio
+2. **Segment table**: exact, from the fMP4 `sidx` for itag 140 (init = ftyp+moov+sidx, virtual file == CDN file); proportional for WebM / no sidx. The MPD parser was removed (Revision 10)
+3. **Cache identity**: `segments/{song_id}/layout.json` holds the `layout_id`; a different layout purges the song's cache; dirs without it are deleted at startup (Revision 10)
+4. **Proportional fallback**: 5-second segments (SEGMENT_TARGET_SEC=5) from the extracted size + duration
 5. **In-memory caches**: BoundedDict (insertion-order LRU, max 256) instead of functools.lru_cache for mutability
 6. **Tauri shell plugin**: Uses `@tauri-apps/plugin-shell` (v2) instead of deprecated `@tauri-apps/api/shell`; registered as `tauri-plugin-shell` in Cargo.toml
 7. **Sidecar spawn**: `Command.create(venvPython(), ...)` in dev (uses venv), `Command.sidecar("amp-backend", ...)` in prod
@@ -471,7 +511,8 @@ amp/frontend/
 - [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). No installer bundle built locally yet
 - [x] ~~Icon is a placeholder~~ — generated from the AMP logo (Revision 8)
 - [x] ~~First play of an uncached song waits ~5 s for `available_at`~~ — `visionos` first (Revision 9); the wait remains only when falling back to `default`
-- [ ] DASH path never runs: every stream is progressive (5 s proportional segments, now from the real duration and size — Revision 9) — Phase 2
+- [x] ~~DASH path never runs~~ — itag 140 gets an exact table from the fMP4 `sidx` (Revision 10); WebM stays proportional
+- [ ] Cached songs still need an extraction after restart (Phase 2's optional `layout.json` bonus not done)
 - [ ] Sidecar runtime not verified: PyInstaller binary builds, but launching it from the packaged app (data dir, `yt_dlp_ejs` data files, Node on PATH) is untested — Phase 6
 - [ ] P7 (Windows encoding of sidecar output) not handled in the frontend
 - [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge

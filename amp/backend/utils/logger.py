@@ -70,7 +70,7 @@ def configure_logging() -> None:
     fh_stream.setFormatter(fmt)
     fh_stream.setLevel(logging.DEBUG)
     fh_stream.addFilter(lambda r: r.name.startswith((
-        "backend.services.streaming", "backend.services.extractor", "backend.utils.dash",
+        "backend.services.streaming", "backend.services.extractor", "backend.utils.layout", "backend.utils.mp4",
     )))
     root.addHandler(fh_stream)
 
