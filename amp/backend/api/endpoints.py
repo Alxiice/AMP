@@ -290,25 +290,14 @@ def get_audio(song_id: str, request: Request):
     status, headers, body = svc.serve_audio_range(song_id, range_header)
 
     if status not in (200, 206):
-        msg = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else "error"
-        # For audio endpoints, return 404 with the same mime type that would be returned
-        # This prevents the browser's audio element from getting confused with text/plain
-        # The audio element will recognize this as a 404 for an audio resource
-        media_type = headers.get("Content-Type", "audio/mp4")
-        if status == 404:
-            # Return an empty audio response with 404 status
-            # The audio element will handle this gracefully
-            return StreamingResponse(
-                iter([b""]),
-                status_code=status,
-                headers={"Content-Type": media_type, "Content-Length": "0"},
-                media_type=media_type,
-            )
-        return JSONResponse({"detail": msg}, status_code=status)
+        # JSON {detail, code}: segment_unavailable (502), extraction codes (404/401/502/503),
+        # bad_range (416, keeps Content-Range). No header ever promises bytes we can't send (F7).
+        extra = {"Content-Range": headers["Content-Range"]} if "Content-Range" in headers else None
+        return JSONResponse(body, status_code=status, headers=extra)
 
+    # A segment that fails mid-stream raises inside the generator: Starlette aborts
+    # the connection instead of sending a body shorter than Content-Length.
     media_type = headers.get("Content-Type", "application/octet-stream")
-    if isinstance(body, bytes):
-        return StreamingResponse(iter([body]), status_code=status, headers=headers, media_type=media_type)
     return StreamingResponse(body, status_code=status, headers=headers, media_type=media_type)
 
 

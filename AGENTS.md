@@ -20,11 +20,12 @@
 | Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
 | Refactor Phase 1 | Single-flight extraction ([plan](improvement-plan/phase-1-extraction.md)) | **DONE** — see Revision 9 |
 | Refactor Phase 2 | Exact segment table from the fMP4 sidx ([plan](improvement-plan/phase-2-segment-table.md)) | **DONE** — see Revision 10 |
-| Refactor Phases 3–6 | Pipeline, playback UX, auth/security, lifecycle | Pending |
+| Refactor Phase 3 | Download pipeline correctness ([plan](improvement-plan/phase-3-download-pipeline.md)) | **DONE** — see Revision 11 |
+| Refactor Phases 4–6 | Playback UX, auth/security, lifecycle | Pending |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–2 are done; Phases 3–6 are pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–3 are done; Phases 4–6 are pending.
 
-**Test results**: 228 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 72% (floor 60%). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 301 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 84% (floor 60%). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
 
@@ -220,6 +221,44 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
 
+### Revision 11 — Phase 3: download pipeline correctness (2026-10-31)
+
+Plan: [improvement-plan/phase-3-download-pipeline.md](improvement-plan/phase-3-download-pipeline.md) · Branch: `fix/phase-3-download-pipeline`
+
+`services/streaming.py` is now a package (public imports unchanged, `from backend.services.streaming import …`):
+
+| Module | Role |
+|---|---|
+| `service.py` | `StreamingService` facade + singleton (endpoint-facing methods keep their signatures) |
+| `registry.py` | `SegmentRegistry`: `MISSING → QUEUED → IN_FLIGHT → DONE / ERROR`, one lock, per-key `Event`; `Priority`, `SegmentStatus` |
+| `downloader.py` | `DownloadManager` (heap of hints, workers `claim()` before working) + `fetch_segment()` (P14 checks unchanged, unique tmp) |
+| `cache.py` | `CacheStore`: paths, `layout.json`, per-file size map + running total, mtime LRU, reconciliation |
+| `serving.py` | `serve_audio_range()`, `parse_range()`, `SegmentUnavailable` |
+| `playback.py` | `PlaybackSession`, `buffer_plan()` |
+
+| # | Problem | Fix |
+|---|---------|-----|
+| F6 | `_downloading` filled at enqueue: after a seek, `enqueue()` of a still-queued index returned False and the worker then dropped the stale item | Registry `request()`: QUEUED + newer epoch / better priority → re-rank and push a new heap item; workers skip items whose (priority, epoch) is no longer current. Heap order (priority, newer epoch, seq). Epoch = priority, not cancellation; in-flight downloads finish |
+| F7 | `download_segment_sync` polled 30 s on queued work; `_iter_audio_range` skipped missing segments → body shorter than `Content-Length` (h11 error) | `ensure_segment()`: DONE → path; IN_FLIGHT → `Event.wait(SEGMENT_SYNC_TIMEOUT_S=15)`; else claim and fetch in the handler thread (jumps the queue). `/audio` ensures the first segment **before** headers (failure → JSON 502 `segment_unavailable`, or 404/401/502/503 from the extraction code); a later failure **raises** in the generator (connection aborted, never short). Evicted-before-open → one retry |
+| F8 | Sync downloads not registered → worker + handler fetch the same segment, shared `NNNN.tmp`, Windows `PermissionError` | Only the claim holder downloads. `mkstemp(dir=song_dir, prefix="NNNN.", suffix=".tmp")` + fsync + `atomic_replace()` (retries `PermissionError`; identical-size winner → drop ours) |
+| F11 | Eviction by download mtime (FIFO), full dir scan after every download, DB `last_accessed` never read | `touch()` bumps mtime when served (≤ once / 30 s) → real LRU. Running total from a size map; `maybe_evict()` O(1) under the limit. Protected: playing song's init + `index ≥ current − SEGMENT_BEHIND`, IN_FLIGHT, `layout.json`. `_touch_segment` DB writes removed |
+| — | Status stayed DOWNLOADED after eviction; `/chunks` did `path.exists()` per segment every 500 ms | Eviction → `registry.evicted()` (MISSING). `/chunks` = `registry.snapshot()`, no filesystem calls; registry rebuilt by `reconcile()` at startup |
+| 3.5 | Buffer-ahead on every 2 s position report | `update_position` re-requests only when the playhead enters a new segment. `start_playback` unqueues other songs' queued items (epochs are per-song, so they can't be ranked against each other); `stop_playback` unqueues the song (no epoch bump) |
+
+**Also fixed on the way:** eviction must not delete a directory that only holds `layout.json` — the in-memory table still refers to it, and a manifest-less dir would be purged as legacy at the next start (caught by `test_manifest_not_counted_or_evicted`). `/audio` errors are JSON `{detail, code}` (the old empty-body 404 special case is gone; the `<audio>` element sees an error either way). New setting `SEGMENT_SYNC_TIMEOUT_S = 15`.
+
+**Verification (live backend, scratch data dir, `CACHE_MAX_SIZE_MB=20`):**
+- Seek check (`BAgTQhR8MLo`, uncached): play, then `seek` + 64 KB Range read at 0 % / 75 % / 10 % / 75 % / 10 % → 0.01 / 0.03 / 0.12 / 0.01 / 0.00 s. No `Too little data` (h11) in `app.log`. Via HTTP, not the Tauri UI.
+- LRU check: full playback of songs 1–5, replay song 1 after 31 s (touch throttle), then songs 6–8 (8 songs, ~37 MB through a 20 MB cache, 3 eviction rounds). Song 1 — the **oldest download** — is still fully cached (27/27 files); songs 2–4 were evicted. Every full GET returned exactly `Content-Length` bytes while evicting. No ERROR lines.
+- Integration: 11/11 (`BAgTQhR8MLo`), 3/3 download (`Tmz3mpOq8aE`), including `test_concat_equals_cdn_file`.
+- `grep -rn "time.sleep(0.05)\|_downloading\|_seg_status" backend/services` → nothing.
+
+**New tests:** `test_registry.py` (15), `test_downloader.py` (19: ordering incl. newer epoch, `test_seek_requeues_queued_segment`, `test_superseded_heap_item_skipped`, unqueued item skipped, handler error → ERROR, `fetch_segment` status classification / Content-Range / short read / `test_unique_tmp_names`), `test_cache.py` (12: `test_lru_respects_access`, touch throttle, `test_eviction_updates_registry`, protected + in-flight, manifest never evicted, `test_running_total_matches_scan`, reconcile rebuilds registry), `test_serving.py` (23: Range parsing, `test_range_first_segment_failure_returns_json_error`, `test_range_mid_stream_failure_raises`, vanished file refetch, extraction code → status, endpoint 502 / abort / 416), `test_playback.py` (7). `test_streaming.py`: `TestEnsureSegment` (`test_sync_and_worker_single_download`, `test_sync_claims_queued_item`, failure, timeout, vanished file, layout change mid-download, `/chunks` after eviction without FS calls), `TestBufferPolicy` (`test_position_update_noop_within_segment`, seek, cross-song unqueue, stop). Removed: old `TestDownloadManager` / `TestSegmentTask` / `TestPlaybackInfo` / `TestSegmentPaths` / `TestAtomicWrite` / `TestSegmentStatus` (moved or rewritten against the registry).
+
+**Not verified:** the abort-mid-stream behaviour in the real webview (only via TestClient, which re-raises); Phase 4 handles retries in the player.
+
+**Test results:** 301 unit tests pass, coverage 84% (registry/playback 100%, serving 94%, downloader 92%, cache 88%, service 81%), ruff clean, 14/14 integration.
+
 ### Revision 10 — Phase 2: exact segment table from the fMP4 sidx (2026-10-31)
 
 Plan: [improvement-plan/phase-2-segment-table.md](improvement-plan/phase-2-segment-table.md) · Branch: `fix/phase-2-segment-table`
@@ -317,7 +356,8 @@ amp/
 │   │   ├── __init__.py
 │   │   ├── auth.py              # AuthService singleton, CredentialStore (atomic write, 0600), SAPISIDHASH, lazy YTMusic
 │   │   ├── youtube.py           # YouTubeService singleton, ytmusicapi wrapper, SongData/PlaylistData dataclasses
-│   │   └── streaming.py         # StreamingService + DownloadManager + PlaybackSession
+│   │   ├── extractor.py         # StreamExtractor (Revision 9)
+│   │   └── streaming/           # package since Revision 11: service, registry, downloader, cache, serving, playback
 │   ├── database/
 │   │   ├── __init__.py
 │   │   ├── models.py            # Song, Playlist, PlaylistSong, LikedSong, Segment (SQLAlchemy 2.x)
@@ -466,7 +506,7 @@ amp/frontend/
 2. **Segment table**: exact, from the fMP4 `sidx` for itag 140 (init = ftyp+moov+sidx, virtual file == CDN file); proportional for WebM / no sidx. The MPD parser was removed (Revision 10)
 3. **Cache identity**: `segments/{song_id}/layout.json` holds the `layout_id`; a different layout purges the song's cache; dirs without it are deleted at startup (Revision 10)
 4. **Proportional fallback**: 5-second segments (SEGMENT_TARGET_SEC=5) from the extracted size + duration
-5. **In-memory caches**: BoundedDict (insertion-order LRU, max 256) instead of functools.lru_cache for mutability
+5. **In-memory caches**: BoundedDict (insertion-order, max 256) instead of functools.lru_cache for mutability
 6. **Tauri shell plugin**: Uses `@tauri-apps/plugin-shell` (v2) instead of deprecated `@tauri-apps/api/shell`; registered as `tauri-plugin-shell` in Cargo.toml
 7. **Sidecar spawn**: `Command.create(venvPython(), ...)` in dev (uses venv), `Command.sidecar("amp-backend", ...)` in prod
 8. **TestClient Host header**: Must set `Host: 127.0.0.1:8000` to pass middleware (P17)
@@ -476,6 +516,7 @@ amp/frontend/
 12. **yt-dlp client order**: `YTDLP_PLAYER_CLIENTS = ["visionos", "default"]` — visionos (no `available_at` delay, runs anonymously since it can't take cookies), then yt-dlp's default (~5 s `available_at` wait, uses cookies). One extraction per client (Revision 9).
 13. **CI**: lint + unit tests run from the lock file; coverage config lives in `amp/pyproject.toml`; Tauri CI builds the PyInstaller sidecar before `tauri build` (Revision 8).
 14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
+15. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; request handlers use `ensure_segment()` and never poll; the cache LRU clock is file mtime (Revision 11)
 
 ## All 24 Pitfalls Addressed
 
@@ -493,10 +534,10 @@ amp/frontend/
 | P12 — Overlapping polls | In-flight guard on health poll + SegmentBar poll |
 | P13 — song_id validation | `^[A-Za-z0-9_-]{11}$` before file paths |
 | P14 — Verify 206 + Content-Range | Check status, Content-Range match, byte count |
-| P15 — Atomic writes | tmp file + `os.replace()` |
+| P15 — Atomic writes | unique `mkstemp` tmp + fsync + `os.replace()` (Windows `PermissionError` retried) (Revision 11) |
 | P16 — Real Range support | 200/206/416 with correct headers |
 | P17 — Bind 127.0.0.1 + token + Host | Host always validated; token check only when configured |
-| P18 — Seek epoch | Per-song monotonic counter, stale workers discard |
+| P18 — Seek epoch | Per-song counter; a seek's requests outrank older queued work, in-flight downloads finish (Revision 11) |
 | P19 — Bound in-memory caches | BoundedDict max 256 entries |
 | P20 — SQLite WAL + busy_timeout | WAL mode, busy_timeout=5000 |
 | P21 — Blocking I/O in `def` | All blocking handlers are plain `def` |

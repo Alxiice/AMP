@@ -59,9 +59,9 @@ class TestSegmentDownload:
         assert info is not None
 
         # Download init (DASH only; progressive streams have none)
-        assert streaming_service.download_segment_sync(song_id, -1) is True
+        assert streaming_service.ensure_segment(song_id, -1).exists()
         if info.has_init:
-            init_path = streaming_service._segment_path(song_id, -1)
+            init_path = streaming_service._cache.segment_path(song_id, -1)
             assert init_path.exists()
             init_size = init_path.stat().st_size
             expected_init = info.init_range[1] - info.init_range[0] + 1
@@ -69,8 +69,8 @@ class TestSegmentDownload:
 
         # Download first 3 segments
         for i in range(min(3, len(info.segments))):
-            assert streaming_service.download_segment_sync(song_id, i) is True
-            path = streaming_service._segment_path(song_id, i)
+            assert streaming_service.ensure_segment(song_id, i).exists()
+            path = streaming_service._cache.segment_path(song_id, i)
             assert path.exists()
             seg = info.segments[i]
             expected = seg.byte_end - seg.byte_start + 1
