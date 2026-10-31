@@ -88,6 +88,8 @@ Files: `amp/backend/config.py`, `amp/backend/main.py`
 
 ### 6.5 Build the sidecar binary
 
+> *Partly done in Revision 8*: `.github/workflows/tauri-build.yml` already runs steps 1–3 inline (PyInstaller → `rustc -vV` triple → copy into `binaries/`), and `.gitignore` covers the copied binary. The Windows build of the sidecar and `tauri build --no-bundle` were verified locally. Still to do: the script (so CI and developers share it), the spec's data files, and the runtime smoke test.
+
 New `amp/scripts/build_sidecar.py`:
 
 1. Run `pyinstaller amp-backend.spec --noconfirm`.
@@ -109,11 +111,11 @@ New `amp/scripts/build_sidecar.py`:
 - `logger.py`: `RotatingFileHandler(maxBytes=5 MB, backupCount=3)` for `app.log` and `streaming.log`.
 - `server.py`: replace `@app.on_event` with a `lifespan` context manager.
 - Replace `datetime.utcnow()` with `datetime.now(timezone.utc)`. SQLite stores naive values, so either strip the tzinfo or set `DateTime(timezone=True)` consistently.
-- Icons: replace the placeholder (keep the existing sizes).
+- ~~Icons: replace the placeholder~~ — done in Revision 8 (generated from `icon/logo-square.svg`).
 
 ### 6.8 Build & smoke test
 
-- `npm run tauri build` produces an installer. Record the path in AGENTS.md.
+- `npm run tauri build` produces an installer. Record the path in AGENTS.md. (Revision 8 removed the Tauri v1 `shell-sidecar` cargo feature that blocked compilation; only the installer bundle step is unverified locally.)
 - Smoke checklist on a clean user profile (or after renaming the app data dir):
   1. App starts, sidebar shows "Backend: running" within 5 s.
   2. Search → play → audio within the TTFA target (Phase 4).

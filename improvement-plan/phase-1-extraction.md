@@ -57,11 +57,12 @@ class StreamExtractor:
 
 ### 1.1 Create `extractor.py` and move extraction out of `streaming.py`
 
-- Move `build_ydl_opts` (from Phase 0), the cookie-file handling (P23: `0600`, deleted in `finally`), the format selection and the diagnostics into the new module.
+- Move `build_ydl_opts` (from Phase 0), the cookie-file handling (P23: `0600`, deleted in `finally`), the format selection (`_select_audio_format`, added in Phase 0), the `available_at` wait (`_wait_until_available`, Phase 0) and the diagnostics into the new module.
 - `StreamingService._get_stream_url`, `_extract_stream_url`, `_try_extract` and `_log_available_formats` are deleted. `refresh_stream_url` becomes a thin call to `StreamExtractor.refresh`.
 
 ### 1.2 One extraction per client, format chosen in Python
 
+- *State after Phase 0*: the hard-coded list already starts with yt-dlp's default client (`None`), then `android`, `web_safari`, `tv_embedded`, `mweb` × 3 formats. Measured on 2026-10-31: default → TVHTML5 itag 140 with a ~5 s `available_at` delay; `android` (no PO token) → only itag 18. Keep the `available_at` wait for any client that sets it, and consider whether a client without the delay (e.g. the one yt-dlp picks without a JS runtime, VISIONOS) should come first to meet the TTFA target.
 - New setting `YTDLP_PLAYER_CLIENTS: list[str] = ["default"]`, where `"default"` means "don't set `player_client`; use yt-dlp's built-in choice". Add other clients only after checking them against the current yt-dlp release notes, because client viability changes often.
 - For each client in order:
   ```python

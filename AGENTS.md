@@ -2,7 +2,7 @@
 
 > **Project**: AMP v2 — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
 > **Spec**: `DESIGN_DOC_2.md` (authoritative)
-> **Last updated**: 2026-10-30
+> **Last updated**: 2026-10-31
 
 ---
 
@@ -17,10 +17,12 @@
 | Phase 5 | Packaging + tests + README | **DONE** |
 | Revision | Open mode (no token) + venv support | **DONE** |
 | Refactor Phase 0 | Safety net + hotfixes ([plan](improvement-plan/phase-0-safety-net.md)) | **DONE** — see Revision 7 |
+| Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
+| Refactor Phases 1–6 | Extraction, segment table, pipeline, playback UX, auth/security, lifecycle | Pending |
 
 **Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phase 0 is done; Phases 1–6 are pending.
 
-**Test results**: 182 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors (Revision 7). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 182 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 63% (floor 60%). All 12 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 2 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
 
@@ -190,6 +192,32 @@ Plan: [improvement-plan/phase-0-safety-net.md](improvement-plan/phase-0-safety-n
 **Action for users:** anyone who used browser import before this revision has non-YouTube cookies stored in `ytm_session.json`. Log out and sign in again. Phase 5 migrates stored cookies.
 
 
+### Revision 8 — Logos, CI, badges (2026-10-31)
+
+Ported the useful pieces from the old `master` branch (a different, earlier layout: `app/` frontend, no DASH core) onto this codebase, then made the Tauri build actually work.
+
+| Area | Change |
+|------|--------|
+| **Logos** | `icon/logo-square.svg` + `icon/logo-round.svg` (repo root, used by README). Favicon set + `site.webmanifest` in `amp/frontend/public/`, linked from `index.html` (same-origin, CSP unchanged). Copies are byte-identical to `master`. |
+| **App icons** | Placeholder solid-colour icons replaced with a set generated from `logo-square.svg` (`npx tauri icon`): `32x32`, `128x128`, `128x128@2x`, `icon.png`, `icon.ico`, new `icon.icns` (added to `tauri.conf.json`). Unreferenced `256x256.png` / `512x512.png` placeholders removed. |
+| **Root README** | New `README.md` with the logo, CI/Codecov/Tauri badges, quick start, quality checks, doc index. (The repo had no root README.) Codecov badge points at `master` (`develop` doesn't exist). |
+| **Python CI** | `.github/workflows/python-ci.yml`: Python 3.13, `pip install -r amp/requirements.lock`, `ruff check amp/backend/`, `pytest -m "not integration" --cov`, Codecov upload (`CODECOV_TOKEN` secret, non-fatal). |
+| **Tauri CI** | `.github/workflows/tauri-build.yml`: builds the PyInstaller sidecar first (copied to `binaries/amp-backend-<target-triple>`), then `npx tauri build --bundles deb`; uploads the `.deb` as an artifact. Node 24, `dtolnay/rust-toolchain` (master used the archived `actions-rs`), Rust cache. |
+| **Ruff** | `.ruff.toml` from `master`, paths adapted; `fastapi.Depends/Query/Header` declared immutable (B008) instead of a blanket ignore. Fixed the 3 real findings: `l` → `row` (E741, `endpoints.py`), `noqa` with reason for backoff jitter (S311) and MPD parsing (S314). |
+| **Coverage** | `[tool.coverage.*]` in `amp/pyproject.toml` (master's root `.coveragerc` would not be read with CI's `cd amp`). Tests omitted, branch coverage on. `fail_under = 60` as a regression floor (actual 63%; master's 80% would fail immediately). |
+| **Deps** | `pytest-cov` and `ruff` added to dev deps; `requirements.lock` regenerated. |
+
+**Found and fixed while verifying the Tauri build locally:**
+- `Cargo.toml` requested `tauri` feature `shell-sidecar`, a **Tauri v1** feature that doesn't exist in v2, so the Rust shell had never compiled. Removed (sidecars come from `tauri-plugin-shell`). `npx tauri build --no-bundle` now succeeds (Windows, 2 min release build) with the PyInstaller sidecar present. `Cargo.lock` is now committed.
+- `amp/.gitignore` had `src-tauri/target/`, anchored to `amp/`, so it never matched `amp/frontend/src-tauri/target/`. Fixed, and added `frontend/src-tauri/gen/schemas/`, PyInstaller `/build/`, the copied sidecar, and coverage/ruff outputs.
+- `test_integration.py` had the same `init.bin` assumption as the download test (fails on progressive streams); fixed with the same `has_init` guard. It had never been run; all 8 tests now pass.
+
+**Not ported from master:** `CONTRIBUTING.md` (describes the old layout and a `develop` branch that no longer exists), `.gitattributes`, `activate.*`, `run.sh`, the old `app/` frontend and its docs.
+
+**Not verified:** the workflows themselves run only on GitHub; the Linux `.deb` bundle step and the Linux PyInstaller build were not run locally (the Windows equivalents were). The Codecov badge needs the `CODECOV_TOKEN` repository secret.
+
+**Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
+
 ## Completed Work
 
 ### Phase 1 — Backend core + auth (DONE)
@@ -299,8 +327,8 @@ amp/frontend/
     ├── build.rs
     ├── src/main.rs              # Registers tauri_plugin_shell
     ├── capabilities/default.json # shell:allow-spawn, shell:allow-stdin-write
-    ├── icons/                   # icon.png (1024x1024), icon.ico, 32x32, 128x128, 128x128@2x, 256x256, 512x512
-    └── binaries/                # (empty — PyInstaller output goes here)
+    ├── icons/                   # generated from icon/logo-square.svg: icon.png, icon.ico, icon.icns, 32x32, 128x128, 128x128@2x
+    └── binaries/                # gitignored; amp-backend-<target-triple> copied here from PyInstaller dist/ (CI does this)
 ```
 
 **Build verified**: `npm run build` → TypeScript compiles clean, Vite bundles successfully.
@@ -364,6 +392,9 @@ amp/frontend/
 8. **TestClient Host header**: Must set `Host: 127.0.0.1:8000` to pass middleware (P17)
 9. **Windows file permissions**: `chmod 0600` not honored on Windows — tests relaxed with `platform.system()` check
 10. **Open mode by default**: No token = no auth required. Token is opt-in for additional security.
+11. **Settings paths**: tests redirect storage with `settings.configure_paths()` / `restore_paths()`, never by monkeypatching private attrs (Revision 7).
+12. **yt-dlp client order**: default client first; it needs `available_at` respected (~5 s on first play). Phase 1 makes the strategy list a setting (Revision 7).
+13. **CI**: lint + unit tests run from the lock file; coverage config lives in `amp/pyproject.toml`; Tauri CI builds the PyInstaller sidecar before `tauri build` (Revision 8).
 
 ## All 24 Pitfalls Addressed
 
@@ -394,10 +425,15 @@ amp/frontend/
 
 ## Known Issues / TODO
 
-- [ ] Integration tests not run (require network + YouTube cookies)
-- [ ] PyInstaller binary not built (run `pyinstaller amp-backend.spec`)
-- [ ] Tauri app not built (run `npm run tauri build` — requires Rust toolchain)
-- [ ] Icon is a placeholder (solid color — replace with real icon)
+- [x] ~~Integration tests not run~~ — all 12 pass (Revision 8)
+- [x] ~~PyInstaller binary not built~~ — builds locally (Windows) and in Tauri CI (Linux)
+- [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). No installer bundle built locally yet
+- [x] ~~Icon is a placeholder~~ — generated from the AMP logo (Revision 8)
+- [ ] First play of an uncached song waits ~5 s for `available_at` (default yt-dlp client = TVHTML5) — Phase 1
+- [ ] DASH path never runs: every stream is progressive, 37 × 5 s segments from a fake 180 s duration (F4) — Phases 1–2
+- [ ] Sidecar runtime not verified: PyInstaller binary builds, but launching it from the packaged app (data dir, `yt_dlp_ejs` data files, Node on PATH) is untested — Phase 6
+- [ ] P7 (Windows encoding of sidecar output) not handled in the frontend
+- [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
 - [ ] MSE upgrade (§8.4) — optional Phase-4 enhancement
 
 ## Environment Notes
@@ -443,6 +479,21 @@ cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m pytest backend/tests/ -m 
 # Build PyInstaller sidecar
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && pyinstaller amp-backend.spec
 # Then copy dist/amp-backend.exe to frontend/src-tauri/binaries/
+
+# Lint (from repo root) — same as CI
+amp/venv/Scripts/python.exe -m ruff check amp/backend/
+
+# Unit tests + coverage (floor 60%) — same as CI
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pytest -m "not integration" --cov=backend --cov-report=term-missing
+
+# Install pinned deps / regenerate the lock after an upgrade
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip install -r requirements.lock
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip freeze > requirements.lock
+
+# Local Tauri release build (sidecar first, like CI)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m PyInstaller --noconfirm amp-backend.spec \
+  && cp dist/amp-backend.exe "frontend/src-tauri/binaries/amp-backend-$(rustc -vV | sed -n 's/^host: //p').exe" \
+  && cd frontend && npx tauri build --no-bundle
 
 # Control panel (tkinter GUI — double-click or run)
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && python amp_control.py

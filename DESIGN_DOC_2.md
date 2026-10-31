@@ -2,6 +2,8 @@
 
 > **Purpose**: Authoritative spec for AMP v2. An agent reading only this document should be able to build the project. Where v1 was exploratory, this version is prescriptive: decisions are made, alternatives are named only where they remain open.
 
+> **Status (2026-10-31)**: Phases 1–5 below are implemented; refactoring Phase 0 of [improvement-plan/](improvement-plan/README.md) is done (AGENTS.md Revisions 7–8). Where the current code still differs from this spec, the section says so in a **Current state** note and names the improvement-plan phase that closes the gap. Progress: [AGENTS.md](AGENTS.md).
+
 > **Scope note**: Personal prototype. Not for distribution. Cookie-based YouTube extraction is against YouTube's ToS; accepted risk for this project. External tools (yt-dlp, Node.js) are allowed to break; tests pin two known-good video IDs and will be updated if they break.
 
 ---
@@ -71,11 +73,13 @@
 | ORM / DB | SQLAlchemy 2.x + SQLite (WAL mode, single `userdb.sqlite`) |
 | Config | `pydantic-settings` + `.env` |
 | YouTube metadata | `ytmusicapi` (cookie auth) |
-| Stream URLs | `yt-dlp` (Python API preferred, CLI fallback), `--js-runtimes node` |
+| Stream URLs | `yt-dlp[default]` Python API (pulls in `yt-dlp-ejs`, the JS challenge solver), `js_runtimes={"node": {}}` |
 | HTTP | `requests` (CDN range downloads) |
 | Packaging | PyInstaller (backend sidecar binary) + `tauri build` |
-| Tests | pytest (unit, mocked) + pytest integration (2 pinned songs) |
-| External req. | Node.js 18+ (yt-dlp JS challenges), Python 3.10+, Rust toolchain (Tauri dev) |
+| Dependencies | `requirements.txt` (major-version caps, yt-dlp uncapped) → `requirements.lock` (exact pins, used by CI) |
+| Tests | pytest (unit, mocked) + pytest integration (pinned songs) + pytest-cov |
+| Lint / CI | Ruff (`.ruff.toml`); GitHub Actions: Python CI (lint + unit tests + coverage → Codecov), Tauri Build (sidecar + `.deb`) |
+| External req. | Node.js on `PATH` (yt-dlp JS challenges), Python 3.13 (3.10+ supported), Rust toolchain (Tauri builds) |
 
 **Format choice**: default stream format **itag 140 (AAC 128 kbps, MP4)** — plays in every webview (Chrome/WebView2, WKWebKit, WebKitGTK). Itag 251 (Opus/WebM, ~160 kbps) is supported as a config option; prefer 140 unless Opus is verified on the target platform. Both are DASH on YouTube; both concatenate init+segments into a valid file.
 
@@ -84,6 +88,15 @@
 ## 4. Directory Structure
 
 ```
+(repo root)
+├── README.md                   # logo, CI badges, quick start, doc index
+├── DESIGN_DOC_2.md / AGENTS.md # spec / progress tracker
+├── improvement-plan/           # refactoring phases 0–6
+├── icon/                       # logo-square.svg, logo-round.svg
+├── .github/workflows/          # python-ci.yml, tauri-build.yml
+├── .ruff.toml
+└── amp/                        # the application (below)
+
 amp/
 ├── backend/
 │   ├── main.py                 # entry: argparse + uvicorn
@@ -110,12 +123,16 @@ amp/
 │   │   ├── components/         # PlayerBar, SegmentBar, SongList, ...
 │   │   ├── pages/              # Search, Library, Playlists, Auth, Logs
 │   │   └── state.ts            # queue + playback state (frontend-owned)
-│   ├── index.html              # CSP meta
-│   └── vite.config.ts
-│   ├── src-tauri/              # tauri.conf.json (sidecar, capabilities)
+│   ├── public/                 # favicons + site.webmanifest (AMP logo)
+│   ├── index.html              # CSP meta, favicon links
+│   ├── vite.config.ts
+│   ├── src-tauri/              # tauri.conf.json (sidecar, capabilities), icons/, Cargo.lock
+│   │   └── binaries/           # amp-backend-<target-triple> (PyInstaller output, gitignored)
 │   └── package.json
 ├── .amp/                       # runtime: cache/, logs/ (gitignored)
-├── pyproject.toml / requirements.txt
+├── amp-backend.spec            # PyInstaller spec for the sidecar
+├── pyproject.toml              # deps + pytest + coverage config
+├── requirements.txt / requirements.lock
 └── README.md
 ```
 
@@ -129,7 +146,7 @@ amp/
 |---|---|---|
 | `HOST` | `127.0.0.1` | **Never `0.0.0.0` in v2** |
 | `PORT` | `8000` | |
-| `AUTH_TOKEN` | required (CLI arg `--token`) | Bearer token; reject requests without it |
+| `AUTH_TOKEN` | `None` (CLI arg `--token`) | Optional. When set, every request needs `Authorization: Bearer <token>`; when unset the API is open (Host check still enforced) |
 | `DEBUG` | `False` | |
 | `CACHE_DIR` / `SEGMENTS_DIR` / `LOGS_DIR` | `.amp/cache`, `.amp/cache/segments`, `.amp/logs` | created on import |
 | `DB_PATH` | `userdb.sqlite` | single DB (playdb dropped — playback state is in-memory) |
@@ -141,14 +158,17 @@ amp/
 | `HTTP_TIMEOUT_CONNECT_S` / `HTTP_TIMEOUT_READ_S` | `5` / `30` | |
 | `MAX_RETRIES` | `3` | backoff 0.5 / 1 / 2 s + jitter |
 
+Computed paths (cache, segments, logs, DB file) are private attributes set by `Settings.configure_paths(data_dir=None, db_file=None)`, which `model_post_init` calls with the defaults above. Tests and the future `--data-dir` option (improvement-plan Phase 6) call it to redirect storage; `snapshot_paths()` / `restore_paths()` undo the change. Never monkeypatch the private attributes (§10 P27).
+
 ### 5.2 Server (`api/server.py`)
 
 1. Create FastAPI app.
-2. **Auth middleware**: every request except `GET /` and `GET /api/health` must carry `Authorization: Bearer <token>` **and** a `Host` of `127.0.0.1`/`localhost` (DNS-rebinding guard). Reject otherwise (401/403).
+2. **Auth middleware**: every request except `GET /` and `GET /api/health` must carry a `Host` of `127.0.0.1`/`localhost` (DNS-rebinding guard), and — when `AUTH_TOKEN` is configured — `Authorization: Bearer <token>`. Reject otherwise (401/403). Open mode (no token) is the default; cross-site POST protection in open mode is improvement-plan Phase 5 (F15).
 3. **CORS**: explicit origins only — `tauri://localhost`, `http://tauri.localhost`, and the Vite dev origin. Never `*` with credentials.
 4. CORS preflight must not require the token (middleware exempts `OPTIONS`).
 5. Init DB, mount routers, startup/shutdown hooks (start DownloadManager, reconcile cache, shutdown executor).
 6. **Blocking I/O rule**: any handler that calls `requests`, yt-dlp, or does file I/O is a plain `def` (FastAPI runs it in the threadpool). Never `async def` for those.
+7. **Startup check**: log whether `node` is on `PATH` and `yt_dlp_ejs` is importable (WARNING if either is missing — extraction will degrade).
 
 ### 5.3 Services — thread-safe singletons
 
@@ -166,9 +186,11 @@ def get_service() -> Service:
 
 Never construct services directly. All shared state (cookies, segment tables, playback session) lives in the singletons.
 
-### 5.4 Auth (`services/auth.py`) — unchanged from v1
+### 5.4 Auth (`services/auth.py`)
 
-- Cookie-based auth only (OAuth is dead for YTMusic as of 2025).
+- Cookie-based auth only (OAuth is dead for YTMusic as of 2025). Optional: search and playback work signed out.
+- **Only youtube.com cookies are stored.** `filter_youtube_cookies(jar)` keeps a cookie only if its domain (leading dot stripped) is `youtube.com` or ends with `.youtube.com`; for duplicate names, `.youtube.com` wins over subdomains. Browser import reads the local cookie store with `yt_dlp.cookies.extract_cookies_from_browser()` (no network request).
+- **Session expiry** is decided only by ytmusicapi 401/403 (`youtube.py`) and `status(verify=True)`. A googlevideo CDN 403 means the signed stream URL expired, not the session (§6.5).
 - `SAPISIDHASH = SHA1(ts + " " + __Secure-3PAPISID + " " + "https://music.youtube.com")`.
 - `CredentialStore`: `.amp/cache/ytm_session.json`, atomic write (tmp + `os.replace`), `0600`.
 - Lazy `YTMusic` client construction (offline launch must not look like a failed login).
@@ -195,17 +217,33 @@ A YouTube audio stream URL (from yt-dlp) resolves to one of two things:
 ### 6.2 Getting the manifest URL
 
 ```python
-ydl_opts = {
-    "format": f"{STREAM_FORMAT}/bestaudio",
-    "quiet": True, "no_warnings": True,
-    "extractor_args": {"youtube": ["js_runtimes=node"]},  # Node.js required
-    # cookies via Netscape temp file (0600, deleted in finally)
-}
-info = YoutubeDL(ydl_opts).extract_info(f"https://music.youtube.com/watch?v={song_id}", download=False)
-url = info["url"]  # or selected format's url
+def build_ydl_opts(player_client, fmt, cookie_file):
+    opts = {
+        "quiet": True, "no_warnings": True, "skip_download": True, "socket_timeout": 15,
+        "js_runtimes": {"node": {}},                     # top-level dict, §10 P2
+    }
+    if player_client:                                    # None = yt-dlp's default client
+        opts["extractor_args"] = {"youtube": {"player_client": [player_client]}}  # dict of lists
+    if fmt:
+        opts["format"] = fmt                             # e.g. "bestaudio/best"
+    if cookie_file:
+        opts["cookiefile"] = cookie_file                 # Netscape temp file, 0600, deleted in finally (P23)
+    return opts
+
+info = YoutubeDL(build_ydl_opts(None, "bestaudio/best", cookie_file)).extract_info(
+    f"https://www.youtube.com/watch?v={song_id}", download=False)
+fmt = select_audio_format(info)      # prefer itag STREAM_FORMAT, then m4a audio-only, then best audio
+wait_until(fmt.get("available_at"))  # §10 P26, capped at 30 s
+url = fmt["url"]
 ```
 
-Fetch the URL with CDN headers (cookie required, §10 P1). If the body starts with `<?xml` or `<MPD` → DASH path. Otherwise → progressive path. Cache the URL per song (expires ~6 h; refresh on 403, §6.6).
+- Use `www.youtube.com` watch URLs: `music.youtube.com` triggers "The page needs to be reloaded" more often.
+- **Client order**: yt-dlp's default client first. Without a PO token, `android` returns only muxed itag 18 (360p video), never audio-only 140 (§10 P26). Other clients (`android`, `web_safari`, `tv_embedded`, `mweb`) remain as fallbacks, each with `bestaudio/best` → `best` → `worst`.
+- No TLS shortcuts: `nocheckcertificate` is never set.
+
+Fetch the URL with CDN headers (cookie when signed in, §10 P1). If the body starts with `<?xml` or `<MPD` → DASH path. Otherwise → progressive path. Cache the URL per song (expires ~6 h; refresh on 403, §6.5).
+
+> **Current state**: yt-dlp returns direct googlevideo URLs, never MPD manifests, so the DASH path never runs and every song goes through the progressive fallback (F4). The strategy list is hard-coded and each request may extract more than once (F5). Improvement-plan Phases 1–2 close this.
 
 ### 6.3 Manifest parsing (`utils/dash.py`)
 
@@ -256,7 +294,7 @@ Keep v1 logic, reduced: size via `clen=` param → HEAD → `Range: bytes=0-0` p
 4. **Atomic write**: write to `{index:04d}.bin.tmp`, `os.replace()` to final name. A crash mid-download can never leave a corrupt segment that looks complete.
 5. **Record**: insert/update `segments` DB row (status, size, `last_accessed`), update in-memory status.
 6. **Retry**: up to `MAX_RETRIES` with backoff 0.5/1/2 s + jitter, re-queued at same priority. Distinguish:
-   - **403** → refresh stream URL once (clear song caches, re-extract, rebuild segment table — byte layout may change), then retry. Other 4xx → ERROR, no retry.
+   - **403** → refresh stream URL once (clear song caches, re-extract, rebuild segment table — byte layout may change), then retry. Other 4xx → ERROR, no retry. A CDN 403 **does not touch auth state**: the refresh still extracts with the user's cookies (§5.4).
    - **429 / 5xx / timeout** → backoff and re-queue (transient).
 7. After every successful download, run `cleanup_cache()` (cheap check) and update `last_accessed`.
 
@@ -288,8 +326,8 @@ Serving: map the requested byte window to segment files (a window can span two s
 
 On `POST /api/stream/{song_id}/play` (or first audio request):
 
-- Queue **init** and **segment 0** at CRITICAL.
-- Queue next 2 segments HIGH, then everything within `SEGMENT_BUFFER_AHEAD_SEC` (30 s) NORMAL.
+- Queue **init** and the **segment at the playhead** at CRITICAL.
+- Queue next 2 segments HIGH, then NORMAL until `SEGMENT_BUFFER_AHEAD_SEC` (30 s) of audio **ahead of the playhead** is covered. The window is measured from the playhead segment, not from the song start (accumulate `duration_ms` from the start index, O(n)).
 - Keep `SEGMENT_BEHIND` (2) segments behind the playhead cached (don't evict).
 - `DownloadManager`: `PriorityQueue` + `ThreadPoolExecutor(4)`, daemon threads, started at app startup, shut down on app shutdown.
 
@@ -311,7 +349,7 @@ This fixes v1's race where an in-flight download for a pre-seek position complet
 
 ## 7. API Specification
 
-All under `/api`. All require the Bearer token except `GET /` and `GET /api/health`. All blocking handlers are plain `def`.
+All under `/api`. When a token is configured, all require it except `GET /` and `GET /api/health` (§5.2). All blocking handlers are plain `def`. Additional endpoints implemented since this table was written: `GET /api/stream/cache-info`, `POST /api/auth/tauri-cookies` and the sign-in flow routes (consolidated in improvement-plan Phase 5).
 
 **Rule**: declare specific routes (`/stream/logs`, `/stream/playback-state`) **before** parameterized ones (`/stream/{song_id}`).
 
@@ -347,10 +385,12 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 ### 8.1 Lifecycle
 
-- `sidecar.ts` spawns the backend: in dev, `python -m backend.main --token <uuid>`; in prod, the PyInstaller binary registered as a Tauri sidecar (`tauri.conf.json → bundle.externalBin`).
-- The token is `crypto.randomUUID()` generated per launch, passed as a CLI arg and attached to every fetch as `Authorization: Bearer`.
+- `sidecar.ts` spawns the backend: in dev, `venv` Python `-m backend.main`; in prod, the PyInstaller binary registered as a Tauri sidecar (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>`). Sidecar spawning comes from `tauri-plugin-shell` (Tauri v2 has no `shell-sidecar` cargo feature).
+- Optional token: when used, `crypto.randomUUID()` per launch, passed as `--token` and attached to every fetch as `Authorization: Bearer`. The current frontend runs in open mode (no token).
 - Health poll every 1 s; UI shows backend status; manual restart button.
-- Backend stdout/stderr captured to an in-memory ring (shown in Logs page). Spawn with `encoding="utf-8", errors="replace"` and **separate reader threads** for stdout/stderr (§10 P6/P7).
+- Backend stdout/stderr captured to an in-memory ring (shown in Logs page), with **separate handlers** for stdout/stderr (§10 P6).
+
+> **Current state**: the Tauri shell plugin's `encoding` spawn option broke spawning and was removed, so P7 (UTF-8 decoding of sidecar output on Windows) is not handled in the frontend. Spawn scoping, kill-on-exit and the PyInstaller data dir are improvement-plan Phase 6 (F14, F16).
 
 ### 8.2 Pages / components
 
@@ -388,11 +428,18 @@ CSP in `index.html`:
 ```
 default-src 'self';
 connect-src 'self' http://127.0.0.1:8000;
-img-src 'self' https://i.ytimg.com https://*.ggpht.com data:;
+media-src 'self' http://127.0.0.1:8000;
+img-src 'self' https://i.ytimg.com https://*.ggpht.com https://lh3.googleusercontent.com data:;
 style-src 'self' 'unsafe-inline';
 ```
 
+The same policy is set in `tauri.conf.json → app.security.csp`. `media-src` is required for `<audio>` to load from the backend; `lh3.googleusercontent.com` serves YouTube Music thumbnails. Favicons and the web manifest are same-origin (`frontend/public/`), covered by `default-src 'self'`.
+
 Tauri v2 capabilities: no shell/fs plugins needed beyond sidecar spawn.
+
+### 8.6 Branding
+
+The AMP logo lives in `icon/` (repo root): `logo-square.svg` (squircle, used for the app and README) and `logo-round.svg`. Web favicons in `frontend/public/` come from the same artwork. Tauri bundle icons in `src-tauri/icons/` are generated from `logo-square.svg` with `npx tauri icon ../../icon/logo-square.svg -o <dir>`; the desktop sizes listed in `tauri.conf.json → bundle.icon` are committed.
 
 ---
 
@@ -417,12 +464,12 @@ Always close sessions (`try/finally` or FastAPI dependency). `echo=DEBUG`.
 Carried from v1, still binding:
 
 - **P1 — CDN requires the Cookie header.** Every googlevideo.com request (segment download, size probe) must include `Cookie` from AuthService. Missing it = 403 on everything.
-- **P2 — yt-dlp needs a JS runtime.** Always pass `js_runtimes=node` / `--js-runtimes node`. Node.js is a hard dependency.
+- **P2 — yt-dlp needs a JS runtime and solver.** Pass `js_runtimes={"node": {}}` as a **top-level** option (CLI: `--js-runtimes node`) and install `yt-dlp[default]` so `yt-dlp-ejs` is present. Node.js is a hard dependency. (The old `extractor_args={"youtube": ["js_runtimes=node"]}` form was silently ignored, §10 P25.)
 - **P3 — Cache expensive lookups.** yt-dlp extraction and stream info are cached per song (bounded, §6.6). First call ~2 s, then instant.
 - **P4 — Stream URLs expire (~6 h).** On 403: refresh URL, rebuild segment table, retry once.
 - **P5 — Never trust one Content-Length strategy** (progressive fallback only): `clen=` param → HEAD → `Range: bytes=0-0` probe.
 - **P6 — Subprocess pipe deadlock.** Separate reader threads for stdout/stderr; never read both sequentially from one thread.
-- **P7 — Windows encoding.** `encoding="utf-8", errors="replace"` on subprocess pipes.
+- **P7 — Windows encoding.** `encoding="utf-8", errors="replace"` on subprocess pipes (Python side: decode bytes explicitly, as `amp_control.py` does). *Not currently handled in the Tauri frontend* — see §8.1.
 - **P9 — FastAPI route order.** Specific routes before parameterized (`/stream/logs` before `/stream/{song_id}`).
 - **P11 — localStorage is origin-scoped.** Cross-port sharing needs the server-side relay (`POST /api/logs` → `GET /api/logs`). (Kept for reference; v2's UI is same-app, but the relay stays.)
 - **P12 — Overlapping polls.** Guard every polling timer with an in-flight flag.
@@ -442,17 +489,27 @@ New in v2 (from the v1 review):
 - **P23 — yt-dlp cookie temp file.** Netscape cookie file must be `0600` and deleted in a `finally` — it contains the user's full Google session.
 - **P24 — Never log full CDN URLs or the Cookie header** (they contain auth signatures).
 
+New from refactoring Phase 0 (AGENTS.md Revision 7):
+
+- **P25 — yt-dlp ignores malformed options silently.** `extractor_args` must be `{extractor: {key: [values]}}`; a plain list is dropped with no warning, so `player_client` / `po_token` never applied. Build options through `build_ydl_opts()` and keep `test_ydl_opts_player_client_applied`, which checks the value yt-dlp actually sees.
+- **P26 — Stream URLs can 403 for a few seconds after extraction.** Some clients (TVHTML5, yt-dlp's default when a JS runtime is available) return formats with `available_at`; requests before that time get 403. Sleep until `available_at` (capped). Relatedly, `android` without a PO token offers only muxed itag 18 — don't put it first.
+- **P27 — Don't monkeypatch pydantic private attributes.** With pydantic 2.14, `monkeypatch.undo()` deletes `settings._cache_dir` instead of restoring it, breaking every later test. Use `Settings.configure_paths()` / `restore_paths()` (§5.1).
+- **P28 — Cookie imports must be domain-filtered.** A browser cookie jar holds every site's session. Keep only youtube.com cookies (§5.4).
+
 ---
 
 ## 11. Testing
 
 - **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `dash.py` manifest parser (fixture MPDs: SegmentList form, SegmentTemplate+Timeline form, init range variants), segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), DownloadManager priority/dedupe/epoch, endpoints (TestClient).
-- **Integration** (`pytest -m integration`, network + cookies, ~2 min): pinned songs `dQw4w9WgXcQ` (Rick Astley) and `LTDxBgP0lqA` (The Weeknd — Blinding Lights). If either breaks (removed/region-blocked), update the IDs — accepted per scope.
+- **Integration** (`pytest -m integration`, network, ~2 min, cookies optional): `test_integration.py` pins `dQw4w9WgXcQ` (Rick Astley) and `LTDxBgP0lqA` (The Weeknd — Blinding Lights); `test_integration_download.py` downloads every segment of `BAgTQhR8MLo` (override with `AMP_TEST_SONG_ID`, e.g. `Tmz3mpOq8aE`). Both must handle streams without an init segment (`has_init=False`). If a pinned song breaks (removed/region-blocked), update the ID — accepted per scope. Run after every yt-dlp upgrade.
   - manifest fetch + parse end-to-end
   - init + first 3 segments download, sizes verified
   - full audio endpoint: `Range: bytes=0-1023` returns 206 with correct bytes; seek to 50% serves correct segment
   - cache eviction and startup reconciliation with a temp cache dir
-- Singletons reset between tests (`conftest.py` clears `_instance` globals); temp dirs for cache/DB; integration tests copy cookies to `ytm_session.json` and clean up.
+- Singletons reset between tests (`conftest.py` clears `_instance` globals); temp dirs for cache/DB via the `temp_dirs` fixture (`configure_paths` / `restore_paths`, §10 P27); integration tests copy cookies to `ytm_session.json` and clean up.
+- **Lint**: `ruff check amp/backend/` with `.ruff.toml` (pyflakes, pycodestyle errors, bugbear, bandit; tests excluded). Inline `noqa` must give a reason.
+- **Coverage**: `pytest -m "not integration" --cov=backend` (config in `amp/pyproject.toml`, tests omitted, branch coverage). `fail_under = 60` is a regression floor; raise it as coverage grows.
+- **CI** (GitHub Actions, every push and PR): *Python CI* installs `requirements.lock`, runs Ruff, unit tests with coverage, uploads to Codecov. *Tauri Build* builds the PyInstaller sidecar, then `tauri build --bundles deb` on Ubuntu, and uploads the `.deb`. Integration tests are not run in CI (network).
 
 ---
 
@@ -475,6 +532,8 @@ Logs page, MSE upgrade (optional, §8.4), error surfacing (expired session, unpl
 
 **Phase 5 — Packaging + tests**
 PyInstaller sidecar, `tauri build`, full test suite green, README.
+
+**Status**: Phases 1–5 are implemented. The full suite is green, and the PyInstaller sidecar and `tauri build` work (the latter since Revision 8). The DASH path (Phase 2's core), the G1 latency target and packaged-sidecar runtime are not met yet; the [improvement plan](improvement-plan/README.md) (refactoring phases 0–6) tracks the remaining work, and Phase 0 is done.
 
 ---
 

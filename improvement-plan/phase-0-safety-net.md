@@ -4,6 +4,8 @@
 
 **Effort**: ½–1 day · **Depends on**: nothing · **Branch**: `fix/phase-0-safety-net`
 
+> **Status: DONE (2026-10-31)** — see AGENTS.md Revision 7. Deviations from this plan, all recorded there: the default yt-dlp client was moved first (§5 risk materialised: `android` gives only itag 18); a wait on `available_at` was added (TVHTML5 URLs 403 for ~5 s); the integration download test was fixed to handle streams without an init segment. Final count: 182 unit tests, 0 failed, 0 errors.
+
 ---
 
 ## 1. Problems addressed
@@ -164,13 +166,13 @@ Files: `amp/backend/api/auth_routes.py`, `amp/backend/services/signin_flow.py`, 
 
 ## 4. Acceptance criteria
 
-- [ ] `venv/Scripts/python.exe -m pytest backend/tests -m "not integration" -q` gives **0 failed, 0 errors**.
-- [ ] `pytest backend/tests/test_auth.py -q` passes on its own as well (order independence).
-- [ ] `grep -rn 'setattr(settings, "_' backend/tests` returns nothing.
-- [ ] `requirements.lock` exists, and a fresh venv built from it passes the suite.
-- [ ] Backend startup log shows `node` and `yt_dlp_ejs` both found.
-- [ ] `test_integration_download.py` passes for `BAgTQhR8MLo` and `Tmz3mpOq8aE`.
-- [ ] AGENTS.md has a "Revision 7 — Phase 0" entry with the real test count.
+- [x] `venv/Scripts/python.exe -m pytest backend/tests -m "not integration" -q` gives **0 failed, 0 errors**.
+- [x] `pytest backend/tests/test_auth.py -q` passes on its own as well (order independence).
+- [x] `grep -rn 'setattr(settings, "_' backend/tests` returns nothing.
+- [x] `requirements.lock` exists, and a fresh venv built from it passes the suite.
+- [x] Backend startup log shows `node` and `yt_dlp_ejs` both found.
+- [x] `test_integration_download.py` passes for `BAgTQhR8MLo` and `Tmz3mpOq8aE`.
+- [x] AGENTS.md has a "Revision 7 — Phase 0" entry with the real test count.
 
 ## 5. Risks and notes
 
