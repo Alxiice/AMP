@@ -43,9 +43,9 @@
 │  Services (thread-safe singletons)                       │
 │  ├── AuthService      → cookies, SAPISIDHASH, ytmusicapi │
 │  ├── YouTubeService   → search, metadata, likes         │
-│  └── StreamingService → DASH segments, cache, playback  │
-│      ├── SegmentFetcher (yt-dlp → manifest URL)         │
-│      ├── ManifestParser (MPD → segment table)           │
+│  └── StreamingService → segments, cache, playback       │
+│      ├── StreamExtractor (yt-dlp → stream URL)          │
+│      ├── Index parser (fMP4 sidx → segment table)       │
 │      ├── DownloadManager (4 workers, priority queue)    │
 │      └── PlaybackSession (in-memory, epoch-based)       │
 └────────────────────────────┬─────────────────────────────┘
@@ -114,7 +114,8 @@ amp/
 │   │   └── session.py          # engine (WAL), session factory, init
 │   ├── utils/
 │   │   ├── logger.py           # app.log + streaming.log + in-memory ring
-│   │   └── dash.py             # MPD parsing (pure functions, unit-testable)
+│   │   ├── mp4.py              # fMP4 box + sidx parsing (pure functions, unit-testable)
+│   │   └── layout.py           # SegmentInfo/StreamInfo + byte-range math (was dash.py)
 │   └── tests/                  # unit tests (mocked) + integration tests
 ├── frontend/
 │   ├── src/
@@ -204,18 +205,20 @@ Wraps `ytmusicapi`: search, song/artist/album/playlist metadata, liked songs, us
 
 ---
 
-## 6. Streaming Core (DASH segments)
+## 6. Streaming Core (segments)
 
-This section replaces v1 §9. The unit of caching is now the **segment**, taken from YouTube's own DASH manifest, not a proportionally-computed byte range.
+This section replaces v1 §9. The unit of caching is the **segment**, taken from the stream's own index (the fMP4 `sidx`), not a proportionally-computed byte range.
 
 ### 6.1 Concepts
 
-A YouTube audio stream URL (from yt-dlp) resolves to one of two things:
+A YouTube audio stream URL (from yt-dlp) is a direct googlevideo URL for one file:
 
-- **DASH manifest** (XML, `<MPD>`): describes an **initialization segment** (file header: ftyp/moov or EBML/Tracks) and an ordered list of **media segments**, each an exact byte range of the same resource, each with an exact duration. `init + segments` concatenated = a valid, playable audio file.
-- **Progressive file** (binary): one continuous file; Range requests work, but segment boundaries are unknown → fall back to v1-style proportional chunking (§6.5).
+- **itag 140 (AAC)** is a **fragmented MP4**: `[ftyp][moov][sidx][moof][mdat][moof][mdat]…`. The `sidx` (Segment Index) lists every fragment's byte size and duration: an exact segment table. The **init segment** is everything before the first fragment (`ftyp + moov + sidx`); `init + segments` concatenated is byte-for-byte the CDN file.
+- **itag 251 (WebM/Opus)** keeps its index in `Cues`, which is not parsed: it falls back to proportional chunking with the extracted size and duration (§6.4).
 
-### 6.2 Getting the manifest URL
+> **History**: v2 originally expected yt-dlp to return a DASH **MPD** manifest and parsed it in `utils/dash.py`. yt-dlp never did, so that path never ran and was removed in improvement-plan Phase 2.
+
+### 6.2 Getting the stream URL + index
 
 ```python
 def build_ydl_opts(player_client, fmt, cookie_file):
@@ -248,21 +251,19 @@ Extraction lives in `services/extractor.py` (`StreamExtractor`), which returns a
 - `/api/health` reports `services.extractor: {node, ejs, yt_dlp}`. Without `node`, extraction fails at once with `node_missing`.
 - No TLS shortcuts: `nocheckcertificate` is never set.
 
-Fetch the URL with CDN headers (cookie when signed in, §10 P1). If the body starts with `<?xml` or `<MPD` → DASH path. Otherwise → progressive path, segmented from the extracted size and duration (HEAD / `Range: bytes=0-0` probe only when the size is unknown). The extracted stream is cached until its URL expires; refresh on 403 (§6.5).
+Then fetch `Range: bytes=0-65535` of the URL with CDN headers (cookie when signed in, §10 P1). For m4a/mp4, parse the index from those bytes (§6.3); if the moov is larger, the parser says how many bytes it needs and the head is re-fetched (at most twice). If there is no usable `sidx`, or its sizes don't add up to the extracted file size, or the stream is WebM → proportional fallback (§6.4). The head bytes already cover the init segment, so they are stored as `init.bin` (saves a request on first play). The extracted stream is cached until its URL expires; refresh on 403 (§6.5).
 
-> **Current state**: yt-dlp returns direct googlevideo URLs, never MPD manifests, so the DASH path never runs and every song goes through the progressive fallback (F4). Phase 1 gave the progressive path real durations and sizes; Phase 2 adds a real segment table.
+### 6.3 Index parsing (`utils/mp4.py`)
 
-### 6.3 Manifest parsing (`utils/dash.py`)
+Pure functions, unit-tested with synthetic boxes and one real header (`tests/fixtures/itag140_head.bin`).
 
-Pure functions, fully unit-testable with fixture XML. Handle namespace `urn:mpeg:dash:schema:mpd:2011`.
+- **Boxes**: 32-bit size + 4-char type; `size == 1` → 64-bit largesize follows; `size == 0` → box runs to end of file. Only boxes in front of the first `moof` are read; `moof`/`mdat` are never parsed.
+- **`sidx`** (ISO/IEC 14496-12 §8.16.3): full box, `reference_ID`, `timescale`, `earliest_presentation_time` + `first_offset` (32-bit in v0, 64-bit in v1), `reference_count`, then per reference: 1-bit `reference_type` + 31-bit `referenced_size`, 32-bit `subsegment_duration`, SAP fields. Hierarchical indexes (`reference_type == 1`) are rejected.
+- The first fragment starts at `sidx_offset + sidx_size + first_offset`; each following one right after the previous. `init_end = first_fragment_offset − 1`, so `total_bytes == filesize`.
+- Durations are rounded cumulatively (`elapsed·1000 // timescale` at each boundary) so they sum exactly to the index's total.
+- If the buffer ends early, `NeedMoreData(required_len)` tells the caller how much to re-fetch.
 
-Extract from the audio `Representation`:
-
-- `BaseURL`
-- Init segment: byte range from `SegmentList/Initialization@sourceURL` or `SegmentTemplate@initialization` + `@indexRange` (resolve `$RepresentationID$`, `$Bandwidth$`, `$Ext$` tokens).
-- Media segments, **two supported forms**:
-  - **SegmentList** (what YouTube audio manifests use): `SegmentURL@mediaRange="start-end"` per segment → exact byte ranges.
-  - **SegmentTemplate + SegmentTimeline**: `S@t/d/r` entries → durations; byte ranges from `mediaRange` if present, otherwise numbered segment URLs (`$Number$` token) downloaded as individual files.
+YouTube itag 140 fragments are ~10 s (26 for a 258 s song).
 
 Output — the **segment table**, cached per song:
 
@@ -284,12 +285,15 @@ class StreamInfo:
     init_range: tuple[int, int]
     segments: list[SegmentInfo]
     total_bytes: int      # exact: init + sum(segment sizes)
-    is_dash: bool         # False → progressive fallback
+    is_dash: bool         # name kept for the API: True = exact table (sidx), False = proportional
+    base_url: str
+    itag: str
+    layout_id: str        # sha256(itag | total_bytes | n_segments | method)[:16], §6.6
 ```
 
-### 6.4 Progressive fallback (non-DASH URLs)
+### 6.4 Proportional fallback (WebM, or no sidx)
 
-Keep v1 logic, reduced: size via `clen=` param → HEAD → `Range: bytes=0-0` probe (3 strategies, drop the yt-dlp and bitrate-estimate fallbacks — if all three fail, the song is unplayable, report an error). Segments = proportional byte ranges of `duration_ms / SEGMENT_TARGET_SEC` (default 5 s — smaller than v1's 10 s for faster first audio). Marked `is_dash=False`; everything downstream is identical.
+Used for WebM (itag 251) and for MP4 streams without a usable `sidx`. Size from extraction (`filesize` or the URL's `clen=`), else HEAD → `Range: bytes=0-0`; duration from extraction (no default — unknown duration = unplayable). Segments = proportional byte ranges of `SEGMENT_TARGET_SEC` (default 5 s), no init segment. Marked `is_dash=False`; everything downstream is identical, but time→segment mapping is approximate.
 
 ### 6.5 Segment download pipeline
 
@@ -305,13 +309,14 @@ Keep v1 logic, reduced: size via `clen=` param → HEAD → `Range: bytes=0-0` p
    - **429 / 5xx / timeout** → backoff and re-queue (transient).
 7. After every successful download, run `cleanup_cache()` (cheap check) and update `last_accessed`.
 
-Files: `.amp/cache/segments/{song_id}/init.bin` and `{index:04d}.bin`.
+Files: `.amp/cache/segments/{song_id}/init.bin`, `{index:04d}.bin` and `layout.json` (§6.6).
 
 ### 6.6 Cache & LRU
 
-- Metadata in `segments` table: `song_id, index, byte_start, byte_end, size_bytes, duration_ms, status, file_path, last_accessed` (PK: `song_id, index`).
+- Metadata in `segments` table: `song_id, index, byte_start, byte_end, size_bytes, duration_ms, status, file_path, layout_id, last_accessed` (PK: `song_id, index`). `init_db()` recreates the table if it lacks a column (it is only a cache; reconciliation then removes the files).
+- **Cache identity**: segment files are only valid for the byte layout they were cut from. Each song directory holds `layout.json` (`layout_id, method, itag, mime_type, total_bytes, duration_ms, init_range, segments: [[start, end, dur], …]`, written atomically). When a newly built table has a different `layout_id` (e.g. a refresh picked itag 251 instead of 140, or the file changed), the song's directory and DB rows are purged before the new manifest is written. `layout.json` is never counted or evicted by the LRU.
 - `cleanup_cache()`: sum file sizes; if over `CACHE_MAX_SIZE_MB`, evict by `last_accessed ASC` until ≤ 80% of max. Delete file + DB row. Never evict segments of the currently-playing song ahead of the playhead.
-- **Startup reconciliation**: scan `SEGMENTS_DIR`; delete orphan files (no DB row), delete rows with missing files, verify file sizes match `size_bytes` (mismatch → delete both). This heals any crash damage.
+- **Startup reconciliation**: scan `SEGMENTS_DIR`; a song directory without `layout.json` is deleted (this also clears pre-Phase-2 caches); delete orphan files (no DB row), delete rows with missing files, verify file sizes match `size_bytes` and `layout_id` matches the manifest (mismatch → delete both). This heals any crash damage.
 - In-memory caches (`_stream_info`, `_stream_urls`, `_segment_tables`) are **bounded**: `functools.lru_cache(maxsize=256)` or a dict with a size cap. v1 leaked these.
 
 ### 6.7 Local audio endpoint — real Range support
@@ -343,7 +348,7 @@ On `POST /api/stream/{song_id}/play` (or first audio request):
 `seek_to_position(position_ms)`:
 
 1. Bump the song's **epoch** (monotonic counter). Workers check the epoch before writing a segment; a stale worker (old epoch) discards its result and does not update status.
-2. Map `position_ms → segment index` via the segment table (exact durations in DASH mode).
+2. Map `position_ms → segment index` via the segment table (exact durations with a sidx table).
 3. Re-queue from the new position with buffer-ahead priorities.
 
 This fixes v1's race where an in-flight download for a pre-seek position completed and overwrote status with stale data.
@@ -507,7 +512,7 @@ New from refactoring Phase 0 (AGENTS.md Revision 7):
 
 ## 11. Testing
 
-- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `dash.py` manifest parser (fixture MPDs: SegmentList form, SegmentTemplate+Timeline form, init range variants), segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), DownloadManager priority/dedupe/epoch, endpoints (TestClient).
+- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `mp4.py` index parser (synthetic boxes, sidx v0/v1, truncation, plus a real itag 140 header fixture), `extractor.py`, layout identity, segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), DownloadManager priority/dedupe/epoch, endpoints (TestClient).
 - **Integration** (`pytest -m integration`, network, ~2 min, cookies optional): `test_integration.py` pins `dQw4w9WgXcQ` (Rick Astley) and `LTDxBgP0lqA` (The Weeknd — Blinding Lights); `test_integration_download.py` downloads every segment of `BAgTQhR8MLo` (override with `AMP_TEST_SONG_ID`, e.g. `Tmz3mpOq8aE`). Both must handle streams without an init segment (`has_init=False`). If a pinned song breaks (removed/region-blocked), update the ID — accepted per scope. Run after every yt-dlp upgrade.
   - manifest fetch + parse end-to-end
   - init + first 3 segments download, sizes verified
@@ -527,7 +532,7 @@ Structure, config, logging, DB, server (token auth, CORS), AuthService, YouTubeS
 *Verify*: server starts on 127.0.0.1; search works unauthenticated; browser-cookie import signs in; liked songs load.
 
 **Phase 2 — DASH streaming core**
-`dash.py` parser, manifest fetch, segment table, DownloadManager, atomic verified downloads, LRU cache + reconciliation, Range-capable audio endpoint, buffer-ahead, epoch seek.
+Segment table (originally an MPD parser; now the fMP4 `sidx`, improvement-plan Phase 2), DownloadManager, atomic verified downloads, LRU cache + reconciliation, Range-capable audio endpoint, buffer-ahead, epoch seek.
 *Verify*: with one pinned song — first audio < 300 ms; `curl -r 0-1023` returns 206 with correct bytes; seek works; second launch serves from cache instantly.
 
 **Phase 3 — Tauri shell + player**
@@ -540,7 +545,7 @@ Logs page, MSE upgrade (optional, §8.4), error surfacing (expired session, unpl
 **Phase 5 — Packaging + tests**
 PyInstaller sidecar, `tauri build`, full test suite green, README.
 
-**Status**: Phases 1–5 are implemented. The full suite is green, and the PyInstaller sidecar and `tauri build` work (the latter since Revision 8). The DASH path (Phase 2's core), the G1 latency target and packaged-sidecar runtime are not met yet; the [improvement plan](improvement-plan/README.md) (refactoring phases 0–6) tracks the remaining work, and Phase 0 is done.
+**Status**: Phases 1–5 are implemented. The full suite is green, and the PyInstaller sidecar and `tauri build` work (the latter since Revision 8). Exact segment tables (improvement-plan Phase 2), the G1 latency target and packaged-sidecar runtime are not met yet; the [improvement plan](improvement-plan/README.md) (refactoring phases 0–6) tracks the remaining work; Phases 0–2 are done.
 
 ---
 
@@ -548,9 +553,11 @@ PyInstaller sidecar, `tauri build`, full test suite green, README.
 
 | Term | Definition |
 |---|---|
-| **Segment** | A unit of cached audio taken from YouTube's DASH manifest (init segment + media segments). Replaces v1's "chunk". |
-| **Init segment** | The small header segment (ftyp/moov or EBML/Tracks). Required for decoding; concatenated with media segments it forms a valid playable file. |
-| **Segment table** | Per-song, exact mapping of segment index → byte range + duration, parsed from the MPD. |
+| **Segment** | A unit of cached audio: one fMP4 fragment from the `sidx` (or a proportional slice for WebM). Replaces v1's "chunk". |
+| **Init segment** | Everything before the first fragment (`ftyp + moov + sidx`). Required for decoding; concatenated with media segments it is byte-for-byte the CDN file. |
+| **Segment table** | Per-song mapping of segment index → byte range + duration, parsed from the fMP4 `sidx` (exact) or computed proportionally. |
+| **sidx** | ISO BMFF Segment Index box: per-fragment byte size and duration. |
+| **layout_id** | Hash of `(itag, total_bytes, segment count, method)`; cached segments under another id are purged. |
 | **Epoch** | Per-song monotonic counter bumped on seek; invalidates in-flight downloads from before the seek. |
 | **SAPISIDHASH** | `SHA1(ts + " " + __Secure-3PAPISID + " " + origin)` — YouTube Music's cookie-derived auth header. |
 | **itag 140 / 251** | YouTube format codes: AAC 128 kbps MP4 / Opus ~160 kbps WebM. v2 defaults to 140. |

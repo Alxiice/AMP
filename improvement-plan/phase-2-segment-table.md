@@ -123,12 +123,14 @@ return build_proportional_info(stream)               # Phase 1 metadata, is_dash
 
 ## 5. Acceptance criteria
 
-- [ ] Spike 2.0 result recorded in AGENTS.md (go or no-go, with box listing).
-- [ ] `GET /api/stream/info/{id}` for an itag 140 song returns `is_dash: true`, real segment count and per-segment durations. Durations sum to within ±1 s of the song length.
-- [ ] Integration `test_concat_equals_cdn_file` passes for both pinned songs.
-- [ ] Seeking to 50% in the UI starts playback within one segment of the target (check `current_segment_index` in `/api/stream/playback-state`).
-- [ ] After the upgrade, the first startup deletes the pre-Phase-2 cache directories (logged by reconciliation).
-- [ ] `grep -rn "parse_mpd" backend` returns nothing.
+> **Done 2026-10-31** (AGENTS.md Revision 10). Spike: GO. The optional 2.4 bonus (serve cached songs without extraction) is not done.
+
+- [x] Spike 2.0 result recorded in AGENTS.md (go or no-go, with box listing).
+- [x] `GET /api/stream/info/{id}` for an itag 140 song returns `is_dash: true`, real segment count and per-segment durations. Durations sum to within ±1 s of the song length.
+- [x] Integration `test_concat_equals_cdn_file` passes for both pinned songs.
+- [x] Seeking to 50% in the UI starts playback within one segment of the target (check `current_segment_index` in `/api/stream/playback-state`). *(Verified via `POST /api/stream/seek`, not the Tauri UI: 128,806 ms → segment 12.)*
+- [x] After the upgrade, the first startup deletes the pre-Phase-2 cache directories (logged by reconciliation).
+- [x] `grep -rn "parse_mpd" backend` returns nothing.
 
 ## 6. Risks and notes
 

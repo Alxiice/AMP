@@ -3,7 +3,7 @@
 > **Source**: code review of `feature/auth-auto-cookie-extraction` @ `0397f83` (2026-10-30).
 > **Spec**: `DESIGN_DOC_2.md` stays authoritative. Where a phase deliberately deviates from it, the phase says so and updates the spec.
 > **Progress tracking**: `AGENTS.md`. Add a "Revision N" entry when each phase lands.
-> **Status (2026-10-31)**: Phase 0 **done** (AGENTS.md Revision 7), plus logos/CI/badges and a working Tauri build (Revision 8). Phase 1 **done** (Revision 9). Next: Phase 2 (and Phase 5 can start in parallel).
+> **Status (2026-10-31)**: Phase 0 **done** (AGENTS.md Revision 7), plus logos/CI/badges and a working Tauri build (Revision 8). Phase 1 **done** (Revision 9), Phase 2 **done** (Revision 10). Next: Phase 3 (and Phase 5 can start in parallel).
 
 This plan fixes the problems the review found, grouped into seven phases. Each phase has its own file: what it fixes, the tasks, the tests to add, and how to tell it is done.
 
@@ -13,8 +13,8 @@ This plan fixes the problems the review found, grouped into seven phases. Each p
 |---|---|---|---|---|---|
 | 0 | [phase-0-safety-net.md](phase-0-safety-net.md) | Red test suite, unpinned deps, ignored yt-dlp options, cookie leak, CDN-403 auth bug, buffer window | ½–1 day | — | **Done** (Rev. 7) |
 | 1 | [phase-1-extraction.md](phase-1-extraction.md) | Redundant extraction strategies, thundering herd, missing metadata (duration/size/mime) | 1 day | 0 | **Done** (Rev. 9) |
-| 2 | [phase-2-segment-table.md](phase-2-segment-table.md) | No real segment table (DASH path never runs), cache identity across formats | 1–2 days | 1 | Next |
-| 3 | [phase-3-download-pipeline.md](phase-3-download-pipeline.md) | Seek drops queued work, truncated audio responses, tmp-file race, FIFO-not-LRU eviction | 1–2 days | 2 | Pending |
+| 2 | [phase-2-segment-table.md](phase-2-segment-table.md) | No real segment table (DASH path never runs), cache identity across formats | 1–2 days | 1 | **Done** (Rev. 10) |
+| 3 | [phase-3-download-pipeline.md](phase-3-download-pipeline.md) | Seek drops queued work, truncated audio responses, tmp-file race, FIFO-not-LRU eviction | 1–2 days | 2 | Next |
 | 4 | [phase-4-playback-ux.md](phase-4-playback-ux.md) | `/ready` polling, stale-load race, opaque errors, no persistence, no next-song prefetch | 1 day | 3 | Pending |
 | 5 | [phase-5-auth-security.md](phase-5-auth-security.md) | Four overlapping sign-in flows, stored foreign cookies, cross-site POSTs | 1 day | 0 (can run in parallel with 2–4) | Ready |
 | 6 | [phase-6-lifecycle-packaging.md](phase-6-lifecycle-packaging.md) | Backend spawn/kill, orphan processes, data dir under PyInstaller, packaging, launchers | 1–2 days | 1, 4 | Pending (part done in Rev. 8) |
