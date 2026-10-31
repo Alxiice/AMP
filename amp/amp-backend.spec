@@ -2,15 +2,16 @@
 """
 PyInstaller spec for the AMP v2 backend sidecar binary.
 
-Build:
-    pip install pyinstaller
-    pyinstaller amp-backend.spec
+Build (and copy to frontend/src-tauri/binaries/amp-backend-<target-triple>[.exe]):
+    python scripts/build_sidecar.py
 
-Output: dist/amp-backend(.exe) — placed into frontend/src-tauri/binaries/
+Output: dist/amp-backend(.exe). Rebuild after every yt-dlp upgrade.
+Node.js is not bundled: it must be on PATH at runtime (/api/health reports it).
 """
 
-import sys
 from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 block_cipher = None
 
@@ -22,7 +23,9 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=[
-        # Include package data if any
+        # yt-dlp's own hook (pyinstaller40 entry point) also adds these; explicit so a hook change can't drop them
+        *collect_data_files("yt_dlp_ejs", includes=["**/*.js"]),  # JS challenge solver (P2)
+        *collect_data_files("ytmusicapi"),  # locales/*.mo
     ],
     hiddenimports=[
         # uvicorn
@@ -58,32 +61,8 @@ a = Analysis(
         "pydantic",
         "pydantic_settings",
         "pydantic_core",
-        # Backend modules
-        "backend",
-        "backend.config",
-        "backend.main",
-        "backend.api",
-        "backend.api.server",
-        "backend.api.endpoints",
-        "backend.api.auth_routes",
-        "backend.services",
-        "backend.services.auth",
-        "backend.services.youtube",
-        "backend.services.extractor",
-        "backend.services.streaming",
-        "backend.services.streaming.service",
-        "backend.services.streaming.registry",
-        "backend.services.streaming.downloader",
-        "backend.services.streaming.cache",
-        "backend.services.streaming.serving",
-        "backend.services.streaming.playback",
-        "backend.database",
-        "backend.database.models",
-        "backend.database.session",
-        "backend.utils",
-        "backend.utils.logger",
-        "backend.utils.layout",
-        "backend.utils.mp4",
+        # Backend modules (tests excluded)
+        *collect_submodules("backend", filter=lambda name: ".tests" not in name),
     ],
     hookspath=[],
     hooksconfig={},
@@ -118,7 +97,9 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,  # No console window in production
+    # Console subsystem: stdin/stdout/stderr must be real pipes (--parent-watch, log forwarding;
+    # uvicorn's logging fails on a None stdout). Tauri spawns it with CREATE_NO_WINDOW: no window.
+    console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

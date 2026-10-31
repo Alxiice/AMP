@@ -32,9 +32,10 @@
 │  └────────────┘ └──────────┘ └────────────────────────┘  │
 │  HTMLAudioElement ←── HTTP Range ──┐                     │
 │  ApiClient (fetch, Bearer token)   │                     │
-│  BackendSidecar (spawn + health)   │                     │
+│  sidecar.ts (backend_info, health) │                     │
+│  Rust backend.rs: spawn, free port, stop on exit         │
 └────────────────────────────┬───────┴─────────────────────┘
-                             │ HTTP, 127.0.0.1:8000, Bearer token
+                             │ HTTP, 127.0.0.1:<free port>, Bearer token (optional)
 ┌────────────────────────────▼─────────────────────────────┐
 │  FastAPI Backend (Python, sidecar process)               │
 │  ┌────────────┐ ┌──────────────┐ ┌────────────────────┐  │
@@ -115,14 +116,14 @@ amp/
 │   │   ├── models.py           # Song, Playlist, PlaylistSong, LikedSong, Segment
 │   │   └── session.py          # engine (WAL), session factory, init
 │   ├── utils/
-│   │   ├── logger.py           # app.log + streaming.log + in-memory ring
+│   │   ├── logger.py           # app.log + streaming.log (rotated 5 MB × 3) + in-memory ring
 │   │   ├── mp4.py              # fMP4 box + sidx parsing (pure functions, unit-testable)
 │   │   └── layout.py           # SegmentInfo/StreamInfo + byte-range math (was dash.py)
 │   └── tests/                  # unit tests (mocked) + integration tests
 ├── frontend/
 │   ├── src/
 │   │   ├── api.ts              # typed fetch wrapper, token header
-│   │   ├── sidecar.ts          # spawn/kill backend, health poll
+│   │   ├── sidecar.ts          # backend client: backend_info → port, health poll, log events
 │   │   ├── components/         # PlayerBar (incl. segment bar), SongList, ...
 │   │   ├── player/             # errors, queue persistence, prefetch threshold (pure, vitest)
 │   │   ├── pages/              # Search, Library, Playlists, Auth, Logs
@@ -131,10 +132,13 @@ amp/
 │   ├── index.html              # CSP meta, favicon links
 │   ├── vite.config.ts
 │   ├── src-tauri/              # tauri.conf.json (sidecar, capabilities), icons/, Cargo.lock
+│   │   ├── src/backend.rs      # spawns/owns/stops the backend (§8.1)
 │   │   └── binaries/           # amp-backend-<target-triple> (PyInstaller output, gitignored)
 │   └── package.json
-├── .amp/                       # runtime: cache/, logs/ (gitignored)
+├── .amp/                       # runtime for manual / app.py runs: cache/, logs/ (gitignored)
 ├── amp-backend.spec            # PyInstaller spec for the sidecar
+├── scripts/build_sidecar.py    # PyInstaller → src-tauri/binaries/amp-backend-<triple> (+ --smoke)
+├── app.py                      # debug launcher (tkinter)
 ├── pyproject.toml              # deps + pytest + coverage config
 ├── requirements.txt / requirements.lock
 └── README.md
@@ -149,11 +153,11 @@ amp/
 | Setting | Default | Notes |
 |---|---|---|
 | `HOST` | `127.0.0.1` | **Never `0.0.0.0` in v2** |
-| `PORT` | `8000` | |
+| `PORT` | `8000` | CLI `--port`; `0` = any free port. The desktop app passes a free one (§8.1) |
 | `AUTH_TOKEN` | `None` (CLI arg `--token`) | Optional. When set, every request needs `Authorization: Bearer <token>`; when unset the API is open (Host check still enforced) |
 | `DEBUG` | `False` | |
-| `CACHE_DIR` / `SEGMENTS_DIR` / `LOGS_DIR` | `.amp/cache`, `.amp/cache/segments`, `.amp/logs` | created on import |
-| `DB_PATH` | `userdb.sqlite` | single DB (playdb dropped — playback state is in-memory) |
+| `CACHE_DIR` / `SEGMENTS_DIR` / `LOGS_DIR` | `<data>/cache`, `<data>/cache/segments`, `<data>/logs` | created on import / `configure_paths`. `<data>` = `--data-dir`, else `amp/.amp` from a checkout, else (PyInstaller binary) the per-user app data dir `…/com.amp.v2` |
+| `DB_PATH` | `userdb.sqlite` | single DB (playdb dropped — playback state is in-memory). `<data>/userdb.sqlite` with `--data-dir` |
 | `CACHE_MAX_SIZE_MB` | `500` | evict down to 80% when exceeded |
 | `SEGMENT_BUFFER_AHEAD_SEC` | `30` | how far ahead to pre-fetch |
 | `SEGMENT_BEHIND` | `2` | segments kept behind playhead for seek-back |
@@ -164,7 +168,7 @@ amp/
 | `MAX_RETRIES` | `3` | backoff 0.5 / 1 / 2 s + jitter |
 | `SEGMENT_SYNC_TIMEOUT_S` | `15` | `ensure_segment` wait for a segment owned by another thread (§6.5) |
 
-Computed paths (cache, segments, logs, DB file) are private attributes set by `Settings.configure_paths(data_dir=None, db_file=None)`, which `model_post_init` calls with the defaults above. Tests and the future `--data-dir` option (improvement-plan Phase 6) call it to redirect storage; `snapshot_paths()` / `restore_paths()` undo the change. Never monkeypatch the private attributes (§10 P27).
+Computed paths (cache, segments, logs, DB file) are private attributes set by `Settings.configure_paths(data_dir=None, db_file=None)`, which `model_post_init` calls with the defaults above. Tests and `--data-dir` (§8.1) call it to redirect storage; `snapshot_paths()` / `restore_paths()` undo the change. Never monkeypatch the private attributes (§10 P27).
 
 ### 5.2 Server (`api/server.py`)
 
@@ -416,12 +420,17 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 ### 8.1 Lifecycle
 
-- `sidecar.ts` spawns the backend: in dev, `venv` Python `-m backend.main`; in prod, the PyInstaller binary registered as a Tauri sidecar (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>`). Sidecar spawning comes from `tauri-plugin-shell` (Tauri v2 has no `shell-sidecar` cargo feature).
-- Optional token: when used, `crypto.randomUUID()` per launch, passed as `--token` and attached to every fetch as `Authorization: Bearer`. The current frontend runs in open mode (no token).
-- Health poll every 1 s; UI shows backend status; manual restart button.
-- Backend stdout/stderr captured to an in-memory ring (shown in Logs page), with **separate handlers** for stdout/stderr (§10 P6).
+**Rust owns the backend** (`src-tauri/src/backend.rs`); the webview has no `shell:*` permission.
 
-> **Current state**: the Tauri shell plugin's `encoding` spawn option broke spawning and was removed, so P7 (UTF-8 decoding of sidecar output on Windows) is not handled in the frontend. Spawn scoping, kill-on-exit and the PyInstaller data dir are improvement-plan Phase 6 (F14, F16).
+- `setup()`: port = `AMP_PORT` or a free port (bind `127.0.0.1:0`, drop); data dir = `app.path().app_data_dir()` (`%APPDATA%\com.amp.v2` on Windows). Spawn with `--host 127.0.0.1 --port <p> --data-dir <dir> --parent-watch`: in debug builds `<amp>/venv` Python (or `AMP_PYTHON`) `-m backend.main` from `amp/`; in release builds the PyInstaller sidecar `amp-backend` (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>[.exe]`, built by `scripts/build_sidecar.py`). `set_process_group(true)` (a Windows job object): the venv launcher and the PyInstaller bootloader both start a second process. The environment is inherited (Node must stay on `PATH`), plus `PYTHONIOENCODING=utf-8`.
+- Output: stdout/stderr lines decoded with `String::from_utf8_lossy` (P7), kept in a 1000-line ring (`backend_logs`) and emitted as `backend-log`; `Terminated` of the current backend → `backend-status {state: "stopped"}`.
+- Commands: `backend_info() → {port, token}` (token always `null` until improvement-plan 5.6), `backend_logs()`, `restart_backend()`.
+- Exit (`RunEvent::Exit`): write `exit` to the backend's stdin, wait ≤ 2 s, then kill the process tree.
+- **Parent watch** (`--parent-watch`): a daemon thread reads stdin; EOF (the app died, even from the Task Manager) or `exit` → graceful uvicorn shutdown, `os._exit` after 1.5 s at the latest.
+- `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit. At startup a WARNING is logged if the recorded backend still answers `/api/health` with that `pid` (`app: "AMP v2"`). `app.py` uses it for Force Kill.
+- One instance (`tauri-plugin-single-instance`): a second launch focuses the running window. Two backends must not share one segment cache.
+- Frontend (`sidecar.ts`): `initBackend()` runs before the first render and sets `api.ts`'s base URL from `backend_info`; then the health poll (1 s, in-flight guard), the log ring and the events; restart button → `restart_backend` (the port may change). Outside Tauri (Vite in a browser) the base URL stays `http://127.0.0.1:8000` and the backend is started by hand or by `app.py`.
+- Node.js is not bundled; `/api/health` reports it (P2).
 
 ### 8.2 Pages / components
 
@@ -440,7 +449,7 @@ Queue state (list of songs, current index, next/previous) is **frontend-owned** 
 ### 8.3 Player
 
 ```ts
-const audio = new Audio(`http://127.0.0.1:8000/api/stream/${songId}/audio`);
+const audio = new Audio(`${baseUrl}/api/stream/${songId}/audio`); // baseUrl from backend_info
 ```
 
 - The browser issues Range requests natively; the backend (§6.7) makes seeks instant once segments are cached.
@@ -458,15 +467,15 @@ CSP in `index.html`:
 
 ```
 default-src 'self';
-connect-src 'self' http://127.0.0.1:8000;
-media-src 'self' http://127.0.0.1:8000;
+connect-src 'self' http://127.0.0.1:*;
+media-src 'self' http://127.0.0.1:*;
 img-src 'self' https://i.ytimg.com https://*.ggpht.com https://lh3.googleusercontent.com data:;
 style-src 'self' 'unsafe-inline';
 ```
 
 The same policy is set in `tauri.conf.json → app.security.csp`. `media-src` is required for `<audio>` to load from the backend; `lh3.googleusercontent.com` serves YouTube Music thumbnails. Favicons and the web manifest are same-origin (`frontend/public/`), covered by `default-src 'self'`.
 
-Tauri v2 capabilities: no shell/fs plugins needed beyond sidecar spawn.
+The port is chosen at launch, hence `127.0.0.1:*`. Tauri v2 capabilities: `core:default` only — no `shell:*` (the backend is spawned from Rust), no fs.
 
 ### 8.6 Branding
 
@@ -500,7 +509,7 @@ Carried from v1, still binding:
 - **P4 — Stream URLs expire (~6 h).** On 403: refresh URL, rebuild segment table, retry once.
 - **P5 — Never trust one Content-Length strategy** (progressive fallback only): `clen=` param → HEAD → `Range: bytes=0-0` probe.
 - **P6 — Subprocess pipe deadlock.** Separate reader threads for stdout/stderr; never read both sequentially from one thread.
-- **P7 — Windows encoding.** `encoding="utf-8", errors="replace"` on subprocess pipes (Python side: decode bytes explicitly, as `amp_control.py` does). *Not currently handled in the Tauri frontend* — see §8.1.
+- **P7 — Windows encoding.** Decode subprocess output as UTF-8 with replacement: Python side `decode("utf-8", errors="ignore")` (`app.py`); Tauri side `String::from_utf8_lossy` + `PYTHONIOENCODING=utf-8` for the backend (§8.1).
 - **P9 — FastAPI route order.** Specific routes before parameterized (`/stream/logs` before `/stream/{song_id}`).
 - **P11 — localStorage is origin-scoped.** Cross-port sharing needs the server-side relay (`POST /api/logs` → `GET /api/logs`). (Kept for reference; v2's UI is same-app, but the relay stays.)
 - **P12 — Overlapping polls.** Guard every polling timer with an in-flight flag.
@@ -536,7 +545,7 @@ New from refactoring Phase 5 (AGENTS.md Revision 13):
 
 ## 11. Testing
 
-- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `mp4.py` index parser (synthetic boxes, sidx v0/v1, truncation, plus a real itag 140 header fixture), `extractor.py`, layout identity, segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), SegmentRegistry state machine, DownloadManager ordering/superseded items, `fetch_segment` verification + unique tmp files, CacheStore LRU/accounting, serving (no short bodies), playback policy, endpoints (TestClient).
+- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `mp4.py` index parser (synthetic boxes, sidx v0/v1, truncation, plus a real itag 140 header fixture), `extractor.py`, layout identity, segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), SegmentRegistry state machine, DownloadManager ordering/superseded items, `fetch_segment` verification + unique tmp files, CacheStore LRU/accounting, serving (no short bodies), playback policy, endpoints (TestClient), lifecycle (`--data-dir`, PID file, socket bind, rotating log handlers, and a real `python -m backend.main --parent-watch` process that must exit within 3 s of stdin EOF). Rust: `cargo test` (`free_port_is_bindable`).
 - **Integration** (`pytest -m integration`, network, ~2 min, cookies optional): `test_integration.py` pins `dQw4w9WgXcQ` (Rick Astley) and `LTDxBgP0lqA` (The Weeknd — Blinding Lights); `test_integration_download.py` downloads every segment of `BAgTQhR8MLo` (override with `AMP_TEST_SONG_ID`, e.g. `Tmz3mpOq8aE`). Both must handle streams without an init segment (`has_init=False`). If a pinned song breaks (removed/region-blocked), update the ID — accepted per scope. Run after every yt-dlp upgrade.
   - manifest fetch + parse end-to-end
   - init + first 3 segments download, sizes verified
@@ -545,7 +554,7 @@ New from refactoring Phase 5 (AGENTS.md Revision 13):
 - Singletons reset between tests (`conftest.py` clears `_instance` globals); temp dirs for cache/DB via the `temp_dirs` fixture (`configure_paths` / `restore_paths`, §10 P27); integration tests copy cookies to `ytm_session.json` and clean up.
 - **Lint**: `ruff check amp/backend/` with `.ruff.toml` (pyflakes, pycodestyle errors, bugbear, bandit; tests excluded). Inline `noqa` must give a reason.
 - **Coverage**: `pytest -m "not integration" --cov=backend` (config in `amp/pyproject.toml`, tests omitted, branch coverage). `fail_under = 60` is a regression floor; raise it as coverage grows.
-- **CI** (GitHub Actions, every push and PR): *Python CI* installs `requirements.lock`, runs Ruff, unit tests with coverage, uploads to Codecov. *Tauri Build* builds the PyInstaller sidecar, then `tauri build --bundles deb` on Ubuntu, and uploads the `.deb`. Integration tests are not run in CI (network).
+- **CI** (GitHub Actions, every push and PR): *Python CI* installs `requirements.lock`, runs Ruff, unit tests with coverage, uploads to Codecov. *Tauri Build* builds the PyInstaller sidecar with `scripts/build_sidecar.py --smoke` (health + search + exit on stdin EOF), then `tauri build --bundles deb` on Ubuntu, and uploads the `.deb`. Integration tests are not run in CI (network).
 
 ---
 

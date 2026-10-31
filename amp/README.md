@@ -23,9 +23,10 @@ YouTube Music streaming desktop app with DASH-segment caching. Tauri shell + Rea
 │  PlayerBar · Search · Library · Playlists · Auth · Logs  │
 │  HTMLAudioElement ←── HTTP Range ──┐                     │
 │  ApiClient (fetch, optional token) │                     │
-│  BackendSidecar (spawn + health)   │                     │
+│  sidecar.ts (backend_info, health) │                     │
+│  Rust backend.rs: spawn, free port, stop on exit         │
 └────────────────────────────┬───────┴─────────────────────┘
-                             │ HTTP, 127.0.0.1:8000 (open by default)
+                             │ HTTP, 127.0.0.1:<free port> (open by default)
 ┌────────────────────────────▼─────────────────────────────┐
 │  FastAPI Backend (Python, sidecar process)               │
 │  AuthRoutes · Endpoints · Logs/Health                    │
@@ -76,7 +77,47 @@ If the integration download test passes, regenerate the lock file with
 `pip freeze > requirements.lock`. The `[default]` extra installs `yt-dlp-ejs`,
 the JS challenge solver; with Node.js on `PATH` the backend logs both as found at startup.
 
-The app uses this virtualenv automatically — the Tauri frontend spawns `venv/Scripts/python.exe` (Windows) or `venv/bin/python` (Unix).
+The desktop app's dev build uses this virtualenv automatically: Rust (`src-tauri/src/backend.rs`)
+spawns `venv/Scripts/python.exe` (Windows) or `venv/bin/python` (Unix). Set `AMP_PYTHON` to use
+another interpreter.
+
+## Running the app
+
+**The Tauri app is the normal entry point.** It starts its own backend and stops it when it exits:
+
+- Port: a free port picked at launch (set `AMP_PORT` to fix it, e.g. `AMP_PORT=8000` for
+  bookmarked `/docs` URLs). The frontend asks Rust for it (`backend_info`); the CSP allows any
+  `127.0.0.1` port.
+- Data: the per-user app data dir — `%APPDATA%\com.amp.v2\` (Windows),
+  `~/Library/Application Support/com.amp.v2/` (macOS), `~/.local/share/com.amp.v2/` (Linux):
+  `cache/` (segments, `ytm_session.json`), `logs/` (`app.log`, `streaming.log`, rotated at 5 MB × 3),
+  `userdb.sqlite`, `backend.pid`. Sign-ins from `amp/.amp/` are **not** copied: sign in again
+  (the dev backend logs a hint when it sees one).
+- Lifetime: the backend runs with `--parent-watch` and exits when the app's stdin pipe closes,
+  so it also goes away when the app is killed. Closing the window asks it to exit, then kills
+  its process tree after 2 s.
+- One instance: launching the app again focuses the running window (two backends must not
+  share one segment cache).
+- Backend output: the **Logs** page, "Backend stdout" tab.
+
+`app.py` (tkinter) is a **debugging tool**: it runs a backend on `:8000` (or `AMP_PORT`) with
+the checkout's `amp/.amp/` + `amp/userdb.sqlite`, the Vite web app, an API tester and a chunk
+viewer. Its Force Kill uses `amp/.amp/backend.pid` first, then port scanning.
+
+### Packaging
+
+```bash
+cd amp/
+python scripts/build_sidecar.py --smoke   # PyInstaller → frontend/src-tauri/binaries/amp-backend-<triple>[.exe]
+cd frontend && npx tauri build            # installers in src-tauri/target/release/bundle/{msi,nsis}/
+```
+
+`build_sidecar.py` runs PyInstaller on `amp-backend.spec`, names the binary after `rustc -vV`'s
+host triple (what `externalBin` expects) and, with `--smoke`, starts it on a free port, checks
+`/api/health` + a search and that it exits on stdin EOF. Tauri needs that file even for
+`tauri dev` (the dev build itself runs the venv). **Rebuild the sidecar after every yt-dlp
+upgrade.** Node.js is not bundled: it must be on `PATH` (`/api/health` reports it, and playback
+fails with "Node.js not found" otherwise).
 
 ### Backend
 
@@ -86,7 +127,14 @@ python -m backend.main --debug
 
 # Or with a token (all requests require Authorization: Bearer <token>)
 python -m backend.main --token my-secret-token --debug
+
+# As the desktop app runs it: free port, its own data dir, exit when stdin closes
+python -m backend.main --port 0 --data-dir /tmp/amp-data --parent-watch
 ```
+
+Without `--data-dir`, data stays in `amp/.amp/` and `amp/userdb.sqlite` (the sidecar binary
+defaults to the app data dir instead). The backend writes `<data dir>/backend.pid`
+(`{"pid", "port", "started_at"}`) and warns at startup if the backend recorded there is still alive.
 
 ### Authentication (optional)
 
@@ -95,7 +143,7 @@ The app works without any sign-in. To access your liked songs and playlists:
 1. Open the **Auth** page (or click the session badge in the sidebar)
 2. Click **Sign in with YouTube** and sign in in the window that opens (desktop app only)
 3. Fallbacks under **Advanced**: paste a Cookie header copied from DevTools, or import from Firefox (close Firefox first; Chrome/Edge cookies can't be decrypted on Windows)
-4. Only youtube.com cookies are saved, to `.amp/cache/ytm_session.json` (0600 permissions). Older files that held a whole browser jar are trimmed on startup; sign in again if the Auth page asks you to
+4. Only youtube.com cookies are saved, to `<data dir>/cache/ytm_session.json` (0600 permissions). Older files that held a whole browser jar are trimmed on startup; sign in again if the Auth page asks you to
 
 ### Frontend (dev)
 
@@ -119,7 +167,9 @@ All settings via environment variables or `.env`:
 | Setting | Default | Description |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Bind host (never `0.0.0.0`) |
-| `PORT` | `8000` | Bind port |
+| `PORT` | `8000` | Bind port (CLI `--port`; `0` = any free port). The desktop app picks one |
+| `AMP_PORT` | _(none)_ | Desktop app and `app.py`: use this port instead of a free one / 8000 |
+| `AMP_PYTHON` | `amp/venv/...` | Desktop app (dev build): Python used to run the backend |
 | `AUTH_TOKEN` | _(none)_ | Optional Bearer token (CLI `--token`). If set, all requests require it |
 | `CACHE_MAX_SIZE_MB` | `500` | LRU eviction threshold |
 | `SEGMENT_BUFFER_AHEAD_SEC` | `30` | Pre-fetch window |
@@ -180,8 +230,9 @@ Pinned songs: `dQw4w9WgXcQ` (Rick Astley), `LTDxBgP0lqA` (The Weeknd).
 ```
 amp/
 ├── backend/
-│   ├── main.py              # Entry point
-│   ├── config.py            # pydantic-settings
+│   ├── main.py              # Entry point (--port, --data-dir, --parent-watch)
+│   ├── lifecycle.py         # Socket bind, backend.pid, parent watch
+│   ├── config.py            # pydantic-settings, data dir
 │   ├── api/
 │   │   ├── server.py        # FastAPI app, auth middleware, CORS
 │   │   ├── errors.py        # {detail: {code, message}} error model
@@ -203,14 +254,17 @@ amp/
 ├── frontend/
 │   ├── src/
 │   │   ├── api.ts           # Typed fetch wrapper
-│   │   ├── sidecar.ts       # Backend process management
+│   │   ├── sidecar.ts       # Backend client: backend_info, health poll, log events
 │   │   ├── state.ts         # Queue + playback state
 │   │   ├── components/      # PlayerBar, SongList
 │   │   ├── player/          # error text, queue persistence, prefetch (vitest: npm test)
 │   │   └── pages/           # Search, Library, Playlists, Auth, Logs
 │   ├── index.html           # CSP meta
-│   └── src-tauri/           # Tauri v2 config
-├── .amp/                    # Runtime: cache/, logs/ (gitignored)
+│   └── src-tauri/           # Tauri v2: backend.rs (spawns/stops the backend), youtube_login.rs
+├── scripts/build_sidecar.py # PyInstaller sidecar → src-tauri/binaries/ (+ --smoke)
+├── app.py                   # Debug launcher (tkinter)
+├── amp-backend.spec         # PyInstaller spec
+├── .amp/                    # Runtime for manual/app.py runs: cache/, logs/ (gitignored)
 ├── pyproject.toml
 ├── requirements.txt
 └── README.md
@@ -223,7 +277,7 @@ amp/
 - Cross-site requests refused in every mode: POST/PUT/DELETE with a foreign `Origin`, and cross-site GETs on `/api/auth/*` (403 `forbidden_origin`)
 - Bearer token optional — set `AUTH_TOKEN` / `--token` to require it on every request
 - Explicit CORS origins (never `*` with credentials)
-- CSP in the webview
+- CSP in the webview; the webview has no `shell:*` permission (the backend is spawned from Rust)
 - YouTube credentials stored with `0600` permissions
 - yt-dlp cookie temp files are `0600` and deleted in `finally`
 

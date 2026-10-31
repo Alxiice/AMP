@@ -24,7 +24,7 @@ export default function App() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Start the backend sidecar on app launch
+    // Follow the backend Tauri started (health, output); it is not spawned from here
     sidecar.start({
       onStatusChange: setBackendStatus,
       onLog: (line) => {
