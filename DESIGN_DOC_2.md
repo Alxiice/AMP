@@ -104,7 +104,7 @@ amp/
 │   ├── api/
 │   │   ├── server.py           # FastAPI app, CORS, token auth, DB init
 │   │   ├── endpoints.py        # library + streaming + logs routes
-│   │   └── auth_routes.py      # 6 auth endpoints
+│   │   └── auth_routes.py      # auth endpoints (status, cookies, tauri-cookies, Firefox import, logout)
 │   ├── services/
 │   │   ├── auth.py             # AuthService, CredentialStore, SAPISIDHASH
 │   │   ├── youtube.py          # YouTubeService (ytmusicapi wrapper)
@@ -169,7 +169,7 @@ Computed paths (cache, segments, logs, DB file) are private attributes set by `S
 ### 5.2 Server (`api/server.py`)
 
 1. Create FastAPI app.
-2. **Auth middleware**: every request except `GET /` and `GET /api/health` must carry a `Host` of `127.0.0.1`/`localhost` (DNS-rebinding guard), and — when `AUTH_TOKEN` is configured — `Authorization: Bearer <token>`. Reject otherwise (401/403). Open mode (no token) is the default; cross-site POST protection in open mode is improvement-plan Phase 5 (F15).
+2. **Auth middleware**: every request except `GET /` and `GET /api/health` must carry a `Host` of `127.0.0.1`/`localhost` (DNS-rebinding guard), and — when `AUTH_TOKEN` is configured — `Authorization: Bearer <token>`. Reject otherwise (401/403). Open mode (no token) is the default. The Host is parsed without its port (`[::1]:8000` → `[::1]`). **Cross-site requests** are refused in every mode (403 `{"detail": {"code": "forbidden_origin"}}`): a method other than GET/HEAD/OPTIONS with an `Origin` not in `ALLOWED_ORIGINS` (browsers always send `Origin` on cross-origin POST/PUT/DELETE; requests without `Origin` — curl, the control panel — are allowed), and a GET on `/api/auth/*` with `Sec-Fetch-Site: cross-site` and no allowed `Origin`. `/stream/*/audio` stays open for `<audio>`.
 3. **CORS**: explicit origins only — `tauri://localhost`, `http://tauri.localhost`, and the Vite dev origin. Never `*` with credentials.
 4. CORS preflight must not require the token (middleware exempts `OPTIONS`).
 5. Init DB, mount routers, startup/shutdown hooks (start DownloadManager, reconcile cache, shutdown executor).
@@ -195,10 +195,11 @@ Never construct services directly. All shared state (cookies, segment tables, pl
 ### 5.4 Auth (`services/auth.py`)
 
 - Cookie-based auth only (OAuth is dead for YTMusic as of 2025). Optional: search and playback work signed out.
-- **Only youtube.com cookies are stored.** `filter_youtube_cookies(jar)` keeps a cookie only if its domain (leading dot stripped) is `youtube.com` or ends with `.youtube.com`; for duplicate names, `.youtube.com` wins over subdomains. Browser import reads the local cookie store with `yt_dlp.cookies.extract_cookies_from_browser()` (no network request).
+- **Only youtube.com cookies are stored, with their domain.** `filter_youtube_cookies(jar)` keeps a cookie only if its domain (leading dot stripped) is `youtube.com` or ends with `.youtube.com`, one per (name, domain). Every entry point goes through `AuthService.set_cookies`, which filters; a pasted `Cookie:` header has no domains and gets `.youtube.com`. For the `Cookie` header (`cookies_by_name`), `.youtube.com` wins over subdomains; the Netscape file for yt-dlp writes each cookie once on its own domain.
+- **Sign-in paths**: (1) the Tauri webview (`youtube_login.rs`: incognito window, 10 min timeout, reads cookies of `music.youtube.com` and `www.youtube.com` merged by (name, domain)) → `POST /api/auth/tauri-cookies`; (2) under "Advanced": a pasted Cookie header, and Firefox import via `yt_dlp.cookies.extract_cookies_from_browser()` (no network; Firefox must be closed). Other browsers are refused (400): Chrome/Edge cookies can't be decrypted on Windows (app-bound encryption).
 - **Session expiry** is decided only by ytmusicapi 401/403 (`youtube.py`) and `status(verify=True)`. A googlevideo CDN 403 means the signed stream URL expired, not the session (§6.5).
 - `SAPISIDHASH = SHA1(ts + " " + __Secure-3PAPISID + " " + "https://music.youtube.com")`.
-- `CredentialStore`: `.amp/cache/ytm_session.json`, atomic write (tmp + `os.replace`), `0600`.
+- `CredentialStore`: `.amp/cache/ytm_session.json`, atomic write (tmp + `os.replace`), `0600`. Format v2: `{"version": 2, "cookies": [{"name", "value", "domain"}]}`. A v1 file (flat `{name: value}`, possibly a whole browser jar) is migrated when loaded (at startup): only an allowlist of YouTube/Google session cookie names is kept (domain `.youtube.com`), the file is rewritten, counts are logged; if it held more than 3× the kept count, a WARNING is logged and `/api/auth/status` reports `migrated_from_full_jar: true` until the next sign-in.
 - Lazy `YTMusic` client construction (offline launch must not look like a failed login).
 - `get_cookie_header()` feeds both ytmusicapi headers and CDN requests.
 - States: `signed_out → signed_in → expired`.
@@ -374,7 +375,7 @@ The epoch is a **priority**, not a cancellation: the new requests outrank everyt
 
 ## 7. API Specification
 
-All under `/api`. When a token is configured, all require it except `GET /` and `GET /api/health` (§5.2). All blocking handlers are plain `def`. Additional endpoints implemented since this table was written: `GET /api/stream/cache-info`, `POST /api/auth/tauri-cookies` and the sign-in flow routes (consolidated in improvement-plan Phase 5).
+All under `/api`. When a token is configured, all require it except `GET /` and `GET /api/health` (§5.2). All blocking handlers are plain `def`. Also implemented: `GET /api/stream/cache-info`.
 
 **Rule**: declare specific routes (`/stream/logs`, `/stream/playback-state`) **before** parameterized ones (`/stream/{song_id}`).
 
@@ -396,8 +397,11 @@ All under `/api`. When a token is configured, all require it except `GET /` and 
 | POST | `/api/stream/buffer/{id}?mode=current\|prefetch` | `current`: force buffer-ahead; `prefetch`: resolve + init and 2 segments at LOW, session untouched |
 | GET | `/api/stream/playback-state` | `PlaybackInfo` |
 | GET | `/api/stream/logs` | recent streaming log lines |
-| GET | `/api/auth/status?verify=` | `{state, is_authenticated, account}` |
-| POST | `/api/auth/cookies` , `/cookie-header` , `/import-browser` , `/open-signin` , `/logout` | auth flow |
+| GET | `/api/auth/status?verify=` | `{state, is_authenticated, account, migrated_from_full_jar}` |
+| POST | `/api/auth/tauri-cookies` | `{cookies: [{name, value, domain}]}` from the sign-in webview; 400 if none is a youtube.com cookie |
+| POST | `/api/auth/cookies` , `/cookie-header` | `{cookie_header}` pasted from DevTools (domain `.youtube.com`) |
+| POST | `/api/auth/import-browser?browser=firefox` | Firefox only (400 for other browsers, 404 if no YouTube cookies) |
+| POST | `/api/auth/logout` | clear the stored session |
 | GET/POST/DELETE | `/api/logs` | frontend log relay (last 500) |
 
 **Errors** (streaming routes, `api/errors.py`): `{"detail": {"code", "message"}}` — `invalid_id` 400, `unavailable` / `no_audio` 404, `auth_required` 401, `node_missing` 503, `extract_failed` / `segment_unavailable` 502, `bad_range` 416. Library routes still use string `detail`s. There is no readiness-polling route: `/play` returning means the stream is resolved.
@@ -425,9 +429,10 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 |---|---|
 | `PlayerBar` (persistent) | play/pause/stop, time, volume, thumbnail/title; segment bar (one cell per segment, colored by status, click-to-seek; `/chunks` polled at 500 ms **with an in-flight guard**, §10 P12). Load sequence: `/play` (abortable) → generation check → `audio.src`; error codes mapped to text (`player/errors.ts`); one reload after a mid-stream network error; TTFA logged to the API relay |
 | `Search` | query box, results list, play per result |
-| `Library` | liked songs list |
-| `Playlists` | user playlists + tracks |
-| `Auth` | import-from-browser buttons, sign-in, status, logout |
+| `Library` | liked songs list; "Sign in to see your library" when signed out / on 401 |
+| `Playlists` | user playlists + tracks; same sign-in prompt |
+| `Auth` | three things: status (+ migration warning), "Sign in with YouTube" (Tauri webview), collapsed "Advanced" (paste Cookie header, Firefox import) |
+| Sidebar | session badge `Signed in` / `Signed out` / `Session expired — reconnect` → `/auth`; `/api/auth/status` polled every 60 s (in-flight guard) and after any 401 from `/api/user/*` (`authSession.ts`) |
 | `Logs` | backend stdout, streaming logs, API log relay |
 
 Queue state (list of songs, current index, next/previous) is **frontend-owned** in `state.ts` — no backend queue API. Songs, current index and volume persist in `localStorage` (`amp.queue.v1`, debounced 500 ms) and are restored paused. When < 20 s remain or past 80 % of the current song, the next song is prefetched once (`/buffer?mode=prefetch`).
@@ -521,6 +526,11 @@ New from refactoring Phase 0 (AGENTS.md Revision 7):
 - **P26 — Stream URLs can 403 for a few seconds after extraction.** Some clients (TVHTML5, yt-dlp's default when a JS runtime is available) return formats with `available_at`; requests before that time get 403. Sleep until `available_at` (capped). Relatedly, `android` without a PO token offers only muxed itag 18 — don't put it first.
 - **P27 — Don't monkeypatch pydantic private attributes.** With pydantic 2.14, `monkeypatch.undo()` deletes `settings._cache_dir` instead of restoring it, breaking every later test. Use `Settings.configure_paths()` / `restore_paths()` (§5.1).
 - **P28 — Cookie imports must be domain-filtered.** A browser cookie jar holds every site's session. Keep only youtube.com cookies (§5.4).
+
+New from refactoring Phase 5 (AGENTS.md Revision 13):
+
+- **P29 — Open mode needs an Origin check.** CORS only stops a page from *reading* the response; a cross-site `fetch(..., {method: "POST"})` with no body is sent without a preflight and runs. Refuse non-safe methods whose `Origin` isn't allowed (§5.2).
+- **P30 — Keep cookie domains.** Flattening cookies to `{name: value}` loses which site they belong to and lets another site's `SID` overwrite YouTube's. Store `(name, value, domain)` (§5.4).
 
 ---
 

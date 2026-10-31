@@ -70,11 +70,7 @@ export async function isTauriAvailable(): Promise<boolean> {
  * This is a best-effort check that doesn't throw.
  */
 export function mightBeTauri(): boolean {
-  // If we already determined it, return cached value
-  if (isAvailableCache !== null) {
-    return isAvailableCache;
-  }
-  // Check if @tauri-apps/api is likely to be available
-  // This is a heuristic - in a real Tauri app, the import will work
-  return typeof window !== "undefined";
+  // Not isAvailableCache: importing @tauri-apps/api/core also succeeds in a plain browser.
+  // Tauri 2 injects __TAURI_INTERNALS__ into its webviews; a plain browser (Vite dev) has none
+  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

@@ -92,9 +92,10 @@ python -m backend.main --token my-secret-token --debug
 
 The app works without any sign-in. To access your liked songs and playlists:
 
-1. Open the **Auth** page in the app
-2. Either import cookies from your browser or paste a Cookie header from music.youtube.com
-3. Your session is saved to `.amp/cache/ytm_session.json` (0600 permissions)
+1. Open the **Auth** page (or click the session badge in the sidebar)
+2. Click **Sign in with YouTube** and sign in in the window that opens (desktop app only)
+3. Fallbacks under **Advanced**: paste a Cookie header copied from DevTools, or import from Firefox (close Firefox first; Chrome/Edge cookies can't be decrypted on Windows)
+4. Only youtube.com cookies are saved, to `.amp/cache/ytm_session.json` (0600 permissions). Older files that held a whole browser jar are trimmed on startup; sign in again if the Auth page asks you to
 
 ### Frontend (dev)
 
@@ -154,8 +155,9 @@ User-specific endpoints (`/api/user/likes`, `/api/user/playlists`) require YouTu
 | GET | `/api/stream/playback-state` | Current playback state |
 | GET | `/api/stream/logs` | Streaming log lines |
 | GET | `/api/auth/status?verify=` | Auth status |
-| POST | `/api/auth/cookies` | Set cookies |
-| POST | `/api/auth/import-browser?browser=` | Import from browser |
+| POST | `/api/auth/tauri-cookies` | Cookies from the sign-in webview |
+| POST | `/api/auth/cookies` | Set cookies from a pasted Cookie header |
+| POST | `/api/auth/import-browser?browser=firefox` | Import from Firefox (only browser accepted) |
 | POST | `/api/auth/logout` | Logout |
 
 ## Testing
@@ -217,7 +219,8 @@ amp/
 ## Security
 
 - Binds to `127.0.0.1` only — never exposed to LAN
-- Host header validation always enforced (DNS-rebinding guard)
+- Host header validation always enforced (DNS-rebinding guard), IPv6 loopback `[::1]` included
+- Cross-site requests refused in every mode: POST/PUT/DELETE with a foreign `Origin`, and cross-site GETs on `/api/auth/*` (403 `forbidden_origin`)
 - Bearer token optional — set `AUTH_TOKEN` / `--token` to require it on every request
 - Explicit CORS origins (never `*` with credentials)
 - CSP in the webview

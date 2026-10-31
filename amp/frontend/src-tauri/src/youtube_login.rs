@@ -13,7 +13,8 @@ const WINDOW_LABEL: &str = "ytm-login";
 // Sign in to Google, then land on YouTube Music so the youtube.com cookies get set.
 const LOGIN_URL: &str =
     "https://accounts.google.com/ServiceLogin?service=youtube&continue=https%3A%2F%2Fmusic.youtube.com%2F";
-const COOKIE_URL: &str = "https://music.youtube.com/";
+// Read both origins: some cookies are only set on www.youtube.com. Merged by (name, domain).
+const COOKIE_URLS: [&str; 2] = ["https://music.youtube.com/", "https://www.youtube.com/"];
 const SESSION_COOKIE: &str = "__Secure-3PAPISID";
 // Google sometimes refuses sign-in from "embedded browsers" it can identify by user agent.
 // A plain desktop Chrome UA avoids most of that. Keep it roughly current.
@@ -45,7 +46,7 @@ pub async fn youtube_login(app: AppHandle) -> Result<Vec<CookieDto>, String> {
         .build()
         .map_err(|e| e.to_string())?;
 
-    let cookie_url: Url = COOKIE_URL.parse().map_err(|e| format!("{e}"))?;
+    let cookie_url: Url = COOKIE_URLS[0].parse().map_err(|e| format!("{e}"))?;
     let deadline = Instant::now() + Duration::from_secs(10 * 60); // 10 minute timeout
 
     loop {
@@ -70,16 +71,28 @@ pub async fn youtube_login(app: AppHandle) -> Result<Vec<CookieDto>, String> {
 
         // Signed in. Give the redirect chain a moment to finish setting the rest, then re-read.
         tokio::time::sleep(Duration::from_millis(1500)).await;
-        let cookies = win.cookies_for_url(cookie_url.clone()).map_err(|e| e.to_string())?;
-        let out = cookies
-            .iter()
-            .map(|c| CookieDto {
-                name: c.name().to_string(),
-                value: c.value().to_string(),
-                domain: c.domain().map(|d| d.to_string()),
-            })
-            .collect();
+        let out = read_youtube_cookies(&win)?;
         let _ = win.close();
         return Ok(out);
     }
+}
+
+/// Cookies of every URL in COOKIE_URLS, one per (name, domain). The backend drops non-youtube.com domains.
+fn read_youtube_cookies(win: &tauri::WebviewWindow) -> Result<Vec<CookieDto>, String> {
+    let mut out: Vec<CookieDto> = Vec::new();
+    for url in COOKIE_URLS {
+        let url: Url = url.parse().map_err(|e| format!("{e}"))?;
+        for c in win.cookies_for_url(url).map_err(|e| e.to_string())? {
+            let dto = CookieDto {
+                name: c.name().to_string(),
+                value: c.value().to_string(),
+                domain: c.domain().map(|d| d.to_string()),
+            };
+            match out.iter_mut().find(|o| o.name == dto.name && o.domain == dto.domain) {
+                Some(existing) => *existing = dto,
+                None => out.push(dto),
+            }
+        }
+    }
+    Ok(out)
 }

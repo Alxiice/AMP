@@ -109,6 +109,17 @@ body {
 .status-dot.starting { background: var(--warning); }
 .status-dot.stopped, .status-dot.error { background: var(--error); }
 
+.session-badge {
+  display: block;
+  margin-bottom: 10px;
+  padding: 3px 10px;
+  border: none;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
 .main-content {
   flex: 1;
   overflow-y: auto;

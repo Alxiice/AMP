@@ -85,32 +85,14 @@ export interface AuthStatus {
   state: "signed_out" | "signed_in" | "expired";
   is_authenticated: boolean;
   account: Record<string, unknown> | null;
+  /** The stored session was migrated from a v1 file holding a whole browser jar: sign in again. */
+  migrated_from_full_jar?: boolean;
 }
 
 export interface TauriCookie {
   name: string;
   value: string;
   domain?: string;
-}
-
-export interface SignInFlowStatus {
-  session_id: string;
-  browser: string;
-  status: "pending" | "polling" | "success" | "failed" | "timeout" | "cancelled";
-  is_authenticated: boolean;
-  cookies_imported: number;
-  error: string | null;
-  polling_interval_ms: number;
-  timeout_seconds: number;
-}
-
-export interface StartSignInFlowResponse {
-  message: string;
-  session_id: string;
-  url: string;
-  browser: string;
-  polling_interval_ms: number;
-  timeout_seconds: number;
 }
 
 export interface HealthStatus {
@@ -166,6 +148,13 @@ function parseErrorBody(status: number, text: string): ApiError {
   return new ApiError(status, text);
 }
 
+// Called after a 401 from /api/user/* so the session badge can catch up (authSession.ts)
+let onUserUnauthorized: (() => void) | null = null;
+
+export function setUserUnauthorizedHandler(fn: (() => void) | null): void {
+  onUserUnauthorized = fn;
+}
+
 async function fetchApi<T>(
   path: string,
   options: RequestInit = {},
@@ -190,6 +179,7 @@ async function fetchApi<T>(
   });
 
   if (!resp.ok) {
+    if (resp.status === 401 && path.startsWith("/api/user/")) onUserUnauthorized?.();
     const text = await resp.text().catch(() => resp.statusText);
     throw parseErrorBody(resp.status, text);
   }
@@ -262,35 +252,18 @@ export const api = {
       body: JSON.stringify({ cookie_header: cookieHeader }),
     }),
 
-  importBrowser: (browser = "chrome") =>
+  // Firefox only: yt-dlp can't decrypt Chrome/Edge cookies on Windows
+  importFirefox: () =>
     fetchApi<{ state: string; cookie_count: number }>(
-      `/api/auth/import-browser?browser=${browser}`,
+      "/api/auth/import-browser?browser=firefox",
       { method: "POST" },
     ),
-
-  openSignin: () =>
-    fetchApi<{ message: string }>("/api/auth/open-signin", { method: "POST" }),
 
   setTauriCookies: (cookies: TauriCookie[]) =>
     fetchApi<{ state: string; cookie_count: number }>("/api/auth/tauri-cookies", {
       method: "POST",
       body: JSON.stringify({ cookies }),
     }),
-
-  startSignInFlow: (browser?: string) =>
-    fetchApi<StartSignInFlowResponse>("/api/auth/start-signin-flow", {
-      method: "POST",
-      body: JSON.stringify({ browser }),
-    }),
-
-  getSignInStatus: (sessionId: string) =>
-    fetchApi<SignInFlowStatus>(`/api/auth/signin-status/${sessionId}`),
-
-  cancelSignInFlow: (sessionId: string) =>
-    fetchApi<{ message: string; session_id: string }>(
-      `/api/auth/cancel-signin-flow/${sessionId}`,
-      { method: "POST" },
-    ),
 
   logout: () =>
     fetchApi<{ message: string }>("/api/auth/logout", { method: "POST" }),
