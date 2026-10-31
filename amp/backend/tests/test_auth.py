@@ -14,10 +14,13 @@ from types import SimpleNamespace
 import pytest
 
 from backend.services.auth import (
+    V1_COOKIE_ALLOWLIST,
     AuthService,
     AuthState,
+    Cookie,
     CredentialStore,
     compute_sapisidhash,
+    cookies_by_name,
     filter_youtube_cookies,
 )
 
@@ -235,7 +238,6 @@ class TestNetscapeCookieFile:
         assert "Netscape HTTP Cookie File" in content
         assert "__Secure-3PAPISID" in content
         assert ".youtube.com" in content
-        assert ".music.youtube.com" in content
 
         # Cleanup (P23: caller must delete in finally)
         os.unlink(path)
@@ -261,22 +263,171 @@ class TestFilterYoutubeCookies:
             _cookie("SID", "youtube-value", ".youtube.com"),
             _cookie("session", "secret", "bank.example"),
         ]
-        assert filter_youtube_cookies(jar) == {"SID": "youtube-value"}
+        assert filter_youtube_cookies(jar) == [Cookie("SID", "youtube-value", ".youtube.com")]
 
-    def test_root_domain_preferred_over_subdomain(self):
+    def test_same_name_on_two_domains_kept_separately(self):
+        jar = [_cookie("PREF", "music", ".music.youtube.com"), _cookie("PREF", "root", ".youtube.com")]
+        assert sorted(filter_youtube_cookies(jar), key=lambda c: c.domain) == [
+            Cookie("PREF", "music", ".music.youtube.com"),
+            Cookie("PREF", "root", ".youtube.com"),
+        ]
+
+    def test_root_domain_preferred_over_subdomain_in_header(self):
         for jar in (
             [_cookie("PREF", "music", ".music.youtube.com"), _cookie("PREF", "root", ".youtube.com")],
             [_cookie("PREF", "root", ".youtube.com"), _cookie("PREF", "music", ".music.youtube.com")],
         ):
-            assert filter_youtube_cookies(jar) == {"PREF": "root"}
+            assert cookies_by_name(filter_youtube_cookies(jar)) == {"PREF": "root"}
 
     def test_subdomain_kept_when_unique(self):
         jar = [_cookie("LOGIN_INFO", "x", "music.youtube.com")]
-        assert filter_youtube_cookies(jar) == {"LOGIN_INFO": "x"}
+        assert cookies_by_name(filter_youtube_cookies(jar)) == {"LOGIN_INFO": "x"}
 
     def test_lookalike_domain_rejected(self):
         jar = [
             _cookie("SID", "evil", ".notyoutube.com"),
             _cookie("SID", "evil2", "youtube.com.attacker.example"),
         ]
-        assert filter_youtube_cookies(jar) == {}
+        assert filter_youtube_cookies(jar) == []
+
+    def test_tauri_cookies_filters_domains(self):
+        """Webview cookies: .google.com and third-party cookies are dropped, domains kept."""
+        from backend.api.auth_routes import TauriCookie
+
+        jar = [
+            TauriCookie(name="SAPISID", value="yt", domain=".youtube.com"),
+            TauriCookie(name="LOGIN_INFO", value="m", domain="music.youtube.com"),
+            TauriCookie(name="SID", value="g", domain=".google.com"),
+            TauriCookie(name="NID", value="g2", domain="accounts.google.com"),
+            TauriCookie(name="ads", value="x", domain=".doubleclick.net"),
+            TauriCookie(name="nodomain", value="x", domain=None),
+        ]
+        assert filter_youtube_cookies(jar) == [
+            Cookie("SAPISID", "yt", ".youtube.com"),
+            Cookie("LOGIN_INFO", "m", "music.youtube.com"),
+        ]
+
+
+# ---------------------------------------------------------------------------
+# Credential store v2 + v1 migration (Phase 5)
+# ---------------------------------------------------------------------------
+
+
+def _store_file() -> Path:
+    from backend.config import settings
+    return settings.credential_store_path
+
+
+class TestStoreV2:
+    def test_store_v2_roundtrip(self, temp_dirs):
+        auth = AuthService()
+        auth.set_cookies([
+            Cookie("SAPISID", "a", ".youtube.com"),
+            Cookie("PREF", "m", "music.youtube.com"),
+        ])
+
+        data = json.loads(_store_file().read_text(encoding="utf-8"))
+        assert data["version"] == 2
+        assert data["cookies"] == [
+            {"name": "SAPISID", "value": "a", "domain": ".youtube.com"},
+            {"name": "PREF", "value": "m", "domain": "music.youtube.com"},
+        ]
+        import platform
+        if platform.system() != "Windows":
+            assert stat.S_IMODE(os.stat(_store_file()).st_mode) == 0o600
+
+        reloaded = AuthService()
+        assert reloaded.load_from_store()
+        assert reloaded.get_cookies() == auth.get_cookies()
+        assert reloaded.state == AuthState.SIGNED_IN
+
+    def test_pasted_header_gets_default_domain(self, temp_dirs):
+        auth = AuthService()
+        auth.set_cookies_from_header("SAPISID=a; HSID=b")
+        assert {c.domain for c in auth.get_cookies()} == {".youtube.com"}
+
+    def test_v2_load_drops_foreign_domains(self, temp_dirs):
+        """A hand-edited v2 file still only yields youtube.com cookies."""
+        _store_file().write_text(json.dumps({"version": 2, "cookies": [
+            {"name": "SAPISID", "value": "a", "domain": ".youtube.com"},
+            {"name": "SID", "value": "g", "domain": ".google.com"},
+        ]}), encoding="utf-8")
+        auth = AuthService()
+        assert auth.load_from_store()
+        assert auth.get_cookies() == [Cookie("SAPISID", "a", ".youtube.com")]
+
+    def test_unknown_version_ignored(self, temp_dirs):
+        _store_file().write_text(json.dumps({"version": 99, "cookies": []}), encoding="utf-8")
+        auth = AuthService()
+        assert not auth.load_from_store()
+        assert auth.state == AuthState.SIGNED_OUT
+
+    def test_netscape_file_uses_real_domains(self, temp_dirs):
+        auth = AuthService()
+        auth.set_cookies([
+            Cookie("SAPISID", "a", ".youtube.com"),
+            Cookie("PREF", "root", ".youtube.com"),
+            Cookie("PREF", "music", "music.youtube.com"),
+        ])
+        path = auth.write_netscape_cookie_file()
+        try:
+            rows = [line.split("\t") for line in Path(path).read_text().splitlines() if not line.startswith("#")]
+        finally:
+            os.unlink(path)
+
+        # each cookie once, on its own domain (was: every cookie on .youtube.com AND .music.youtube.com)
+        assert sorted((r[0], r[1], r[5], r[6]) for r in rows) == [
+            (".youtube.com", "TRUE", "PREF", "root"),
+            (".youtube.com", "TRUE", "SAPISID", "a"),
+            ("music.youtube.com", "FALSE", "PREF", "music"),
+        ]
+
+
+class TestMigrateV1:
+    def test_migrate_v1_keeps_allowlist_only(self, temp_dirs, caplog):
+        v1 = {f"site{i}_cookie": f"value-{i}" for i in range(297)}
+        v1.update({"SAPISID": "sapisid-secret", "SID": "sid-secret", "bank_session": "bank-secret"})
+        assert len(v1) == 300
+        _store_file().write_text(json.dumps({"cookies": v1}), encoding="utf-8")
+
+        auth = AuthService()
+        with caplog.at_level("INFO", logger="backend.services.auth"):
+            assert auth.load_from_store()
+
+        data = json.loads(_store_file().read_text(encoding="utf-8"))
+        assert data["version"] == 2
+        assert {c["name"] for c in data["cookies"]} == {"SAPISID", "SID"}
+        assert all(c["domain"] == ".youtube.com" for c in data["cookies"])
+        assert auth.state == AuthState.SIGNED_IN
+
+        assert "kept 2 of 300 cookies" in caplog.text
+        assert any(r.levelname == "WARNING" for r in caplog.records)
+        for secret in ("sapisid-secret", "sid-secret", "bank-secret", "value-1"):
+            assert secret not in caplog.text  # P24: counts only
+
+        assert auth.status()["migrated_from_full_jar"] is True
+
+    def test_migrate_v1_small_file_no_warning(self, temp_dirs, caplog):
+        _store_file().write_text(json.dumps({"cookies": {"SAPISID": "a", "HSID": "b", "PREF": "c"}}),
+                                 encoding="utf-8")
+        auth = AuthService()
+        with caplog.at_level("INFO", logger="backend.services.auth"):
+            assert auth.load_from_store()
+        assert "kept 3 of 3 cookies" in caplog.text
+        assert not any(r.levelname == "WARNING" for r in caplog.records)
+        assert auth.status()["migrated_from_full_jar"] is False
+
+    def test_migrated_flag_cleared_by_new_sign_in(self, temp_dirs):
+        v1 = {f"x{i}": "v" for i in range(20)}
+        v1["SAPISID"] = "a"
+        _store_file().write_text(json.dumps({"cookies": v1}), encoding="utf-8")
+        auth = AuthService()
+        auth.load_from_store()
+        assert auth.status()["migrated_from_full_jar"] is True
+
+        auth.set_cookies_from_header("SAPISID=b")
+        assert auth.status()["migrated_from_full_jar"] is False
+
+    def test_allowlist(self):
+        assert {"SAPISID", "__Secure-3PAPISID", "LOGIN_INFO"} <= V1_COOKIE_ALLOWLIST
+        assert "bank_session" not in V1_COOKIE_ALLOWLIST

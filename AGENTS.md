@@ -22,13 +22,14 @@
 | Refactor Phase 2 | Exact segment table from the fMP4 sidx ([plan](improvement-plan/phase-2-segment-table.md)) | **DONE** — see Revision 10 |
 | Refactor Phase 3 | Download pipeline correctness ([plan](improvement-plan/phase-3-download-pipeline.md)) | **DONE** — see Revision 11 |
 | Refactor Phase 4 | Playback UX & frontend ([plan](improvement-plan/phase-4-playback-ux.md)) | **DONE** — see Revision 12 |
-| Refactor Phases 5–6 | Auth/security, lifecycle | Pending |
+| Refactor Phase 5 | Auth simplification & local API hardening ([plan](improvement-plan/phase-5-auth-security.md)) | **DONE** — see Revision 13 |
+| Refactor Phase 6 | Lifecycle & packaging ([plan](improvement-plan/phase-6-lifecycle-packaging.md)) | Pending |
 
-**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–4 are done; Phases 5–6 are pending.
+**Refactoring plan**: [improvement-plan/](improvement-plan/README.md) — phases 0–6. Phases 0–5 are done; Phase 6 is pending.
 
-**Test results**: 325 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 86% (floor 60%). 10 frontend unit tests pass (`npm test`, vitest). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 357 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 88% (floor 60%). 12 frontend unit tests pass (`npm test`, vitest). All 14 integration tests pass (`test_integration.py` 8, `test_integration_download.py` 3 × 2 songs). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
-**Auth model**: Open by default — no token required. Search, browse, and play work immediately. Cookie-based YouTube sign-in (optional) unlocks liked songs and user playlists.
+**Auth model**: Open by default — no token required, but cross-site requests are refused (Revision 13). Search, browse, and play work immediately. YouTube sign-in (optional, Tauri webview; paste / Firefox import as fallbacks) unlocks liked songs and user playlists. Only youtube.com cookies are stored, with their domains.
 
 **Virtualenv**: The app uses `amp/venv/` — the Tauri frontend spawns `venv/Scripts/python.exe` (Windows) or `venv/bin/python` (Unix).
 
@@ -222,6 +223,33 @@ Ported the useful pieces from the old `master` branch (a different, earlier layo
 
 **Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
 
+### Revision 13 — Phase 5: auth simplification & local API hardening (2026-10-31)
+
+Plan: [improvement-plan/phase-5-auth-security.md](improvement-plan/phase-5-auth-security.md) · Branch: `fix/phase-5-auth-security`
+
+| # | Problem | Fix |
+|---|---|---|
+| F12 | `ytm_session.json` written before Phase 0 could hold every site's cookies, flattened by name (another site's `SID` overwrote YouTube's) and sent to YouTube/googlevideo | Store **v2** `{"version": 2, "cookies": [{name, value, domain}]}` (atomic, 0600 unchanged). `AuthService` keeps `list[Cookie]`; every entry point goes through `set_cookies` → `filter_youtube_cookies` (now returns `Cookie`s, one per (name, domain)). Pasted header → domain `.youtube.com`. Cookie header via `cookies_by_name` (`.youtube.com` wins); Netscape file writes each cookie once on its own domain (was: every cookie on both `.youtube.com` and `.music.youtube.com`) |
+| 5.2 | — | v1 file (no `version`) migrated on load: only the 19-name allowlist (`V1_COOKIE_ALLOWLIST`), domain `.youtube.com`, file rewritten, `Migrated credential store v1→v2: kept N of M cookies` (counts only). M > 3·N → WARNING + `migrated_from_full_jar: true` in `/api/auth/status` until the next sign-in/logout. The store is now loaded in `_startup`, so the migration is in the startup log |
+| — | Four sign-in flows; browser polling read Chrome while opening the default browser; Chrome/Edge decryption broken on Windows | Removed `services/signin_flow.py` + `test_signin_flow.py`, `/start-signin-flow`, `/signin-status/{id}`, `/cancel-signin-flow/{id}`, `/open-signin`, their `api.ts` methods/types. `/import-browser` accepts **Firefox only** (400 otherwise, 404 if no YouTube cookies, "Close Firefox" hint on a locked DB). `youtube_login.rs` reads `music.youtube.com` **and** `www.youtube.com`, merged by (name, domain); incognito + 10 min timeout kept |
+| F15 | Any web page could POST to `127.0.0.1:8000` in open mode (logout, seek, stop, `DELETE /logs`…) | Middleware, every mode: non-GET/HEAD/OPTIONS with an `Origin` not in `ALLOWED_ORIGINS` → 403 `{"detail": {"code": "forbidden_origin", …}}`; no `Origin` (curl, control panel, `app.py`) allowed. GET `/api/auth/*` with `Sec-Fetch-Site: cross-site` and no allowed Origin → 403. `https://tauri.localhost` added to `ALLOWED_ORIGINS`. CORS unchanged |
+| — | Host check split on `:` → `[::1]:8000` rejected | `host_name()`: bracketed IPv6 kept whole, port stripped only when there is exactly one `:` |
+| 5.4 | Session expiry invisible outside the Auth page | `authSession.ts` (shared store): sidebar badge `Signed in` / `Signed out` / `Session expired — reconnect` → `/auth`; `/api/auth/status` polled every 60 s while the backend runs (in-flight guard, P12) and after any 401 from `/api/user/*` (`setUserUnauthorizedHandler` in `api.ts`). Library / Playlists show `SignInPrompt` ("Sign in to see your library" + button) when signed out or on 401 |
+| 5.3 | — | Auth page = status (+ migration warning), "Sign in with YouTube", collapsed "Advanced" (paste Cookie header, Firefox import). `mightBeTauri()` checks `__TAURI_INTERNALS__` (was `true` in any browser) |
+
+**Verification** (scratch backend on :8765, `AMP_DIR`/`DB_PATH` in the scratchpad; the user's backend and `.amp/` untouched):
+- Synthetic v1 store, 246 cookies incl. `SAPISID`/`__Secure-3PAPISID`/`bank_session` (fake values): startup `app.log` → `Migrated credential store v1→v2: kept 5 of 246 cookies` + the WARNING; file rewritten as v2 with 5 allowlisted names on `.youtube.com`; status `signed_in`, `migrated_from_full_jar: true`; no cookie value in either log. (The real `ytm_session.json` was already v2, so no pre-Phase-0 copy was available.)
+- Headless Edge, attacker page served by `python -m http.server 9999` doing `fetch(POST /api/auth/logout, /stream/stop, /auth/import-browser; DELETE /logs; GET /auth/status?verify=true)`: from `http://localhost:9999` every POST → 403 `forbidden_origin` (logged `Rejected …`), the auth GET → 403, `DELETE` stopped by the CORS preflight; from `http://127.0.0.1:9999` every POST → 403. Still `signed_in` after both.
+- `cargo check` OK (`youtube_login.rs`), `npm run build` OK, integration 11/11 (`BAgTQhR8MLo`).
+
+**Not verified:** the webview sign-in itself (Google login → Library shows liked songs) — needs a manual run in the Tauri window; the sidebar badge / Library prompt in the real window (only `npm run build` + vitest). From a page on `127.0.0.1:<other port>` (same-site), `GET /api/auth/status` is not blocked (`Sec-Fetch-Site: same-site`); only a local process can serve such a page, and it could call the API directly anyway. The user agent in `youtube_login.rs` still says Chrome 125. **Not done:** 5.6 (per-launch token), which waits for Phase 6.
+
+**New tests:** `test_auth.py`: `TestStoreV2` (`test_store_v2_roundtrip`, pasted header domain, v2 load drops foreign domains, unknown version ignored, `test_netscape_file_uses_real_domains`), `TestMigrateV1` (`test_migrate_v1_keeps_allowlist_only` — 300 cookies, warning, no values logged —, small file no warning, flag cleared by sign-in, allowlist), `test_tauri_cookies_filters_domains`, filter tests moved to `Cookie` / `cookies_by_name`. `test_endpoints.py`: Firefox-only import (×3 browsers), locked-profile hint, `/tauri-cookies` keeps domains / 400, status flag, `test_signin_flow_routes_removed` (×4), `TestCrossSite` (`test_cross_origin_post_forbidden`, 4 state-changing routes, with token, `test_allowed_origin_post_ok` ×4 origins, `test_post_without_origin_ok`, cross-origin GET outside auth OK, cross-site auth GET 403, same-site OK, app origin OK, preflight not blocked), `TestHostParsing` (8 cases, `test_ipv6_loopback_host_accepted`, 3 rejected hosts). Frontend: `authSession.test.ts` (badge labels, 401 from `/api/user/*` refreshes the status). Removed: `test_signin_flow.py`.
+
+**Action for users:** if the Auth page shows the migration warning, sign in again. Browser import from Chrome/Edge/Brave is gone — use "Sign in with YouTube" (or paste a Cookie header).
+
+**Test results:** 357 unit tests pass, coverage 88%, ruff clean, 12 vitest tests, `npm run build` OK, `cargo check` OK, 11/11 integration.
+
 ### Revision 12 — Phase 4: playback UX & frontend (2026-10-31)
 
 Plan: [improvement-plan/phase-4-playback-ux.md](improvement-plan/phase-4-playback-ux.md) · Branch: `fix/phase-4-playback-ux`
@@ -392,7 +420,7 @@ amp/
 │   │   ├── __init__.py
 │   │   ├── server.py            # FastAPI app, AuthMiddleware (Bearer + Host check P17), CORS, startup/shutdown
 │   │   ├── endpoints.py         # library + streaming + logs routes (specific before parameterized, P9)
-│   │   └── auth_routes.py       # 6 auth endpoints: status, cookies, cookie-header, import-browser, open-signin, logout
+│   │   └── auth_routes.py       # 6 auth endpoints: status, cookies, cookie-header, import-browser (Firefox), tauri-cookies, logout
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── auth.py              # AuthService singleton, CredentialStore (atomic write, 0600), SAPISIDHASH, lazy YTMusic
@@ -424,7 +452,7 @@ amp/
 - `POST /api/stream/pause`, `POST /api/stream/resume`, `POST /api/stream/stop`
 - `POST /api/stream/position`, `POST /api/stream/seek`
 - `GET /api/stream/playback-state`, `GET /api/stream/logs`
-- `GET /api/auth/status`, `POST /api/auth/cookies`, `POST /api/auth/cookie-header`, `POST /api/auth/import-browser`, `POST /api/auth/open-signin`, `POST /api/auth/logout`
+- `GET /api/auth/status`, `POST /api/auth/cookies`, `POST /api/auth/cookie-header`, `POST /api/auth/import-browser` (Firefox only), `POST /api/auth/tauri-cookies`, `POST /api/auth/logout` (`/open-signin` and the sign-in flow routes removed in Revision 13)
 - `GET /api/logs`, `POST /api/logs`, `DELETE /api/logs`
 
 ### Phase 2 — DASH streaming core (DONE)
@@ -559,6 +587,7 @@ amp/frontend/
 14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
 15. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; request handlers use `ensure_segment()` and never poll; the cache LRU clock is file mtime (Revision 11)
 16. **Play contract**: `/play` resolves the stream before returning, newest `/play` owns the session; the player sets `audio.src` only for its newest load. Streaming errors are `{detail: {code, message}}` (`api/errors.py`) (Revision 12)
+17. **Auth (Revision 13)**: one primary sign-in (Tauri webview → `/tauri-cookies`); credential store v2 keeps `(name, value, domain)`, youtube.com only; v1 files migrated at startup. Cross-site requests are refused by `Origin` / `Sec-Fetch-Site` in every mode; requests without `Origin` stay allowed for non-browser clients
 
 ## All 24 Pitfalls Addressed
 
@@ -578,7 +607,7 @@ amp/frontend/
 | P14 — Verify 206 + Content-Range | Check status, Content-Range match, byte count |
 | P15 — Atomic writes | unique `mkstemp` tmp + fsync + `os.replace()` (Windows `PermissionError` retried) (Revision 11) |
 | P16 — Real Range support | 200/206/416 with correct headers |
-| P17 — Bind 127.0.0.1 + token + Host | Host always validated; token check only when configured |
+| P17 — Bind 127.0.0.1 + token + Host | Host always validated (`[::1]` accepted); token check only when configured; foreign `Origin` on state-changing requests → 403 (Revision 13) |
 | P18 — Seek epoch | Per-song counter; a seek's requests outrank older queued work, in-flight downloads finish (Revision 11) |
 | P19 — Bound in-memory caches | BoundedDict max 256 entries |
 | P20 — SQLite WAL + busy_timeout | WAL mode, busy_timeout=5000 |
@@ -601,6 +630,8 @@ amp/frontend/
 - [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
 - [ ] MSE upgrade (§8.4) — optional, not done in Phase 4
 - [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
+- [ ] Phase 5 webview sign-in (Google login in the Tauri window → liked songs) not run manually; `youtube_login.rs` user agent still Chrome 125
+- [ ] Phase 5.6 (automatic per-launch token) — after Phase 6
 
 ## Environment Notes
 

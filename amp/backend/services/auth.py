@@ -2,6 +2,8 @@
 
 - SAPISIDHASH = SHA1(ts + " " + __Secure-3PAPISID + " " + "https://music.youtube.com")
 - CredentialStore: .amp/cache/ytm_session.json, atomic write (tmp + os.replace), 0600
+  v2: {"version": 2, "cookies": [{"name", "value", "domain"}]}, youtube.com cookies only.
+  v1 files (flat {name: value}, possibly a whole browser jar) are migrated on load.
 - Lazy YTMusic client construction
 - States: signed_out -> signed_in -> expired
 """
@@ -14,9 +16,10 @@ import os
 import tempfile
 import threading
 import time
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Union
 
 from backend.config import settings
 from backend.utils.logger import get_logger
@@ -24,6 +27,27 @@ from backend.utils.logger import get_logger
 logger = get_logger("backend.services.auth")
 
 YTMUSIC_ORIGIN = "https://music.youtube.com"
+
+STORE_VERSION = 2
+DEFAULT_COOKIE_DOMAIN = ".youtube.com"  # pasted Cookie headers and v1 files carry no domain
+
+# v1 migration keeps only these: a v1 file may hold every site's cookies flattened by name
+V1_COOKIE_ALLOWLIST = frozenset({
+    "SID", "HSID", "SSID", "APISID", "SAPISID",
+    "__Secure-1PSID", "__Secure-3PSID", "__Secure-1PAPISID", "__Secure-3PAPISID",
+    "__Secure-1PSIDTS", "__Secure-3PSIDTS", "__Secure-1PSIDCC", "__Secure-3PSIDCC",
+    "SIDCC", "LOGIN_INFO", "PREF", "VISITOR_INFO1_LIVE", "VISITOR_PRIVACY_METADATA", "YSC",
+})
+
+
+@dataclass(frozen=True)
+class Cookie:
+    name: str
+    value: str
+    domain: str = DEFAULT_COOKIE_DOMAIN
+
+
+CookieInput = Union[Mapping[str, str], Iterable[Any]]
 
 
 class AuthState(str, Enum):
@@ -39,25 +63,45 @@ def compute_sapisidhash(sapisid: str, timestamp: Optional[int] = None) -> str:
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
-def filter_youtube_cookies(cookiejar: Iterable[Any]) -> Dict[str, str]:
-    """Keep only youtube.com cookies from a cookie jar, as {name: value}.
+def _is_youtube_domain(domain: str) -> bool:
+    bare = domain.lstrip(".")
+    return bare == "youtube.com" or bare.endswith(".youtube.com")
 
-    A cookie is kept if its domain (leading dot stripped) is youtube.com or a
-    subdomain of it. When a name appears on several domains, the
-    .youtube.com one wins over subdomains such as music.youtube.com.
+
+def filter_youtube_cookies(cookiejar: Iterable[Any]) -> List[Cookie]:
+    """Keep only youtube.com cookies (domain youtube.com or a subdomain), with their domain.
+
+    Accepts anything with .name / .value / .domain (http.cookiejar cookies,
+    Tauri cookie models, Cookie). One cookie per (name, domain); the last one wins.
     """
+    result: Dict[tuple, Cookie] = {}
+    for cookie in cookiejar:
+        domain = (getattr(cookie, "domain", None) or "").strip().lower()
+        name = getattr(cookie, "name", None)
+        if not name or not _is_youtube_domain(domain):
+            continue
+        result[(name, domain)] = Cookie(name, getattr(cookie, "value", None) or "", domain)
+    return list(result.values())
+
+
+def cookies_by_name(cookies: Iterable[Cookie]) -> Dict[str, str]:
+    """{name: value} for a Cookie header: .youtube.com wins over subdomains like music.youtube.com."""
     result: Dict[str, str] = {}
     is_root: Dict[str, bool] = {}
-    for cookie in cookiejar:
-        domain = (cookie.domain or "").lstrip(".").lower()
-        if domain != "youtube.com" and not domain.endswith(".youtube.com"):
+    for c in cookies:
+        root = c.domain.lstrip(".") == "youtube.com"
+        if c.name in result and (is_root[c.name] or not root):
             continue
-        root = domain == "youtube.com"
-        if cookie.name in result and (is_root[cookie.name] or not root):
-            continue
-        result[cookie.name] = cookie.value
-        is_root[cookie.name] = root
+        result[c.name] = c.value
+        is_root[c.name] = root
     return result
+
+
+def _to_cookies(cookies: CookieInput) -> List[Cookie]:
+    """A {name: value} mapping gets the default domain; cookie objects keep theirs. Filtered."""
+    if isinstance(cookies, Mapping):
+        cookies = [Cookie(str(n), str(v)) for n, v in cookies.items()]
+    return filter_youtube_cookies(cookies)
 
 
 class CredentialStore:
@@ -116,7 +160,9 @@ class AuthService:
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._store = CredentialStore()
-        self._cookies: Dict[str, str] = {}
+        self._cookies: List[Cookie] = []
+        self._by_name: Dict[str, str] = {}  # header view of _cookies (cookies_by_name)
+        self._migrated_from_full_jar = False  # v1 file looked like a whole browser jar
         self._state: AuthState = AuthState.SIGNED_OUT
         self._account: Optional[Dict[str, Any]] = None
         self._ytm_client: Any = None  # lazy ytmusicapi.YTMusic
@@ -124,7 +170,7 @@ class AuthService:
     # --- Cookie management ---
 
     def set_cookies_from_header(self, cookie_header: str) -> Dict[str, Any]:
-        """Parse a Cookie header string into the cookie dict and persist."""
+        """Parse a pasted Cookie header (no domains: assume .youtube.com) and persist."""
         cookies: Dict[str, str] = {}
         for part in cookie_header.split(";"):
             part = part.strip()
@@ -133,39 +179,78 @@ class AuthService:
                 cookies[name.strip()] = value.strip()
         return self.set_cookies(cookies)
 
-    def set_cookies(self, cookies: Dict[str, str]) -> Dict[str, Any]:
+    def set_cookies(self, cookies: CookieInput) -> Dict[str, Any]:
+        """Replace the session. Every entry point lands here, so only youtube.com cookies are kept."""
+        kept = _to_cookies(cookies)
         with self._lock:
-            self._cookies = dict(cookies)
-            self._store.save({"cookies": self._cookies})
-            self._ytm_client = None  # invalidate lazy client
-            self._state = self._evaluate_state()
+            self._set(kept)
+            self._save()
+            self._migrated_from_full_jar = False
             logger.info("Cookies updated (%d cookies), state=%s", len(self._cookies), self._state.value)
             return {"state": self._state.value, "cookie_count": len(self._cookies)}
 
+    def _set(self, cookies: List[Cookie]) -> None:
+        self._cookies = list(cookies)
+        self._by_name = cookies_by_name(self._cookies)
+        self._ytm_client = None  # invalidate lazy client
+        self._state = self._evaluate_state()
+
+    def _save(self) -> None:
+        self._store.save({"version": STORE_VERSION, "cookies": [asdict(c) for c in self._cookies]})
+
     def load_from_store(self) -> bool:
-        """Load cookies from disk on startup. Returns True if loaded."""
+        """Load cookies from disk on startup (migrating v1 files). Returns True if loaded."""
         data = self._store.load()
-        if not data or "cookies" not in data:
+        if not isinstance(data, dict) or "cookies" not in data:
             return False
+        version = data.get("version")
         with self._lock:
-            self._cookies = dict(data["cookies"])
-            self._ytm_client = None
-            self._state = self._evaluate_state()
+            if version is None:
+                if not self._migrate_v1(data["cookies"]):
+                    return False
+            elif version == STORE_VERSION and isinstance(data["cookies"], list):
+                entries = [c for c in data["cookies"] if isinstance(c, dict)]
+                self._set(filter_youtube_cookies(
+                    Cookie(str(c.get("name", "")), str(c.get("value", "")), str(c.get("domain", "")))
+                    for c in entries
+                ))
+            else:
+                logger.warning("Credential store has unknown version %r; ignoring it", version)
+                return False
         logger.info("Loaded %d cookies from store, state=%s", len(self._cookies), self._state.value)
+        return True
+
+    def _migrate_v1(self, raw: Any) -> bool:
+        """v1 = flat {name: value}, possibly every site's cookies. Keep the allowlist, rewrite as v2."""
+        if not isinstance(raw, dict):
+            logger.warning("Credential store v1 has no cookie mapping; ignoring it")
+            return False
+        kept = [Cookie(str(n), str(v)) for n, v in raw.items() if n in V1_COOKIE_ALLOWLIST]
+        self._set(kept)
+        self._save()
+        total = len(raw)
+        logger.info("Migrated credential store v1→v2: kept %d of %d cookies", len(kept), total)  # counts only (P24)
+        if total > 3 * len(kept):
+            self._migrated_from_full_jar = True
+            logger.warning(
+                "The old credential store held %d cookies, most of them not YouTube's (a whole browser "
+                "jar). Sign in again to rebuild a clean session.", total,
+            )
         return True
 
     def _evaluate_state(self) -> AuthState:
         """Determine auth state from cookie presence."""
-        if not self._cookies:
+        if not self._by_name:
             return AuthState.SIGNED_OUT
         # Check for the key session cookie
-        if "__Secure-3PAPISID" in self._cookies or "SAPISID" in self._cookies:
+        if "__Secure-3PAPISID" in self._by_name or "SAPISID" in self._by_name:
             return AuthState.SIGNED_IN
         return AuthState.SIGNED_OUT
 
     def logout(self) -> None:
         with self._lock:
-            self._cookies = {}
+            self._cookies, self._by_name = [], {}
+            self._migrated_from_full_jar = False
             self._store.clear()
             self._ytm_client = None
             self._account = None
@@ -183,13 +268,17 @@ class AuthService:
         return self._state == AuthState.SIGNED_IN
 
     def get_cookie_header(self) -> str:
-        """Return the Cookie header string for CDN requests and ytmusicapi."""
+        """Return the Cookie header string for CDN requests and ytmusicapi (one value per name)."""
         with self._lock:
-            return "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+            return "; ".join(f"{k}={v}" for k, v in self._by_name.items())
 
     def get_cookies_dict(self) -> Dict[str, str]:
         with self._lock:
-            return dict(self._cookies)
+            return dict(self._by_name)
+
+    def get_cookies(self) -> List[Cookie]:
+        with self._lock:
+            return list(self._cookies)
 
     def get_auth_headers(self) -> Dict[str, str]:
         """Headers for ytmusicapi requests (includes SAPISIDHASH Authorization when authenticated)."""
@@ -205,7 +294,7 @@ class AuthService:
             }
             if self._cookies:
                 headers["Cookie"] = self.get_cookie_header()
-                sapisid = self._cookies.get("__Secure-3PAPISID") or self._cookies.get("SAPISID")
+                sapisid = self._by_name.get("__Secure-3PAPISID") or self._by_name.get("SAPISID")
                 if sapisid:
                     ts = int(time.time())
                     headers["Authorization"] = f"SAPISIDHASH {ts}_{compute_sapisidhash(sapisid, ts)}"
@@ -294,13 +383,10 @@ class AuthService:
             fd, path = tempfile.mkstemp(suffix=".cookies.txt", prefix="amp_yt_")
             try:
                 lines = ["# Netscape HTTP Cookie File"]
-                for name, value in self._cookies.items():
-                    lines.append(
-                        f".youtube.com\tTRUE\t/\tTRUE\t2147483647\t{name}\t{value}"
-                    )
-                    lines.append(
-                        f".music.youtube.com\tTRUE\t/\tTRUE\t2147483647\t{name}\t{value}"
-                    )
+                for c in self._cookies:
+                    # Each cookie once, on its own domain; include-subdomains iff the domain has a leading dot
+                    subdomains = "TRUE" if c.domain.startswith(".") else "FALSE"
+                    lines.append(f"{c.domain}\t{subdomains}\t/\tTRUE\t2147483647\t{c.name}\t{c.value}")
                 with os.fdopen(fd, "w", encoding="utf-8") as f:
                     f.write("\n".join(lines) + "\n")
                 os.chmod(path, 0o600)
@@ -318,6 +404,7 @@ class AuthService:
             "state": self._state.value,
             "is_authenticated": self.is_authenticated,
             "account": self._account,
+            "migrated_from_full_jar": self._migrated_from_full_jar,
         }
         if verify and self.is_authenticated:
             try:
