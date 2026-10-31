@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { Routes, Route, NavLink } from "react-router-dom";
+import { Routes, Route, NavLink, useNavigate } from "react-router-dom";
 import { sidecar, type BackendStatus } from "./sidecar";
+import { sessionLabel, startAuthPolling, stopAuthPolling, useAuthStatus } from "./authSession";
 import { PlayerBar } from "./components/PlayerBar";
 import { Search } from "./pages/Search";
 import { Library } from "./pages/Library";
@@ -19,6 +20,8 @@ const NAV_ITEMS = [
 export default function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("stopped");
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
+  const authStatus = useAuthStatus();
+  const navigate = useNavigate();
 
   useEffect(() => {
     // Start the backend sidecar on app launch
@@ -36,6 +39,13 @@ export default function App() {
       sidecar.stop();
     };
   }, []);
+
+  // Session badge: poll /api/auth/status every 60 s while the backend runs
+  useEffect(() => {
+    if (backendStatus !== "running") return;
+    startAuthPolling();
+    return stopAuthPolling;
+  }, [backendStatus]);
 
   const handleRestart = useCallback(() => {
     sidecar.restart({
@@ -67,6 +77,15 @@ export default function App() {
             </NavLink>
           ))}
           <div className="nav-status">
+            {backendStatus === "running" && authStatus && (
+              <button
+                className={`auth-status-badge session-badge ${authStatus.state}`}
+                onClick={() => navigate("/auth")}
+                title="YouTube session: open the Auth page"
+              >
+                {sessionLabel(authStatus)}
+              </button>
+            )}
             <span className={`status-dot ${backendStatus}`} />
             Backend: {backendStatus}
             {backendStatus !== "running" && (

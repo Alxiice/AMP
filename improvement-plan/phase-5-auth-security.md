@@ -95,11 +95,11 @@ This is compatible with "no setup", because the user never sees the token.
 
 ## 4. Acceptance criteria
 
-- [ ] Unit suite green. `signin_flow.py` and its tests deleted.
-- [ ] Manual (Windows): Auth page → "Sign in with YouTube" → Google login in the webview → Library shows liked songs.
-- [ ] Manual: start with a pre-Phase-0 `ytm_session.json` (keep a copy) → startup log reports the migration; the file now only has allowlisted cookies.
-- [ ] Manual: from a page served at another origin (e.g. `python -m http.server 9999` with a page that does `fetch("http://127.0.0.1:8000/api/auth/logout", {method: "POST"})`) → 403, still signed in.
-- [ ] Auth page shows at most three things: status, "Sign in with YouTube", and the "Advanced" section.
+- [x] Unit suite green. `signin_flow.py` and its tests deleted. (357 pass, Revision 13)
+- [ ] *(not run yet)* Manual (Windows): Auth page → "Sign in with YouTube" → Google login in the webview → Library shows liked songs.
+- [x] Manual: start with a pre-Phase-0 `ytm_session.json` (keep a copy) → startup log reports the migration; the file now only has allowlisted cookies. (Synthetic 246-cookie v1 file; the real store was already v2.)
+- [x] Manual: from a page served at another origin (e.g. `python -m http.server 9999` with a page that does `fetch("http://127.0.0.1:8000/api/auth/logout", {method: "POST"})`) → 403, still signed in. (Headless Edge, from `localhost:9999` and `127.0.0.1:9999`.)
+- [x] Auth page shows at most three things: status, "Sign in with YouTube", and the "Advanced" section.
 
 ## 5. Risks and notes
 

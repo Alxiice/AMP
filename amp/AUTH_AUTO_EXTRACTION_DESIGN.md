@@ -1,5 +1,7 @@
 # Automatic Cookie Extraction Design
 
+> **Status (Phase 5, AGENTS.md Revision 13)**: the Tauri webview flow below is the only automatic sign-in. The browser-polling fallback (`signin_flow.py`, `/start-signin-flow`, `/signin-status`, `/cancel-signin-flow`) and `/open-signin` were removed; browser import is Firefox-only. The webview now reads both `music.youtube.com` and `www.youtube.com`. See `improvement-plan/phase-5-auth-security.md`.
+
 ## Problem
 
 Users must manually copy the Cookie header from browser DevTools and paste it into the app. This is cumbersome and error-prone.
