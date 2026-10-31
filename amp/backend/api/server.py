@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from backend.api.errors import register_error_handlers
 from backend.config import settings
 from backend.database.session import init_db
 from backend.services.extractor import get_extraction_dependencies
@@ -66,6 +67,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
             return await call_next(request)
 
     app.add_middleware(AuthMiddleware)
+    register_error_handlers(app)
 
     # --- CORS (explicit origins only) ---
     app.add_middleware(

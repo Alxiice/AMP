@@ -216,6 +216,15 @@ body {
   transform: scale(1.06);
 }
 
+.btn-icon.play-pause .spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--bg-hover);
+  border-top-color: var(--bg);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
 .player-progress {
   flex: 1;
   display: flex;

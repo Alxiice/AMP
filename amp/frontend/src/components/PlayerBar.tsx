@@ -1,7 +1,14 @@
-import { useEffect, useRef, useCallback, useState } from "react";
-import { api, type SegmentStatus, type CacheInfo } from "../api";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { api, type SegmentStatus, type CacheInfo, type Song } from "../api";
 import { store, useQueueState, useQueueActions } from "../state";
 import type { BackendStatus } from "../sidecar";
+import { describeError, describeMediaError } from "../player/errors";
+
+/** Player events go to the API log relay (Logs page → "API relay"). */
+function relayLog(line: string): void {
+  const ts = new Date().toISOString().slice(11, 23);
+  api.postLogs([`${ts} [player] ${line}`]).catch(() => {});
+}
 
 function formatTime(ms: number): string {
   if (!ms || isNaN(ms)) return "0:00";
@@ -25,7 +32,13 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
   const state = useQueueState();
   const actions = useQueueActions();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const currentSongIdRef = useRef<string>("");
+  const requestedIdRef = useRef<string>(""); // last song the effect saw
+  // Load sequence (F13): a newer load() invalidates older ones
+  const loadGen = useRef(0);
+  const loadAbort = useRef<AbortController | null>(null);
+  const loadedIdRef = useRef<string>(""); // song whose /audio URL is on the element
+  const retriedRef = useRef(false);       // one reload per load after a network error
+  const ttfaRef = useRef<{ songId: string; start: number; cached: boolean } | null>(null);
 
   // Segment visualization state
   const [segments, setSegments] = useState<SegmentStatus[]>([]);
@@ -44,10 +57,22 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
 
     // Surface audio errors in the player bar
     const onError = () => {
-      const err = audio.error;
-      const msg = err?.message || `Audio error (code ${err?.code ?? "?"})`;
+      const songId = loadedIdRef.current;
+      if (!audio.getAttribute("src") || !songId) return; // source cleared by a newer load
+      const code = audio.error?.code;
+      if (code === MediaError.MEDIA_ERR_NETWORK && !retriedRef.current) {
+        // A segment that fails mid-stream aborts the response (Phase 3): reload once from here
+        retriedRef.current = true;
+        const at = audio.currentTime;
+        relayLog(`network error on ${songId} at ${at.toFixed(1)}s, reloading`);
+        audio.src = api.getStreamAudioUrl(songId);
+        audio.currentTime = at;
+        audio.play().catch(() => {});
+        return;
+      }
+      relayLog(`audio error on ${songId}: code=${code} ${audio.error?.message ?? ""}`);
       setAudioLoading(false);
-      setAudioError(msg);
+      setAudioError(describeMediaError(code));
     };
     const onCanPlay = () => {
       setAudioLoading(false);
@@ -62,6 +87,11 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
     const onPlaying = () => {
       setAudioLoading(false);
       setAudioError(null);
+      const t = ttfaRef.current;
+      if (t && t.songId === loadedIdRef.current) {
+        ttfaRef.current = null;
+        relayLog(`TTFA ${t.songId} ${Math.round(performance.now() - t.start)} cached=${t.cached}`);
+      }
     };
     audio.addEventListener("error", onError);
     audio.addEventListener("canplay", onCanPlay);
@@ -80,66 +110,62 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
       audio.removeEventListener("playing", onPlaying);
       store.stopPositionReporting();
       store.setAudioElement(null);
+      loadAbort.current?.abort();
       audio.pause();
-      audio.src = "";
+      audio.removeAttribute("src");
+      audio.load();
     };
   }, []);
 
-  // Load new song when currentSong changes
-  useEffect(() => {
+  /** Resolve the stream (/play), then point the audio element at it — unless a newer load started. */
+  const load = useCallback(async (song: Song) => {
     const audio = audioRef.current;
-    if (!audio || !state.currentSong) return;
+    if (!audio) return;
+    const gen = ++loadGen.current;
+    loadAbort.current?.abort();
+    const ctrl = new AbortController();
+    loadAbort.current = ctrl;
+    const start = performance.now();
 
-    if (currentSongIdRef.current !== state.currentSong.id) {
-      currentSongIdRef.current = state.currentSong.id;
-      setSegments([]);
-      setAudioError(null);
+    // Stop the previous song now rather than letting it play while this one resolves
+    loadedIdRef.current = "";
+    retriedRef.current = false;
+    ttfaRef.current = null;
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    setSegments([]);
+    setAudioError(null);
+    setAudioLoading(true);
+    store.setDurationMs(song.duration_ms || 0);
 
-      // Tell backend to start playback session + buffer
-      const songId = state.currentSong.id;
-      api.playSong(songId).catch((e) => {
-        console.error("Failed to start playback:", e);
-        setAudioError(`Backend error: ${e.message || e}`);
-      });
-
-      // Wait for stream to be ready before setting audio source
-      const waitForReady = async () => {
-        setAudioLoading(true);
-        const maxAttempts = 30; // Wait up to 30 seconds
-        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-          try {
-            const ready = await api.isStreamReady(songId);
-            if (ready.ready) {
-              // Stream is ready, set audio source
-              audio.src = api.getStreamAudioUrl(songId);
-              audio.load();
-              audio.play().catch((e) => {
-                console.error("Audio play failed:", e);
-                setAudioLoading(false);
-                if (e.name === "NotAllowedError") {
-                  setAudioError("Autoplay blocked — click play to start");
-                } else {
-                  setAudioError(`Play failed: ${e.message || e}`);
-                }
-              });
-              return;
-            } else {
-              console.log(`Stream not ready (${ready.reason}), waiting... (${attempt}/${maxAttempts})`);
-              await new Promise((r) => setTimeout(r, 1000));
-            }
-          } catch (e) {
-            console.error(`Failed to check stream ready:`, e);
-            await new Promise((r) => setTimeout(r, 1000));
-          }
-        }
-        // Timeout waiting for stream
-        setAudioLoading(false);
-        setAudioError("Stream took too long to become ready");
-      };
-
-      waitForReady();
+    try {
+      const info = await api.playSong(song.id, ctrl.signal);
+      if (gen !== loadGen.current) return; // a newer song was chosen
+      store.setDurationMs(info.duration_ms);
+      ttfaRef.current = { songId: song.id, start, cached: info.cached_ahead };
+      loadedIdRef.current = song.id;
+      relayLog(`src ${song.id} (resolved in ${Math.round(performance.now() - start)} ms)`);
+      audio.src = api.getStreamAudioUrl(song.id);
+      await audio.play();
+    } catch (e) {
+      if (gen !== loadGen.current) return; // includes the AbortError of a superseded /play
+      console.error(`Load of ${song.id} failed:`, e);
+      relayLog(`load ${song.id} failed: ${(e as { code?: string }).code ?? (e as Error).message}`);
+      setAudioError(describeError(e));
+    } finally {
+      if (gen === loadGen.current) setAudioLoading(false);
     }
-  }, [state.currentSong]);
+  }, []);
+
+  // Load new song when currentSong changes (a restored song waits for the play button)
+  useEffect(() => {
+    const song = state.currentSong;
+    if (!song || requestedIdRef.current === song.id) return;
+    requestedIdRef.current = song.id;
+    if (store.takeRestored()) return;
+    load(song);
+  }, [state.currentSong, load]);
 
   // Poll segment statuses (P12: in-flight guard)
   useEffect(() => {
@@ -191,6 +217,10 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
     const audio = audioRef.current;
     if (!audio || !state.currentSong) return;
 
+    if (loadedIdRef.current !== state.currentSong.id) {
+      load(state.currentSong); // restored at startup, or the last load failed
+      return;
+    }
     if (state.isPlaying) {
       audio.pause();
       api.pause().catch(() => {});
@@ -200,11 +230,11 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
       audio.play().catch((e) => {
         console.error("Play failed:", e);
         setAudioLoading(false);
-        setAudioError(`Play failed: ${e.message || e}`);
+        setAudioError(describeError(e));
       });
       api.resume().catch(() => {});
     }
-  }, [state.isPlaying, state.currentSong]);
+  }, [state.isPlaying, state.currentSong, load]);
 
   // Handle stop
   const handleStop = useCallback(() => {
@@ -273,8 +303,21 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
   const positionSec = state.positionMs / 1000;
   const progressRatio = state.durationMs > 0 ? state.positionMs / state.durationMs : 0;
 
-  // Compute cumulative durations for segment positioning
-  const totalSegDuration = segments.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
+  // Cumulative segment offsets, once per /chunks update (not per cell)
+  const segLayout = useMemo(() => {
+    const total = segments.reduce((sum, s) => sum + (s.duration_ms || 0), 0);
+    let acc = 0;
+    return segments.map((seg) => {
+      const dur = seg.duration_ms || 0;
+      const leftPct = total > 0 ? (acc / total) * 100 : 0;
+      const widthPct = total > 0 ? (dur / total) * 100 : 0;
+      acc += dur;
+      // Init segment (index -1) gets minimal width
+      return seg.index === -1
+        ? { seg, left: 0, width: Math.max(widthPct, 0.5) }
+        : { seg, left: leftPct, width: widthPct };
+    });
+  }, [segments]);
 
   return (
     <div className="player-bar">
@@ -325,7 +368,7 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
             disabled={!state.currentSong || audioLoading}
             title={audioLoading ? "Loading..." : state.isPlaying ? "Pause" : "Play"}
           >
-            {audioLoading ? "\u25B6" : state.isPlaying ? "\u23F8" : "\u25B6"}
+            {audioLoading ? <span className="spinner" /> : state.isPlaying ? "\u23F8" : "\u25B6"}
           </button>
           <button
             className="btn-icon"
@@ -357,28 +400,14 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
                 style={{ width: `${progressRatio * 100}%` }}
               />
               {/* Segment cells */}
-              {segments.map((seg, i) => {
-                const segStart = segments
-                  .slice(0, i)
-                  .reduce((sum, s) => sum + (s.duration_ms || 0), 0);
-                const segDur = seg.duration_ms || 0;
-                const leftPct = totalSegDuration > 0 ? (segStart / totalSegDuration) * 100 : 0;
-                const widthPct = totalSegDuration > 0 ? (segDur / totalSegDuration) * 100 : 0;
-                // Init segment (index -1) gets minimal width
-                const actualWidth = seg.index === -1 ? Math.max(widthPct, 0.5) : widthPct;
-                const actualLeft = seg.index === -1 ? 0 : leftPct;
-                return (
-                  <div
-                    key={seg.index}
-                    className={`segment-progress-cell ${seg.status}`}
-                    style={{
-                      left: `${actualLeft}%`,
-                      width: `${actualWidth}%`,
-                    }}
-                    title={`Segment ${seg.index === -1 ? "init" : seg.index}: ${seg.status} (${formatBytes(seg.size_bytes)})`}
-                  />
-                );
-              })}
+              {segLayout.map(({ seg, left, width }) => (
+                <div
+                  key={seg.index}
+                  className={`segment-progress-cell ${seg.status}`}
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                  title={`Segment ${seg.index === -1 ? "init" : seg.index}: ${seg.status} (${formatBytes(seg.size_bytes)})`}
+                />
+              ))}
             </div>
           ) : (
             /* Fallback: plain seek slider when no segment data */
