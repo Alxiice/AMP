@@ -191,7 +191,7 @@ class TestAuthEndpoints:
     def test_import_browser_keeps_only_youtube_cookies(self, client, auth_headers):
         """F12: browser import must not store other sites' cookies."""
         from types import SimpleNamespace
-        from backend.services.auth import get_auth_service
+        from backend.services.auth import Cookie, get_auth_service
 
         jar = [
             SimpleNamespace(name="__Secure-3PAPISID", value="yt", domain=".youtube.com"),
@@ -200,22 +200,70 @@ class TestAuthEndpoints:
         ]
         with patch("yt_dlp.cookies.extract_cookies_from_browser", return_value=jar) as extract, \
              patch("yt_dlp.YoutubeDL") as ydl_cls:
-            resp = client.post("/api/auth/import-browser?browser=chrome", headers=auth_headers)
+            resp = client.post("/api/auth/import-browser?browser=firefox", headers=auth_headers)
 
         assert resp.status_code == 200
         assert resp.json()["state"] == "signed_in"
-        extract.assert_called_once_with("chrome")
+        extract.assert_called_once_with("firefox")
         ydl_cls.assert_not_called()  # no network extraction just to load cookies
-        assert get_auth_service().get_cookies_dict() == {"__Secure-3PAPISID": "yt"}
+        assert get_auth_service().get_cookies() == [Cookie("__Secure-3PAPISID", "yt", ".youtube.com")]
 
     def test_import_browser_no_youtube_cookies(self, client, auth_headers):
         from types import SimpleNamespace
 
         jar = [SimpleNamespace(name="SID", value="google", domain=".google.com")]
         with patch("yt_dlp.cookies.extract_cookies_from_browser", return_value=jar):
-            resp = client.post("/api/auth/import-browser?browser=chrome", headers=auth_headers)
+            resp = client.post("/api/auth/import-browser?browser=firefox", headers=auth_headers)
+        assert resp.status_code == 404
+        assert "No YouTube cookies found" in resp.json()["detail"]
+
+    @pytest.mark.parametrize("browser", ["chrome", "edge", "brave"])
+    def test_import_browser_firefox_only(self, client, auth_headers, browser):
+        """Chrome/Edge decryption is broken on Windows (app-bound encryption): refused up front."""
+        with patch("yt_dlp.cookies.extract_cookies_from_browser") as extract:
+            resp = client.post(f"/api/auth/import-browser?browser={browser}", headers=auth_headers)
+        assert resp.status_code == 400
+        extract.assert_not_called()
+
+    def test_import_browser_locked_profile_hint(self, client, auth_headers):
+        with patch("yt_dlp.cookies.extract_cookies_from_browser", side_effect=OSError("database is locked")):
+            resp = client.post("/api/auth/import-browser?browser=firefox", headers=auth_headers)
         assert resp.status_code == 500
-        assert "No cookies found" in resp.json()["detail"]
+        assert "Close Firefox" in resp.json()["detail"]
+
+    def test_tauri_cookies_keeps_domains(self, client, auth_headers):
+        from backend.services.auth import Cookie, get_auth_service
+
+        resp = client.post("/api/auth/tauri-cookies", headers=auth_headers, json={"cookies": [
+            {"name": "SAPISID", "value": "yt", "domain": ".youtube.com"},
+            {"name": "PREF", "value": "m", "domain": "music.youtube.com"},
+            {"name": "SID", "value": "g", "domain": ".google.com"},
+        ]})
+        assert resp.status_code == 200
+        assert resp.json() == {"state": "signed_in", "cookie_count": 2}
+        assert get_auth_service().get_cookies() == [
+            Cookie("SAPISID", "yt", ".youtube.com"),
+            Cookie("PREF", "m", "music.youtube.com"),
+        ]
+
+    def test_tauri_cookies_none_youtube_is_400(self, client, auth_headers):
+        resp = client.post("/api/auth/tauri-cookies", headers=auth_headers, json={"cookies": [
+            {"name": "SID", "value": "g", "domain": ".google.com"},
+        ]})
+        assert resp.status_code == 400
+
+    def test_status_reports_migration_flag(self, client, auth_headers):
+        assert client.get("/api/auth/status", headers=auth_headers).json()["migrated_from_full_jar"] is False
+
+    @pytest.mark.parametrize("path,method", [
+        ("/api/auth/start-signin-flow", "post"),
+        ("/api/auth/signin-status/abc", "get"),
+        ("/api/auth/cancel-signin-flow/abc", "post"),
+        ("/api/auth/open-signin", "post"),
+    ])
+    def test_signin_flow_routes_removed(self, client, auth_headers, path, method):
+        resp = getattr(client, method)(path, headers=auth_headers)
+        assert resp.status_code in (404, 405)
 
 
 # ---------------------------------------------------------------------------
@@ -331,3 +379,103 @@ class TestOpenMode:
         assert resp.status_code == 200
         data = resp.json()
         assert "total_bytes" in data
+
+
+# ---------------------------------------------------------------------------
+# Cross-site requests (F15) + Host parsing
+# ---------------------------------------------------------------------------
+
+
+class TestCrossSite:
+    """Other web pages must not change state on the local API (open mode included)."""
+
+    def _signed_in(self, client):
+        client.post("/api/auth/cookies", json={"cookie_header": "__Secure-3PAPISID=x"})
+
+    def test_cross_origin_post_forbidden(self, client_no_auth):
+        self._signed_in(client_no_auth)
+        resp = client_no_auth.post("/api/auth/logout", headers={"Origin": "https://evil.example"})
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["code"] == "forbidden_origin"
+        assert client_no_auth.get("/api/auth/status").json()["state"] == "signed_in"
+
+    @pytest.mark.parametrize("method,path", [
+        ("post", "/api/stream/seek?position_ms=1000"),
+        ("post", "/api/stream/stop"),
+        ("delete", "/api/logs"),
+        ("post", "/api/auth/import-browser"),
+    ])
+    def test_cross_origin_state_changes_forbidden(self, client_no_auth, method, path):
+        resp = getattr(client_no_auth, method)(path, headers={"Origin": "http://localhost:9999"})
+        assert resp.status_code == 403
+
+    def test_cross_origin_post_forbidden_with_token(self, client, auth_headers):
+        resp = client.post("/api/auth/logout", headers={**auth_headers, "Origin": "https://evil.example"})
+        assert resp.status_code == 403
+
+    @pytest.mark.parametrize("origin", [
+        "http://tauri.localhost", "https://tauri.localhost", "tauri://localhost", "http://localhost:1420",
+    ])
+    def test_allowed_origin_post_ok(self, client_no_auth, origin):
+        self._signed_in(client_no_auth)
+        resp = client_no_auth.post("/api/auth/logout", headers={"Origin": origin})
+        assert resp.status_code == 200
+        assert client_no_auth.get("/api/auth/status").json()["state"] == "signed_out"
+
+    def test_post_without_origin_ok(self, client_no_auth):
+        """curl, the control panel and app.py send no Origin."""
+        resp = client_no_auth.post("/api/auth/logout")
+        assert resp.status_code == 200
+
+    def test_cross_origin_get_allowed_outside_auth(self, client_no_auth):
+        resp = client_no_auth.get("/api/stream/playback-state",
+                                  headers={"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"})
+        assert resp.status_code == 200
+
+    def test_cross_site_auth_get_forbidden(self, client_no_auth):
+        resp = client_no_auth.get("/api/auth/status?verify=true", headers={"Sec-Fetch-Site": "cross-site"})
+        assert resp.status_code == 403
+        assert resp.json()["detail"]["code"] == "forbidden_origin"
+
+    def test_same_site_auth_get_ok(self, client_no_auth):
+        for site in ("same-origin", "same-site", "none"):
+            resp = client_no_auth.get("/api/auth/status", headers={"Sec-Fetch-Site": site})
+            assert resp.status_code == 200
+
+    def test_cross_site_auth_get_from_app_ok(self, client_no_auth):
+        """The webview (tauri.localhost) is cross-site to 127.0.0.1 but sends an allowed Origin."""
+        resp = client_no_auth.get("/api/auth/status",
+                                  headers={"Sec-Fetch-Site": "cross-site", "Origin": "http://tauri.localhost"})
+        assert resp.status_code == 200
+
+    def test_preflight_not_blocked(self, client_no_auth):
+        resp = client_no_auth.options("/api/auth/logout", headers={
+            "Origin": "http://tauri.localhost", "Access-Control-Request-Method": "POST",
+        })
+        assert resp.status_code == 200
+        assert resp.headers["access-control-allow-origin"] == "http://tauri.localhost"
+
+
+class TestHostParsing:
+    @pytest.mark.parametrize("header,expected", [
+        ("127.0.0.1:8000", "127.0.0.1"),
+        ("localhost", "localhost"),
+        ("LOCALHOST:8000", "localhost"),
+        ("[::1]:8000", "[::1]"),
+        ("[::1]", "[::1]"),
+        ("::1", "::1"),
+        ("evil.com:8000", "evil.com"),
+        ("127.0.0.1.evil.com", "127.0.0.1.evil.com"),
+    ])
+    def test_host_name(self, header, expected):
+        from backend.api.server import host_name
+        assert host_name(header) == expected
+
+    def test_ipv6_loopback_host_accepted(self, client_no_auth):
+        resp = client_no_auth.get("/api/stream/playback-state", headers={"Host": "[::1]:8000"})
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("host", ["evil.com", "127.0.0.1.evil.com:8000", "[::2]:8000"])
+    def test_other_hosts_rejected(self, client_no_auth, host):
+        resp = client_no_auth.get("/api/stream/playback-state", headers={"Host": host})
+        assert resp.status_code == 403
