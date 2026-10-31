@@ -10,6 +10,7 @@
     <a href="https://github.com/Alxiice/AMP/actions/workflows/python-ci.yml"><img src="https://github.com/Alxiice/AMP/actions/workflows/python-ci.yml/badge.svg" alt="Python CI" /></a>
     <a href="https://codecov.io/gh/Alxiice/AMP"><img src="https://img.shields.io/codecov/c/github/Alxiice/AMP/master?logo=codecov" alt="Code Coverage" /></a>
     <a href="https://github.com/Alxiice/AMP/actions/workflows/tauri-build.yml"><img src="https://github.com/Alxiice/AMP/actions/workflows/tauri-build.yml/badge.svg" alt="Tauri Build" /></a>
+    <a href="https://Alxiice.github.io/AMP/"><img src="https://img.shields.io/badge/docs-GitHub_Pages-blue?logo=github" alt="Documentation" /></a>
   </div>
 </div>
 
@@ -65,8 +66,12 @@ The installers are written to `amp/frontend/src-tauri/target/release/bundle/` (`
 
 ## Documentation
 
-The full documentation (usage guide and code reference) is in [`docs/`](docs/index.md), built
-with MkDocs:
+The full documentation (usage guide and code reference) is available on **GitHub Pages**:
+
+📚 **[https://Alxiice.github.io/AMP/](https://Alxiice.github.io/AMP/)**
+
+The docs are built with MkDocs from the `docs/` directory in this repository. To build and
+preview them locally:
 
 ```bash
 pip install -r docs/requirements.txt
@@ -75,10 +80,10 @@ mkdocs serve                       # then open http://127.0.0.1:8000
 
 | | |
 |---|---|
-| [Install & launch](docs/usage/install.md) | prerequisites, setup, installers, updating yt-dlp |
-| [Using the app](docs/usage/using-the-app.md) | search, player, queue, logs |
-| [Troubleshooting](docs/usage/troubleshooting.md) | when a song won't play, the app won't start… |
-| [Code](docs/code/index.md) | architecture, backend, frontend, tests, CI |
+| [Install & launch](https://Alxiice.github.io/AMP/usage/install/) | prerequisites, setup, installers, updating yt-dlp |
+| [Using the app](https://Alxiice.github.io/AMP/usage/using-the-app/) | search, player, queue, logs |
+| [Troubleshooting](https://Alxiice.github.io/AMP/usage/troubleshooting/) | when a song won't play, the app won't start… |
+| [Code](https://Alxiice.github.io/AMP/code/) | architecture, backend, frontend, tests, CI |
 
 > **Personal prototype, not for distribution.** Fetching YouTube streams this way goes against
 > YouTube's Terms of Service.
