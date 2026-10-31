@@ -7,7 +7,7 @@ YouTube Music streaming desktop app with DASH-segment caching. Tauri shell + Rea
 ## Features
 
 - **Works out of the box** — no sign-in required. Search, browse, and play YouTube Music immediately
-- **DASH-segment streaming**: Audio is cached as individual segments from YouTube's own DASH manifest, enabling instant seeks and persistent cache
+- **DASH-segment streaming**: Audio is cached as individual segments read from the stream's own fMP4 index (`sidx`), enabling exact seeks and a persistent cache
 - **< 300ms time to first audio**: Init segment + first media segment are queued at CRITICAL priority
 - **Real HTTP Range support**: The local audio endpoint implements Range correctly — the browser's `<audio>` element seeks via Range requests
 - **Persistent segment cache**: Segments survive restarts; LRU eviction at 500 MB
@@ -30,8 +30,8 @@ YouTube Music streaming desktop app with DASH-segment caching. Tauri shell + Rea
 │  FastAPI Backend (Python, sidecar process)               │
 │  AuthRoutes · Endpoints · Logs/Health                    │
 │  Services: AuthService · YouTubeService · StreamingService│
-│    ├── SegmentFetcher (yt-dlp → manifest URL)            │
-│    ├── ManifestParser (MPD → segment table)              │
+│    ├── StreamExtractor (yt-dlp → stream URL)             │
+│    ├── Index parser (fMP4 sidx → segment table)          │
 │    ├── DownloadManager (4 workers, priority queue)       │
 │    └── PlaybackSession (in-memory, epoch-based)          │
 └────────────────────────────┬─────────────────────────────┘
@@ -188,7 +188,8 @@ amp/
 │   │   └── session.py       # Engine (WAL), session factory
 │   ├── utils/
 │   │   ├── logger.py        # File + ring buffer logging
-│   │   └── dash.py          # MPD parser (pure functions)
+│   │   ├── mp4.py           # fMP4 sidx parser (pure functions)
+│   │   └── layout.py        # Segment table types + byte-range math
 │   └── tests/               # Unit + integration tests
 ├── frontend/
 │   ├── src/

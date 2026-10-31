@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -81,4 +82,5 @@ class Segment(Base):
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)
     status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|downloading|downloaded|error
     file_path: Mapped[str] = mapped_column(Text, default="")
+    layout_id: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)  # StreamInfo.layout_id
     last_accessed: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

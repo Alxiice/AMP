@@ -1,19 +1,21 @@
-"""StreamingService — DASH segment streaming core.
+"""StreamingService — segment streaming core.
 
 Includes:
   - Stream info: StreamExtractor (services/extractor.py) -> segment table
-  - ManifestParser (uses utils/dash.py)
+  - Exact segment table from the fMP4 sidx (utils/mp4.py), itag 140
+  - Proportional fallback (WebM, or no sidx) from extracted size + duration
   - DownloadManager (PriorityQueue + ThreadPoolExecutor, 4 workers)
   - PlaybackSession (in-memory, epoch-based)
-  - Cache management (LRU eviction, startup reconciliation)
-  - Progressive fallback for non-DASH URLs
+  - Cache management (layout.json identity, LRU eviction, startup reconciliation)
 """
 
 from __future__ import annotations
 
 import datetime as dt
 import enum
+import json
 import os
+import shutil
 import random
 import re
 import threading
@@ -37,17 +39,21 @@ from backend.services.extractor import (
     SingleFlight,
     StreamExtractor,
 )
-from backend.utils.dash import (
+from backend.utils.layout import (
     StreamInfo,
     SegmentInfo as DashSegmentInfo,
     build_virtual_layout,
     map_range_to_segments,
-    parse_mpd,
     position_ms_to_segment_index,
 )
+from backend.utils.mp4 import NeedMoreData, parse_fmp4_index
 from backend.utils.logger import get_logger
 
 logger = get_logger("backend.services.streaming")
+
+# First request for an fMP4 stream: ftyp + moov + sidx are ~1-2 KB for YouTube audio
+SIDX_HEAD_BYTES = 65536
+LAYOUT_MANIFEST = "layout.json"
 
 # P13: song_id validation
 SONG_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
@@ -423,73 +429,123 @@ class StreamingService:
         return self._build_from_stream(song_id, self._extractor.get(song_id))
 
     def _build_from_stream(self, song_id: str, stream: ExtractedStream) -> Optional[StreamInfo]:
-        """Fetch the start of the URL to tell a DASH manifest from a progressive file."""
-        url = stream.url
-        headers = self._auth.get_cdn_headers()
+        """Exact table from the fMP4 sidx when possible, else a proportional split.
 
-        # Fetch the URL to check if it's DASH (XML) or progressive (binary)
+        Applies cache identity (layout.json) before returning, and caches the
+        init segment from the head bytes already fetched.
+        """
+        headers = self._auth.get_cdn_headers()
+        info: Optional[StreamInfo] = None
+        head: Optional[bytes] = None
+        if stream.ext in ("m4a", "mp4"):
+            info, head = self._build_sidx_info(song_id, stream, headers)
+        if info is None:
+            info = self._build_proportional_info(song_id, stream, headers)
+        if info is None:
+            return None
+
+        self._apply_layout(info)
+        if head is not None and info.has_init and len(head) > info.init_range[1]:
+            self._cache_init_from_head(info, head)
+        return info
+
+    def _fetch_head(self, url: str, headers: Dict[str, str], length: int) -> Optional[bytes]:
+        """GET bytes [0, length) — at most length bytes even if the CDN ignores Range."""
         try:
             resp = self._http.get(
                 url,
-                headers={**headers, "Range": "bytes=0-1023"},
+                headers={**headers, "Range": f"bytes=0-{length - 1}"},
                 timeout=(settings.HTTP_TIMEOUT_CONNECT_S, settings.HTTP_TIMEOUT_READ_S),
                 stream=True,
             )
         except requests.RequestException as e:
-            logger.error("Failed to fetch stream URL for %s: %s", song_id, e)
+            logger.warning("Head fetch failed: %s", e)
             return None
-
-        content_type = resp.headers.get("Content-Type", "")
-        first_bytes = resp.content[:1024]
-        resp.close()
-
-        # Check if DASH manifest
-        is_xml = (
-            first_bytes.lstrip().startswith(b"<?xml")
-            or first_bytes.lstrip().startswith(b"<MPD")
-            or "dash" in content_type.lower()
-            or "mpd" in content_type.lower()
-        )
-
-        if is_xml:
-            try:
-                manifest_resp = self._http.get(
-                    url,
-                    headers=headers,
-                    timeout=(settings.HTTP_TIMEOUT_CONNECT_S, settings.HTTP_TIMEOUT_READ_S),
-                )
-                manifest_resp.raise_for_status()
-                info = parse_mpd(
-                    manifest_resp.content,
-                    song_id=song_id,
-                    title=stream.title,
-                    mime_hint=stream.mime_type,
-                )
-                info.base_url = url if not info.base_url else info.base_url
-                logger.info(
-                    "DASH manifest parsed for %s: %d segments, %d bytes, mime=%s",
-                    song_id, len(info.segments), info.total_bytes, info.mime_type,
-                )
-                return info
-            except Exception as e:
-                logger.error("Failed to parse DASH manifest for %s: %s", song_id, e)
+        try:
+            if resp.status_code not in (200, 206):
+                logger.warning("Head fetch returned HTTP %d", resp.status_code)
                 return None
-        else:
-            return self._build_progressive_info(song_id, stream, headers)
+            chunks: List[bytes] = []
+            received = 0
+            for chunk in resp.iter_content(chunk_size=65536):
+                chunks.append(chunk)
+                received += len(chunk)
+                if received >= length:
+                    break
+            return b"".join(chunks)[:length]
+        finally:
+            resp.close()
 
-    def _build_progressive_info(
+    def _build_sidx_info(
+        self, song_id: str, stream: ExtractedStream, headers: Dict[str, str],
+    ) -> Tuple[Optional[StreamInfo], Optional[bytes]]:
+        """Read ftyp + moov + sidx from the file head → exact segment table."""
+        length = SIDX_HEAD_BYTES
+        for attempt in range(3):
+            head = self._fetch_head(stream.url, headers, length)
+            if head is None:
+                return None, None
+            try:
+                index = parse_fmp4_index(head)
+                break
+            except NeedMoreData as e:
+                # Big moov: re-fetch past the box we need, with room for the sidx.
+                # A short read means the file ended, so there is no sidx to find.
+                if attempt < 2 and len(head) == length and e.required_len > length:
+                    length = e.required_len + SIDX_HEAD_BYTES
+                    continue
+                logger.warning("No complete sidx for %s in %d bytes; using proportional split", song_id, len(head))
+                return None, None
+            except ValueError as e:
+                logger.warning("No usable sidx for %s (%s); using proportional split", song_id, e)
+                return None, None
+
+        if stream.filesize and index.total_bytes != stream.filesize:
+            logger.warning(
+                "sidx for %s covers %d bytes but the file has %d; using proportional split",
+                song_id, index.total_bytes, stream.filesize,
+            )
+            return None, None
+        if stream.duration_ms and abs(index.duration_ms - stream.duration_ms) > 1000:
+            logger.warning(
+                "sidx durations for %s sum to %d ms, extraction says %d ms",
+                song_id, index.duration_ms, stream.duration_ms,
+            )
+
+        segments = [
+            DashSegmentInfo(index=i, byte_start=start, byte_end=end, duration_ms=dur, url=stream.url)
+            for i, (start, end, dur) in enumerate(index.segments)
+        ]
+        info = StreamInfo(
+            song_id=song_id,
+            title=stream.title,
+            duration_ms=index.duration_ms,
+            mime_type=stream.mime_type,
+            init_range=(0, index.init_end),  # ftyp + moov + sidx: virtual file == CDN file
+            segments=segments,
+            is_dash=True,
+            base_url=stream.url,
+            itag=stream.itag,
+        )
+        logger.info(
+            "Segment table for %s from sidx: %d segments, %d bytes, %.1fs, %s",
+            song_id, len(segments), info.total_bytes, info.duration_ms / 1000, stream.mime_type,
+        )
+        return info, head
+
+    def _build_proportional_info(
         self, song_id: str, stream: ExtractedStream, headers: Dict[str, str],
     ) -> Optional[StreamInfo]:
-        """Progressive fallback: proportional segments from the extracted size and duration."""
+        """Fallback (WebM, or no sidx): proportional segments from the extracted size and duration."""
         url = stream.url
         total_bytes = stream.filesize or self._probe_content_length(url, headers)
         if total_bytes <= 0:
-            logger.error("Cannot determine size for progressive stream %s", song_id)
+            logger.error("Cannot determine size for stream %s", song_id)
             return None
 
         duration_ms = stream.duration_ms
         if duration_ms <= 0:
-            logger.error("Unknown duration for progressive stream %s", song_id)
+            logger.error("Unknown duration for stream %s", song_id)
             return None
 
         bytes_per_ms = total_bytes / duration_ms
@@ -520,12 +576,79 @@ class StreamingService:
             segments=segments,
             is_dash=False,
             base_url=url,
+            itag=stream.itag,
         )
         logger.info(
-            "Progressive stream for %s: %d segments, %d bytes, %.1fs, %s",
+            "Proportional segments for %s: %d segments, %d bytes, %.1fs, %s",
             song_id, len(segments), total_bytes, duration_ms / 1000, stream.mime_type,
         )
         return info
+
+    # --- Cache identity (layout.json) ---
+
+    def _layout_path(self, song_id: str) -> Path:
+        return settings.segments_dir / song_id / LAYOUT_MANIFEST
+
+    def _read_layout_id(self, song_id: str) -> Optional[str]:
+        try:
+            return json.loads(self._layout_path(song_id).read_text(encoding="utf-8")).get("layout_id")
+        except (OSError, ValueError, AttributeError):
+            return None
+
+    def _apply_layout(self, info: StreamInfo) -> None:
+        """Purge the song's cache if it was written under another layout, then record this one."""
+        song_id = info.song_id
+        song_dir = settings.segments_dir / song_id
+        on_disk = self._read_layout_id(song_id)
+        if on_disk == info.layout_id:
+            return
+        if song_dir.exists() and any(song_dir.iterdir()):
+            logger.info(
+                "Layout changed for %s (%s -> %s, %s): purging cached segments",
+                song_id, on_disk or "none", info.layout_id, info.method,
+            )
+            self._purge_song(song_id)
+        self._write_layout_manifest(info)
+
+    def _write_layout_manifest(self, info: StreamInfo) -> None:
+        manifest = {
+            "layout_id": info.layout_id,
+            "method": info.method,
+            "itag": info.itag,
+            "mime_type": info.mime_type,
+            "total_bytes": info.total_bytes,
+            "duration_ms": info.duration_ms,
+            "init_range": list(info.init_range),
+            "segments": [[s.byte_start, s.byte_end, s.duration_ms] for s in info.segments],
+        }
+        path = self._layout_path(info.song_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as f:  # P15: tmp + os.replace
+            json.dump(manifest, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(str(tmp), str(path))
+
+    def _purge_song(self, song_id: str) -> None:
+        """Delete a song's cached files, DB rows and in-memory statuses."""
+        shutil.rmtree(settings.segments_dir / song_id, ignore_errors=True)
+        try:
+            with session_scope() as session:
+                session.query(Segment).filter(Segment.song_id == song_id).delete()
+        except Exception as e:
+            logger.error("Failed to delete segment rows for %s: %s", song_id, e)
+        with self._seg_status_lock:
+            self._seg_status.pop(song_id, None)
+
+    def _cache_init_from_head(self, info: StreamInfo, head: bytes) -> None:
+        """The head fetch already covers [0, init_end]: store it as init.bin."""
+        if self._segment_path(info.song_id, -1).exists():
+            return
+        start, end = info.init_range
+        self._atomic_write_segment(info.song_id, -1, head[start:end + 1])
+        self._record_segment_db(info.song_id, -1, start, end, end - start + 1, 0, info.layout_id)
+        self.set_segment_status(info.song_id, -1, SegmentStatus.DOWNLOADED)
 
     def _probe_content_length(self, url: str, headers: Dict[str, str]) -> int:
         """P5: content length when extraction didn't provide it. Returns 0 on failure."""
@@ -664,7 +787,7 @@ class StreamingService:
                 )
                 if success:
                     self.set_segment_status(song_id, index, SegmentStatus.DOWNLOADED)
-                    self._record_segment_db(song_id, index, byte_start, byte_end, expected_size, duration_ms)
+                    self._record_segment_db(song_id, index, byte_start, byte_end, expected_size, duration_ms, info.layout_id)
                     self._touch_segment(song_id, index)
                     self.cleanup_cache()
                     return
@@ -699,7 +822,7 @@ class StreamingService:
                     )
                     if success:
                         self.set_segment_status(song_id, index, SegmentStatus.DOWNLOADED)
-                        self._record_segment_db(song_id, index, byte_start, byte_end, expected_size, duration_ms)
+                        self._record_segment_db(song_id, index, byte_start, byte_end, expected_size, duration_ms, info.layout_id)
                         self._touch_segment(song_id, index)
                         self.cleanup_cache()
                         return
@@ -833,7 +956,7 @@ class StreamingService:
 
     def _record_segment_db(
         self, song_id: str, index: int, byte_start: int, byte_end: int,
-        size_bytes: int, duration_ms: int,
+        size_bytes: int, duration_ms: int, layout_id: Optional[str] = None,
     ) -> None:
         try:
             with session_scope() as session:
@@ -841,6 +964,7 @@ class StreamingService:
                 if existing:
                     existing.status = SegmentStatus.DOWNLOADED.value
                     existing.size_bytes = size_bytes
+                    existing.layout_id = layout_id
                     existing.last_accessed = dt.datetime.utcnow()
                 else:
                     session.add(Segment(
@@ -852,6 +976,7 @@ class StreamingService:
                         duration_ms=duration_ms,
                         status=SegmentStatus.DOWNLOADED.value,
                         file_path=str(self._segment_path(song_id, index)),
+                        layout_id=layout_id,
                     ))
         except Exception as e:
             logger.error("Failed to record segment DB row %s seg %d: %s", song_id, index, e)
@@ -898,7 +1023,7 @@ class StreamingService:
                 if not song_dir.is_dir():
                     continue
                 for f in song_dir.iterdir():
-                    if f.is_file() and not f.name.endswith(".tmp"):
+                    if f.is_file() and not f.name.endswith(".tmp") and f.name != LAYOUT_MANIFEST:
                         try:
                             stat = f.stat()
                             total += stat.st_size
@@ -989,7 +1114,7 @@ class StreamingService:
                 song_bytes = 0
                 song_files = 0
                 for f in song_dir.iterdir():
-                    if f.is_file() and not f.name.endswith(".tmp"):
+                    if f.is_file() and not f.name.endswith(".tmp") and f.name != LAYOUT_MANIFEST:
                         try:
                             size = f.stat().st_size
                             total_bytes += size
@@ -1025,6 +1150,7 @@ class StreamingService:
         orphans_deleted = 0
         missing_deleted = 0
         mismatches_deleted = 0
+        legacy_dirs_deleted = 0
 
         db_rows: Dict[Tuple[str, int], Segment] = {}
         try:
@@ -1035,12 +1161,19 @@ class StreamingService:
             logger.error("Failed to read segment DB rows: %s", e)
             return
 
-        for song_dir in segments_dir.iterdir():
+        for song_dir in list(segments_dir.iterdir()):
             if not song_dir.is_dir():
                 continue
             song_id = song_dir.name
+            layout_id = self._read_layout_id(song_id)
+            if layout_id is None:
+                # No layout.json: written before Phase 2 (proportional layout) or
+                # never completed — its segments can't be trusted
+                self._purge_song(song_id)
+                legacy_dirs_deleted += 1
+                continue
             for f in song_dir.iterdir():
-                if not f.is_file():
+                if not f.is_file() or f.name == LAYOUT_MANIFEST:
                     continue
                 if f.name.endswith(".tmp"):
                     try:
@@ -1074,7 +1207,7 @@ class StreamingService:
                 else:
                     try:
                         actual_size = f.stat().st_size
-                        if actual_size != row.size_bytes:
+                        if actual_size != row.size_bytes or row.layout_id != layout_id:
                             f.unlink()
                             with session_scope() as session:
                                 s = session.get(Segment, key)
@@ -1086,7 +1219,7 @@ class StreamingService:
                     except OSError:
                         pass
 
-        # Delete DB rows with missing files
+        # Delete DB rows with missing files (purged legacy dirs included)
         for (song_id, index) in list(db_rows.keys()):
             path = self._segment_path(song_id, index)
             if not path.exists():
@@ -1100,8 +1233,8 @@ class StreamingService:
                     pass
 
         logger.info(
-            "Reconciliation done: %d orphans, %d missing, %d mismatches removed",
-            orphans_deleted, missing_deleted, mismatches_deleted,
+            "Reconciliation done: %d orphans, %d missing, %d mismatches, %d song dirs without %s removed",
+            orphans_deleted, missing_deleted, mismatches_deleted, legacy_dirs_deleted, LAYOUT_MANIFEST,
         )
 
     # --- Audio serving (Range support, §6.7, P16) ---
@@ -1214,7 +1347,10 @@ class StreamingService:
             "mime_type": info.mime_type,
             "init_range": list(info.init_range),
             "total_bytes": info.total_bytes,
-            "is_dash": info.is_dash,
+            "is_dash": info.is_dash,  # True = exact segment table (sidx), False = proportional
+            "method": info.method,
+            "itag": info.itag,
+            "layout_id": info.layout_id,
             "segment_count": len(info.segments),
             "segments": [
                 {
