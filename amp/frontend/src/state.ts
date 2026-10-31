@@ -3,10 +3,16 @@
  *
  * The backend has no queue API — the queue lives here.
  * Playback position is reported to the backend every 2s (drives buffer-ahead).
+ * Queue, current index and volume persist in localStorage (amp.queue.v1) and
+ * are restored paused; the next song is prefetched near the end of this one.
  */
 
 import { useSyncExternalStore, useCallback } from "react";
-import type { Song } from "./api";
+import { api, type Song } from "./api";
+import { loadQueue, saveQueue } from "./player/persistence";
+import { shouldPrefetch } from "./player/prefetch";
+
+const PERSIST_DEBOUNCE_MS = 500;
 
 // ---------------------------------------------------------------------------
 // Queue state
@@ -38,6 +44,34 @@ class StateStore {
   private listeners: Set<Listener> = new Set();
   private audio: HTMLAudioElement | null = null;
   private positionTimer: ReturnType<typeof setInterval> | null = null;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private restored = false;                   // currentSong came from storage: don't autoplay it
+  private prefetchedFor: string | null = null; // current song id whose successor was prefetched
+
+  constructor() {
+    const saved = loadQueue();
+    if (saved && saved.currentIndex >= 0) {
+      const song = saved.songs[saved.currentIndex];
+      this.state = {
+        ...this.state,
+        songs: saved.songs,
+        currentIndex: saved.currentIndex,
+        currentSong: song,
+        durationMs: song.duration_ms,
+        volume: saved.volume,
+      };
+      this.restored = true;
+    } else if (saved) {
+      this.state = { ...this.state, volume: saved.volume };
+    }
+  }
+
+  /** True once if the current song was restored from storage (show it paused). */
+  takeRestored(): boolean {
+    const r = this.restored;
+    this.restored = false;
+    return r;
+  }
 
   // --- Subscription (useSyncExternalStore) ---
 
@@ -53,8 +87,22 @@ class StateStore {
   }
 
   private setState(partial: Partial<QueueState>): void {
-    this.state = { ...this.state, ...partial };
+    const prev = this.state;
+    this.state = { ...prev, ...partial };
+    if (this.state.songs !== prev.songs || this.state.currentIndex !== prev.currentIndex
+        || this.state.volume !== prev.volume) {
+      this.schedulePersist();
+    }
     this.emit();
+  }
+
+  private schedulePersist(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      const { songs, currentIndex, volume } = this.state;
+      saveQueue({ songs, currentIndex, volume });
+    }, PERSIST_DEBOUNCE_MS);
   }
 
   // --- Audio element ---
@@ -75,6 +123,7 @@ class StateStore {
     this.audio = audio;
 
     if (audio) {
+      audio.volume = this.state.volume;
       audio.addEventListener("timeupdate", this._onTimeUpdate);
       audio.addEventListener("ended", this._onEnded);
       audio.addEventListener("play", this._onPlay);
@@ -212,10 +261,23 @@ class StateStore {
   // --- Audio event handlers ---
 
   private _onTimeUpdate = (): void => {
-    if (this.audio) {
-      this.setState({ positionMs: Math.floor(this.audio.currentTime * 1000) });
-    }
+    if (!this.audio) return;
+    const positionMs = Math.floor(this.audio.currentTime * 1000);
+    this.setState({ positionMs });
+    this.maybePrefetchNext(positionMs);
   };
+
+  /** Once per current song: resolve the next song and queue its first segments (LOW). */
+  private maybePrefetchNext(positionMs: number): void {
+    const { currentSong, songs, currentIndex, durationMs } = this.state;
+    if (!currentSong || this.prefetchedFor === currentSong.id) return;
+    const next = songs[currentIndex + 1];
+    if (!next || !shouldPrefetch(positionMs, durationMs)) return;
+    this.prefetchedFor = currentSong.id;
+    api.bufferAhead(next.id, "prefetch").catch((e) => {
+      console.warn(`Prefetch of ${next.id} failed:`, e);
+    });
+  }
 
   private _onEnded = (): void => {
     this.setState({ isPlaying: false });
@@ -235,7 +297,7 @@ class StateStore {
   };
 
   private _onLoadedMetadata = (): void => {
-    if (this.audio) {
+    if (this.audio && Number.isFinite(this.audio.duration)) {
       this.setState({ durationMs: Math.floor(this.audio.duration * 1000) });
     }
   };
