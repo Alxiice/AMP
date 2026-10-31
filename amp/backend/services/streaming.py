@@ -1069,7 +1069,7 @@ class StreamingService:
 
             if attempt < settings.MAX_RETRIES - 1:
                 backoff = [0.5, 1.0, 2.0][min(attempt, 2)]
-                jitter = random.uniform(0, 0.3)
+                jitter = random.uniform(0, 0.3)  # noqa: S311 - backoff jitter, not crypto
                 time.sleep(backoff + jitter)
 
         self.set_segment_status(song_id, index, SegmentStatus.ERROR)

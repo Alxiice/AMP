@@ -148,11 +148,11 @@ def get_user_likes(db: Session = Depends(get_db)):
         if liked:
             return [
                 SongResponse(
-                    id=l.song.id, title=l.song.title, artist=l.song.artist,
-                    album=l.song.album, duration_ms=l.song.duration_ms,
-                    thumbnail_url=l.song.thumbnail_url,
+                    id=row.song.id, title=row.song.title, artist=row.song.artist,
+                    album=row.song.album, duration_ms=row.song.duration_ms,
+                    thumbnail_url=row.song.thumbnail_url,
                 )
-                for l in liked
+                for row in liked
             ]
         raise HTTPException(status_code=502, detail=f"Failed to fetch likes: {e}")
 
