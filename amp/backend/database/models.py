@@ -22,7 +22,8 @@ class Base(DeclarativeBase):
 
 
 def _utcnow() -> dt.datetime:
-    return dt.datetime.utcnow()
+    # Naive UTC, like the rows already stored (SQLite DateTime keeps no tzinfo)
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)
 
 
 class Song(Base):
