@@ -45,6 +45,18 @@
 
 **Virtualenv**: dev builds of the Tauri app run `amp/venv/Scripts/python.exe` (Windows) or `amp/venv/bin/python` (Unix), or `AMP_PYTHON`. Release builds run the PyInstaller sidecar.
 
+## Commit Guidelines
+
+To keep the repository history clean and maintainable, follow these commit guidelines:
+
+1. **Atomic commits**: Each commit should represent a single logical change. Do not bundle multiple unrelated changes into one commit.
+2. **Clear scope**: A commit should be self-contained and complete for its stated purpose. If a change requires modifications across multiple files for a single feature or fix, that is acceptable as one commit.
+3. **Descriptive messages**: Use clear, concise commit messages that explain **what** changed and **why**. Follow the convention: `<type>: <description>` where type is one of: `feat`, `fix`, `docs`, `refactor`, `cleanup`, `test`, `chore`.
+4. **Avoid mega-commits**: Do not combine unrelated features, fixes, or cleanup into a single large commit. Split them into separate, focused commits.
+5. **Branch organization**: Use feature branches (`feat/<name>`, `fix/<name>`, `docs/<name>`, `refactor/<name>`) for development. Keep `master` clean with logical, reviewable commits.
+6. **Documentation updates**: When changing behavior, update the corresponding documentation page in `docs/` and verify `mkdocs build --strict` passes.
+7. **Test updates**: Include test changes in the same commit as the code they test, when they are directly related to that code change.
+
 ### Revision 2 — Bug fixes + control panel + segment visualization (2026-10-27)
 
 **User-reported issues fixed:**
