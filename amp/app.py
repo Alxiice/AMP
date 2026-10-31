@@ -5,7 +5,11 @@ Standard library only. Provides:
 
   Top bar:
     - Backend:  Start / Stop / Restart / Force Kill (port 8000)
-    - Frontend: Start / Stop / Restart / Force Kill (port 1420)
+    - Frontend: Web app / Desktop app mode + Start / Stop / Restart / Force Kill (port 1420)
+        Web app:     Vite dev server, opened in the selected browser once it is up;
+                     also starts the backend (a browser can't spawn it)
+        Desktop app: `npm run tauri dev` (Vite + Tauri window; the app spawns its own
+                     backend, or reuses one already on :8000)
     - Browser selector dropdown + Open in Browser
 
   Tab zone (ttk.Notebook):
@@ -67,7 +71,10 @@ DB_PATH = AMP_DIR / "userdb.sqlite"
 APP_LOG_PATH = AMP_DIR / ".amp" / "logs" / "app.log"
 SEGMENTS_DIR = AMP_DIR / ".amp" / "cache" / "segments"
 
-MAX_LOG_LINES = 2000        # lines kept in memory / shown in the log widget
+FRONTEND_MODES = {"web": "Web app", "desktop": "Desktop app"}
+FRONTEND_READY_TIMEOUT_S = 60  # web mode: wait this long for Vite before opening the browser
+
+MAX_LOG_LINES = 2000       # lines kept in memory / shown in the log widget
 MAX_CHUNK_ROWS = 5000       # rows shown in the chunk table
 LOG_RELOAD_BYTES = 256 * 1024  # how much of app.log "Reload All" re-reads
 
@@ -627,6 +634,8 @@ class AppLauncher(tk.Tk):
         self._auto_scroll = tk.BooleanVar(value=True)
         self._browsers: dict[str, str] = {}
         self._browser_var = tk.StringVar()
+        self._frontend_mode = tk.StringVar(value="web")  # key of FRONTEND_MODES
+        self._frontend_started_mode = "web"              # mode of the running frontend
         self._chunks_auto_refresh = tk.BooleanVar(value=True)
         self._chunks_filter_var = tk.StringVar()
         self._chunk_rows: list[tuple] = []
@@ -714,10 +723,21 @@ class AppLauncher(tk.Tk):
         self._cbtn(be_frame, "Force Kill Port", self._kill_backend_port, ERROR_CLR)
 
         # --- Frontend section ---
-        fe_frame = tk.LabelFrame(top, text="  Frontend (Vite :1420)  ",
+        fe_frame = tk.LabelFrame(top, text="  Frontend (:1420)  ",
                                  bg=BG_ELEV, fg=FG, font=("Segoe UI", 10, "bold"),
                                  padx=10, pady=8)
         fe_frame.grid(row=1, column=1, padx=4, pady=2, sticky=tk.W)
+
+        # Mode: locked while the frontend runs (Restart keeps the running mode)
+        self.fe_mode_buttons = [
+            tk.Radiobutton(fe_frame, text=label, value=key, variable=self._frontend_mode,
+                           bg=BG_ELEV, fg=FG, selectcolor=BG_INPUT,
+                           activebackground=BG_ELEV, activeforeground=FG,
+                           font=("Segoe UI", 9))
+            for key, label in FRONTEND_MODES.items()
+        ]
+        for rb in self.fe_mode_buttons:
+            rb.pack(side=tk.LEFT)
 
         self.fe_status = tk.Label(fe_frame, text="● Stopped", font=("Segoe UI", 10, "bold"),
                                   bg=BG_ELEV, fg=FG_DIM)
@@ -1071,11 +1091,15 @@ class AppLauncher(tk.Tk):
             "--host", "127.0.0.1", "--port", str(BACKEND_PORT),
         ]
 
-    def _frontend_cmd(self) -> list[str]:
+    def _frontend_cmd(self, mode: str) -> list[str]:
+        if mode == "desktop":
+            # Tauri runs `npm run dev` itself (beforeDevCommand) and opens the window on devUrl
+            return [NPM_CMD, "run", "tauri", "dev"]
         return [NPM_CMD, "run", "dev", "--", "--port", str(FRONTEND_PORT),
                 "--host", "127.0.0.1"]
 
-    def _launch(self, pm: ProcessManager, cmd: list[str], cwd: str, port: int) -> None:
+    def _launch(self, pm: ProcessManager, cmd: list[str], cwd: str, port: int,
+                on_ready: Optional[Callable[[], None]] = None) -> None:
         def work() -> None:
             if not pm.is_running() and is_port_open(port):
                 self._append_log(
@@ -1083,9 +1107,11 @@ class AppLauncher(tk.Tk):
                     f"use 'Force Kill Port' first")
                 return
             pm.start(cmd, cwd)
+            self._when_listening(pm, port, on_ready)
         threading.Thread(target=work, daemon=True).start()
 
-    def _relaunch(self, pm: ProcessManager, cmd: list[str], cwd: str, port: int) -> None:
+    def _relaunch(self, pm: ProcessManager, cmd: list[str], cwd: str, port: int,
+                  on_ready: Optional[Callable[[], None]] = None) -> None:
         def work() -> None:
             pm.stop(quiet=True)
             if not wait_port_free(port):
@@ -1093,7 +1119,23 @@ class AppLauncher(tk.Tk):
                     f"[system] Port {port} is still in use — use 'Force Kill Port', then Start")
                 return
             pm.start(cmd, cwd)
+            self._when_listening(pm, port, on_ready)
         threading.Thread(target=work, daemon=True).start()
+
+    def _when_listening(self, pm: ProcessManager, port: int,
+                        on_ready: Optional[Callable[[], None]]) -> None:
+        """(Worker thread) run *on_ready* on the UI thread once *port* accepts connections."""
+        if on_ready is None:
+            return
+        deadline = time.monotonic() + FRONTEND_READY_TIMEOUT_S
+        while pm.is_running() and time.monotonic() < deadline:
+            if is_port_open(port):
+                self._post(on_ready)
+                return
+            time.sleep(0.5)
+        if pm.is_running():
+            self._append_log(f"[system] Port {port} not up after {FRONTEND_READY_TIMEOUT_S}s — "
+                             f"open it with 'Open in Browser' once it is")
 
     def _start_backend(self) -> None:
         self._launch(self.backend, self._backend_cmd(), str(AMP_DIR), BACKEND_PORT)
@@ -1108,13 +1150,40 @@ class AppLauncher(tk.Tk):
         self._kill_port_async(BACKEND_PORT)
 
     def _start_frontend(self) -> None:
-        self._launch(self.frontend, self._frontend_cmd(), str(FRONTEND_DIR), FRONTEND_PORT)
+        if self.frontend.is_running():
+            self._append_log(f"[frontend] Already running "
+                             f"({FRONTEND_MODES[self._frontend_started_mode]}) — Stop it first")
+            return
+        mode = self._frontend_mode.get()
+        self._frontend_started_mode = mode
+        self._append_log(f"[system] Launching the {FRONTEND_MODES[mode].lower()}")
+        if mode == "desktop":
+            self._append_log("[system] First desktop launch compiles the Rust shell (a few minutes)")
+            self._launch(self.frontend, self._frontend_cmd(mode), str(FRONTEND_DIR), FRONTEND_PORT)
+            return
+        self._ensure_backend()
+        self._launch(self.frontend, self._frontend_cmd(mode), str(FRONTEND_DIR), FRONTEND_PORT,
+                     on_ready=self._open_browser)
 
     def _stop_frontend(self) -> None:
         threading.Thread(target=self.frontend.stop, daemon=True).start()
 
     def _restart_frontend(self) -> None:
-        self._relaunch(self.frontend, self._frontend_cmd(), str(FRONTEND_DIR), FRONTEND_PORT)
+        mode = self._frontend_started_mode if self.frontend.is_running() else self._frontend_mode.get()
+        self._frontend_started_mode = mode
+        if mode == "web":
+            self._ensure_backend()
+        # no browser re-open on restart: the open tab reconnects to Vite by itself
+        self._relaunch(self.frontend, self._frontend_cmd(mode), str(FRONTEND_DIR), FRONTEND_PORT)
+
+    def _ensure_backend(self) -> None:
+        """The web app can't spawn the backend (no Tauri), so start ours unless one is up."""
+        def work() -> None:
+            if self.backend.is_running() or is_port_open(BACKEND_PORT):
+                return
+            self._append_log("[system] Starting the backend for the web app")
+            self.backend.start(self._backend_cmd(), str(AMP_DIR))
+        threading.Thread(target=work, daemon=True).start()
 
     def _kill_frontend_port(self) -> None:
         self._kill_port_async(FRONTEND_PORT)
@@ -1145,15 +1214,20 @@ class AppLauncher(tk.Tk):
             self._status_busy = False
 
     def _apply_status(self, be: tuple, fe: tuple) -> None:
-        for label, (running, pid, port_open) in ((self.be_status, be), (self.fe_status, fe)):
+        fe_mode = f"{FRONTEND_MODES[self._frontend_started_mode]}, "
+        for label, (running, pid, port_open), mode in ((self.be_status, be, ""),
+                                                       (self.fe_status, fe, fe_mode)):
             if running and port_open:
-                label.config(text=f"● Running (PID {pid})", fg=SUCCESS)
+                label.config(text=f"● Running ({mode}PID {pid})", fg=SUCCESS)
             elif running:
-                label.config(text=f"● Starting… (PID {pid})", fg=WARNING)
+                label.config(text=f"● Starting… ({mode}PID {pid})", fg=WARNING)
             elif port_open:
                 label.config(text="● Port in use (external)", fg=WARNING)
             else:
                 label.config(text="● Stopped", fg=FG_DIM)
+        mode_state = tk.DISABLED if fe[0] else tk.NORMAL
+        for rb in self.fe_mode_buttons:
+            rb.config(state=mode_state)
 
     # ------------------------------------------------------------------
     # Log handling
