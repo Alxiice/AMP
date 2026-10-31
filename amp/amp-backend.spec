@@ -69,6 +69,7 @@ a = Analysis(
         "backend.services",
         "backend.services.auth",
         "backend.services.youtube",
+        "backend.services.extractor",
         "backend.services.streaming",
         "backend.database",
         "backend.database.models",

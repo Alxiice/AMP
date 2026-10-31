@@ -69,7 +69,9 @@ def configure_logging() -> None:
     fh_stream = logging.FileHandler(stream_path, encoding="utf-8")
     fh_stream.setFormatter(fmt)
     fh_stream.setLevel(logging.DEBUG)
-    fh_stream.addFilter(lambda r: r.name.startswith("backend.services.streaming") or r.name.startswith("backend.utils.dash"))
+    fh_stream.addFilter(lambda r: r.name.startswith((
+        "backend.services.streaming", "backend.services.extractor", "backend.utils.dash",
+    )))
     root.addHandler(fh_stream)
 
     # In-memory ring

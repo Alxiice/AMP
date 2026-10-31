@@ -123,6 +123,7 @@ All settings via environment variables or `.env`:
 | `CACHE_MAX_SIZE_MB` | `500` | LRU eviction threshold |
 | `SEGMENT_BUFFER_AHEAD_SEC` | `30` | Pre-fetch window |
 | `STREAM_FORMAT` | `140` | itag (140=AAC/MP4, 251=Opus/WebM) |
+| `YTDLP_PLAYER_CLIENTS` | `["visionos","default"]` | yt-dlp player clients tried in order (JSON in env); `default` = yt-dlp's choice |
 | `DOWNLOAD_WORKERS` | `4` | Download thread pool size |
 | `MAX_RETRIES` | `3` | Retry attempts per segment |
 

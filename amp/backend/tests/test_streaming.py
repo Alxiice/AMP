@@ -378,170 +378,6 @@ class TestCacheEviction:
 
 
 # ---------------------------------------------------------------------------
-# _try_extract — yt-dlp extraction with format preference (Revision 4 fix)
-# ---------------------------------------------------------------------------
-
-
-class TestTryExtract:
-    """Tests for StreamingService._try_extract — format selection and error handling."""
-
-    def _make_svc(self):
-        svc = StreamingService()
-        return svc
-
-    def test_download_error_returns_none(self):
-        """DownloadError from yt-dlp should be caught, returning None (not raising).
-
-        This is the core Revision 4 fix: previously the exception propagated,
-        preventing the fallback to 'best' from ever running.
-        """
-        from yt_dlp.utils import DownloadError
-
-        svc = self._make_svc()
-        ydl_opts = {"format": "bestaudio/best", "quiet": True}
-
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.side_effect = DownloadError("Requested format is not available")
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-
-            result = svc._try_extract(ydl_opts, "https://youtube.com/watch?v=test", "testSong123")
-            assert result is None
-
-    def test_prefers_itag_140_from_formats(self):
-        """When formats list contains itag 140, it should be preferred over yt-dlp's selection."""
-        svc = self._make_svc()
-        ydl_opts = {"format": "bestaudio/best", "quiet": True}
-
-        info = {
-            "url": "https://cdn.example.com/itag251.webm",
-            "format_id": "251",
-            "acodec": "opus",
-            "vcodec": "none",
-            "formats": [
-                {"format_id": "251", "acodec": "opus", "vcodec": "none", "url": "https://cdn.example.com/itag251.webm", "ext": "webm", "abr": 160},
-                {"format_id": "140", "acodec": "mp4a.40.2", "vcodec": "none", "url": "https://cdn.example.com/itag140.m4a", "ext": "m4a", "abr": 128},
-            ],
-        }
-
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.return_value = info
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-
-            result = svc._try_extract(ydl_opts, "https://youtube.com/watch?v=test", "testSong123")
-            assert result == "https://cdn.example.com/itag140.m4a"
-
-    def test_falls_back_to_selected_url_when_no_itag_140(self):
-        """When itag 140 is not in formats, use yt-dlp's selected format URL."""
-        svc = self._make_svc()
-        ydl_opts = {"format": "bestaudio/best", "quiet": True}
-
-        info = {
-            "url": "https://cdn.example.com/itag251.webm",
-            "format_id": "251",
-            "acodec": "opus",
-            "vcodec": "none",
-            "formats": [
-                {"format_id": "251", "acodec": "opus", "vcodec": "none", "url": "https://cdn.example.com/itag251.webm", "ext": "webm", "abr": 160},
-            ],
-        }
-
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.return_value = info
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-
-            result = svc._try_extract(ydl_opts, "https://youtube.com/watch?v=test", "testSong123")
-            assert result == "https://cdn.example.com/itag251.webm"
-
-    def test_prefers_mp4_over_webm_in_audio_fallback(self):
-        """When no itag 140, prefer MP4/M4A container over WebM for webview compat."""
-        svc = self._make_svc()
-        ydl_opts = {"format": "best", "quiet": True}
-
-        info = {
-            "url": "https://cdn.example.com/video.mp4",
-            "format_id": "22",
-            "acodec": "mp4a.40.2",
-            "vcodec": "avc1.64001F",
-            "formats": [
-                {"format_id": "251", "acodec": "opus", "vcodec": "none", "url": "https://cdn.example.com/itag251.webm", "ext": "webm", "abr": 160},
-                {"format_id": "140", "acodec": "mp4a.40.2", "vcodec": "none", "url": "https://cdn.example.com/itag140.m4a", "ext": "m4a", "abr": 128},
-                {"format_id": "139", "acodec": "mp4a.40.5", "vcodec": "none", "url": "https://cdn.example.com/itag139.m4a", "ext": "m4a", "abr": 48},
-            ],
-        }
-
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.return_value = info
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-
-            # itag 140 should be found first in the formats scan
-            result = svc._try_extract(ydl_opts, "https://youtube.com/watch?v=test", "testSong123")
-            assert result == "https://cdn.example.com/itag140.m4a"
-
-    def test_generic_exception_returns_none(self):
-        """Any unexpected exception should be caught and return None."""
-        svc = self._make_svc()
-        ydl_opts = {"format": "bestaudio/best", "quiet": True}
-
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.side_effect = RuntimeError("network timeout")
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-
-            result = svc._try_extract(ydl_opts, "https://youtube.com/watch?v=test", "testSong123")
-            assert result is None
-
-
-# ---------------------------------------------------------------------------
-# build_ydl_opts — option shapes yt-dlp actually honours (F2)
-# ---------------------------------------------------------------------------
-
-
-class TestBuildYdlOpts:
-    def test_ydl_opts_player_client_applied(self):
-        """yt-dlp must actually see the player_client (no network)."""
-        from yt_dlp import YoutubeDL
-        from backend.services.streaming import build_ydl_opts
-
-        with YoutubeDL(build_ydl_opts("android", None, None)) as ydl:
-            ie = ydl.get_info_extractor("Youtube")
-            assert ie._configuration_arg("player_client") == ["android"]
-
-    def test_ydl_opts_js_runtime_top_level(self):
-        from backend.services.streaming import build_ydl_opts
-
-        opts = build_ydl_opts("android", "bestaudio/best", "/tmp/cookies.txt")
-        assert opts["js_runtimes"] == {"node": {}}
-        assert isinstance(opts["extractor_args"], dict)
-        assert isinstance(opts["extractor_args"]["youtube"], dict)
-        assert opts["extractor_args"]["youtube"]["player_client"] == ["android"]
-        assert opts["format"] == "bestaudio/best"
-        assert opts["cookiefile"] == "/tmp/cookies.txt"
-        assert "nocheckcertificate" not in opts
-
-    def test_ydl_opts_default_client(self):
-        from backend.services.streaming import build_ydl_opts
-
-        opts = build_ydl_opts(None, None, None)
-        assert "extractor_args" not in opts
-        assert "format" not in opts
-        assert "cookiefile" not in opts
-
-
-# ---------------------------------------------------------------------------
 # CDN 403 handling (F9) and buffer-ahead window (F10)
 # ---------------------------------------------------------------------------
 
@@ -561,6 +397,18 @@ def _make_stream_info(song_id, n_segments, seg_ms=5000, url="https://cdn.example
     )
 
 
+def _extracted(song_id="dQw4w9WgXcQ", url="https://cdn.example.com/a", **kw):
+    from backend.services.extractor import ExtractedStream
+
+    fields = dict(
+        song_id=song_id, url=url, itag="140", ext="m4a", mime_type="audio/mp4",
+        acodec="mp4a.40.2", is_audio_only=True, filesize=None, duration_ms=180_000,
+        title="t", expires_at=time.time() + 3600, player_client="default",
+    )
+    fields.update(kw)
+    return ExtractedStream(**fields)
+
+
 class TestCdn403:
     def test_403_does_not_change_auth_state(self, temp_dirs):
         from backend.services.auth import AuthState, get_auth_service
@@ -573,6 +421,7 @@ class TestCdn403:
 
         svc = StreamingService()
         svc._stream_info_cache.set(song_id, _make_stream_info(song_id, 3))
+        svc._extractor._deps = {"node": True}
         states = []
         cookie_files = []
 
@@ -582,15 +431,16 @@ class TestCdn403:
                 raise _Auth403Error("403 Forbidden")
             return True
 
-        def try_extract(ydl_opts, watch_url, sid, prefer_audio=False):
+        def extract_with_client(sid, client, label, cookie_file):
             states.append(auth.state)
-            cookie_files.append(ydl_opts.get("cookiefile"))
-            return "https://cdn.example.com/fresh"
+            cookie_files.append(cookie_file)
+            return _extracted(sid, url="https://cdn.example.com/fresh")
 
         fresh = _make_stream_info(song_id, 3, url="https://cdn.example.com/fresh")
-        with patch.object(svc, "_download_segment_attempt", side_effect=attempt), \
-             patch.object(svc, "_try_extract", side_effect=try_extract), \
-             patch.object(svc, "_build_stream_info", return_value=fresh):
+        with patch("backend.config.settings.YTDLP_PLAYER_CLIENTS", ["default"]), \
+             patch.object(svc, "_download_segment_attempt", side_effect=attempt), \
+             patch.object(svc._extractor, "_extract_with_client", side_effect=extract_with_client), \
+             patch.object(svc, "_build_from_stream", return_value=fresh):
             svc._download_segment_with_retry(song_id, 0, svc.get_epoch(song_id))
 
         assert svc.get_segment_status(song_id, 0) == SegmentStatus.DOWNLOADED
@@ -599,6 +449,116 @@ class TestCdn403:
         assert auth.state == AuthState.SIGNED_IN
         assert cookie_files and cookie_files[0] is not None
 
+    def test_concurrent_403s_rebuild_once(self, temp_dirs):
+        """4 workers hitting a 403 on the same URL cause one re-extraction (P4)."""
+        import threading
+
+        song_id = "dQw4w9WgXcQ"
+        svc = StreamingService()
+        stale = _make_stream_info(song_id, 3, url="https://cdn.example.com/old")
+        svc._stream_info_cache.set(song_id, stale)
+        gate = threading.Event()
+
+        def refresh(sid, stale_url):
+            gate.wait(2)
+            return _extracted(sid, url="https://cdn.example.com/new")
+
+        fresh = _make_stream_info(song_id, 3, url="https://cdn.example.com/new")
+        results = []
+        with patch.object(svc._extractor, "refresh", side_effect=refresh) as refresh_mock, \
+             patch.object(svc, "_build_from_stream", return_value=fresh):
+            threads = [threading.Thread(target=lambda: results.append(
+                svc._rebuild_after_403(song_id, "https://cdn.example.com/old"))) for _ in range(4)]
+            for t in threads:
+                t.start()
+            time.sleep(0.2)
+            gate.set()
+            for t in threads:
+                t.join(5)
+            # A late worker with the same stale URL reuses the rebuilt table
+            results.append(svc._rebuild_after_403(song_id, "https://cdn.example.com/old"))
+
+        assert refresh_mock.call_count == 1
+        assert len(results) == 5 and all(r is fresh for r in results)
+
+
+class TestStreamInfo:
+    def _probe_response(self):
+        resp = MagicMock()
+        resp.headers = {"Content-Type": "audio/mp4"}
+        resp.content = b"\x00\x00\x00\x18ftypdash"
+        return resp
+
+    def test_stream_info_uses_extracted_duration(self, temp_dirs, monkeypatch):
+        from backend.config import settings
+
+        monkeypatch.setattr(settings, "SEGMENT_TARGET_SEC", 5)
+        song_id = "dQw4w9WgXcQ"
+        svc = StreamingService()
+        stream = _extracted(song_id, duration_ms=245_000, filesize=245 * 16_000,
+                            mime_type="audio/webm", ext="webm", itag="251", title="Real title")
+        with patch.object(svc._extractor, "get", return_value=stream), \
+             patch.object(svc._http, "get", return_value=self._probe_response()), \
+             patch.object(svc, "_probe_content_length") as probe:
+            info = svc.get_stream_info(song_id)
+
+        probe.assert_not_called()  # filesize came from extraction
+        assert info.duration_ms == 245_000
+        assert len(info.segments) == 49
+        assert abs(sum(s.duration_ms for s in info.segments) - 245_000) < 50
+        assert info.total_bytes == 245 * 16_000
+        assert info.mime_type == "audio/webm"
+        assert info.title == "Real title"
+
+    def test_probe_only_when_filesize_unknown(self, temp_dirs):
+        song_id = "dQw4w9WgXcQ"
+        svc = StreamingService()
+        with patch.object(svc._extractor, "get", return_value=_extracted(song_id, filesize=None)), \
+             patch.object(svc._http, "get", return_value=self._probe_response()), \
+             patch.object(svc, "_probe_content_length", return_value=2_880_000) as probe:
+            info = svc.get_stream_info(song_id)
+        probe.assert_called_once()
+        assert info.total_bytes == 2_880_000
+
+    def test_unknown_duration_gives_no_info(self, temp_dirs):
+        song_id = "dQw4w9WgXcQ"
+        svc = StreamingService()
+        with patch.object(svc._extractor, "get", return_value=_extracted(song_id, duration_ms=0, filesize=1000)), \
+             patch.object(svc._http, "get", return_value=self._probe_response()):
+            assert svc.get_stream_info(song_id) is None  # no 180 s fallback
+
+    def test_stream_info_single_flight(self, temp_dirs):
+        import threading
+
+        song_id = "dQw4w9WgXcQ"
+        svc = StreamingService()
+        gate = threading.Event()
+        info = _make_stream_info(song_id, 3)
+
+        def build(sid):
+            gate.wait(2)
+            return info
+
+        results = []
+        with patch.object(svc, "_build_stream_info", side_effect=build) as build_mock:
+            threads = [threading.Thread(target=lambda: results.append(svc.get_stream_info(song_id)))
+                       for _ in range(10)]
+            for t in threads:
+                t.start()
+            time.sleep(0.2)
+            gate.set()
+            for t in threads:
+                t.join(5)
+
+        assert build_mock.call_count == 1
+        assert len(results) == 10 and all(r is info for r in results)
+
+    def test_extraction_error_gives_no_info(self, temp_dirs):
+        from backend.services.extractor import ExtractionError
+
+        svc = StreamingService()
+        with patch.object(svc._extractor, "get", side_effect=ExtractionError("unavailable")):
+            assert svc.get_stream_info("dQw4w9WgXcQ") is None
 
 class TestBufferAhead:
     def test_buffer_ahead_relative_to_playhead(self, temp_dirs, monkeypatch):
@@ -636,36 +596,3 @@ class TestBufferAhead:
         assert indices == [-1, 58, 59]
 
 
-class TestAvailableAt:
-    """Some clients (TVHTML5) return URLs that 403 until available_at."""
-
-    def _extract(self, info):
-        svc = StreamingService()
-        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls, \
-             patch("backend.services.streaming.time.sleep") as sleep:
-            mock_ydl = MagicMock()
-            mock_ydl.extract_info.return_value = info
-            mock_ydl.__enter__ = MagicMock(return_value=mock_ydl)
-            mock_ydl.__exit__ = MagicMock(return_value=False)
-            mock_ydl_cls.return_value = mock_ydl
-            url = svc._try_extract({"format": "bestaudio/best"}, "https://youtube.com/watch?v=x", "testSong123")
-        return url, sleep
-
-    def _info(self, available_at):
-        return {"formats": [{"format_id": "140", "acodec": "mp4a.40.2", "vcodec": "none",
-                             "url": "https://cdn.example.com/140", "available_at": available_at}]}
-
-    def test_waits_until_available(self):
-        url, sleep = self._extract(self._info(time.time() + 6))
-        assert url == "https://cdn.example.com/140"
-        sleep.assert_called_once()
-        assert 5 < sleep.call_args.args[0] <= 6
-
-    def test_wait_is_capped(self):
-        from backend.services.streaming import MAX_AVAILABLE_AT_WAIT_S
-        _, sleep = self._extract(self._info(time.time() + 3600))
-        assert sleep.call_args.args[0] == MAX_AVAILABLE_AT_WAIT_S
-
-    def test_no_wait_when_already_available(self):
-        _, sleep = self._extract(self._info(time.time() - 10))
-        sleep.assert_not_called()
