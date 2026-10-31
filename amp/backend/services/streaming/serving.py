@@ -25,13 +25,20 @@ logger = get_logger("backend.services.streaming.serving")
 
 CHUNK = 65536
 
-# ExtractionError.code -> HTTP status for /audio
-_EXTRACTION_STATUS = {
+# ExtractionError.code -> HTTP status (also used by api/errors.py)
+EXTRACTION_STATUS = {
     "unavailable": 404,
     "no_audio": 404,
     "auth_required": 401,
     "node_missing": 503,
     "extract_failed": 502,
+}
+EXTRACTION_MESSAGES = {
+    "unavailable": "This video is unavailable.",
+    "no_audio": "No audio-only stream for this video.",
+    "auth_required": "Sign in required for this video.",
+    "node_missing": "Node.js not found: yt-dlp needs it to extract streams.",
+    "extract_failed": "Could not extract an audio stream.",
 }
 
 
@@ -49,8 +56,13 @@ class SegmentSource(Protocol):
     def ensure_segment(self, song_id: str, index: int, timeout: Optional[float] = None) -> Path: ...
 
 
-def _error(status: int, code: str, detail: str) -> Tuple[int, Dict[str, str], Dict[str, Any]]:
-    return status, {"Content-Type": "application/json"}, {"detail": detail, "code": code}
+def error_body(code: str, message: str) -> Dict[str, Any]:
+    """The API's single error shape (api/errors.py)."""
+    return {"detail": {"code": code, "message": message}}
+
+
+def _error(status: int, code: str, message: str) -> Tuple[int, Dict[str, str], Dict[str, Any]]:
+    return status, {"Content-Type": "application/json"}, error_body(code, message)
 
 
 def parse_range(range_header: Optional[str], total: int) -> Optional[Tuple[int, int]]:
@@ -84,15 +96,16 @@ def serve_audio_range(
     info = source.get_stream_info(song_id)
     if not info:
         code = source.stream_error_code(song_id) or "extract_failed"
-        return _error(_EXTRACTION_STATUS.get(code, 502), code,
-                      "Stream not available — could not extract an audio stream")
+        if code not in EXTRACTION_STATUS:
+            code = "extract_failed"
+        return _error(EXTRACTION_STATUS[code], code, EXTRACTION_MESSAGES[code])
 
     total = info.total_bytes
     headers = {"Content-Type": info.mime_type, "Accept-Ranges": "bytes", "Cache-Control": "no-cache"}
     rng = parse_range(range_header, total)
     if rng is None:
-        return 416, {**headers, "Content-Range": f"bytes */{total}"}, {"detail": "Range not satisfiable",
-                                                                       "code": "bad_range"}
+        return 416, {**headers, "Content-Range": f"bytes */{total}"}, error_body("bad_range",
+                                                                                 "Range not satisfiable")
     start, end = rng
     reads = map_range_to_segments(build_virtual_layout(info), start, end)
 

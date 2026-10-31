@@ -58,7 +58,7 @@
                    YouTube Music / googlevideo.com / yt-dlp
 ```
 
-**Data flow (play)**: UI `play(song_id)` → `POST /api/stream/{id}/play` → queue init + segment 0 as CRITICAL → UI sets `audio.src = /api/stream/{id}/audio` → endpoint serves init+segments from cache, downloading missing ones synchronously → browser plays, issues its own Range requests as it buffers → DownloadManager pre-fetches ahead of the playhead.
+**Data flow (play)**: UI `play(song_id)` → `POST /api/stream/{id}/play` **resolves the stream** (blocks for the extraction on first play) and queues init + segment 0 as CRITICAL → UI sets `audio.src = /api/stream/{id}/audio` unless a newer song was chosen meanwhile → endpoint serves init+segments from cache, downloading missing ones synchronously → browser plays, issues its own Range requests as it buffers → DownloadManager pre-fetches ahead of the playhead.
 
 ---
 
@@ -123,7 +123,8 @@ amp/
 │   ├── src/
 │   │   ├── api.ts              # typed fetch wrapper, token header
 │   │   ├── sidecar.ts          # spawn/kill backend, health poll
-│   │   ├── components/         # PlayerBar, SegmentBar, SongList, ...
+│   │   ├── components/         # PlayerBar (incl. segment bar), SongList, ...
+│   │   ├── player/             # errors, queue persistence, prefetch threshold (pure, vitest)
 │   │   ├── pages/              # Search, Library, Playlists, Auth, Logs
 │   │   └── state.ts            # queue + playback state (frontend-owned)
 │   ├── public/                 # favicons + site.webmanifest (AMP logo)
@@ -388,16 +389,18 @@ All under `/api`. When a token is configured, all require it except `GET /` and 
 | GET | `/api/stream/info/{id}` | `StreamInfo` (segment table summary) |
 | GET | `/api/stream/{id}/audio` | **binary, full Range support (§6.7)** |
 | GET | `/api/stream/{id}/chunks` | segment status list (for visualization) |
-| POST | `/api/stream/{id}/play` | start session + buffer |
+| POST | `/api/stream/{id}/play` | resolve stream, start session + buffer → `{song_id, duration_ms, mime_type, segment_count, is_dash, epoch, cached_ahead}` |
 | POST | `/api/stream/pause` , `/resume` , `/stop` | `{message}` |
 | POST | `/api/stream/position?position_ms=` | update playhead |
 | POST | `/api/stream/seek?position_ms=` | seek + re-buffer (§6.9) |
-| POST | `/api/stream/buffer/{id}` | force buffer-ahead |
+| POST | `/api/stream/buffer/{id}?mode=current\|prefetch` | `current`: force buffer-ahead; `prefetch`: resolve + init and 2 segments at LOW, session untouched |
 | GET | `/api/stream/playback-state` | `PlaybackInfo` |
 | GET | `/api/stream/logs` | recent streaming log lines |
 | GET | `/api/auth/status?verify=` | `{state, is_authenticated, account}` |
 | POST | `/api/auth/cookies` , `/cookie-header` , `/import-browser` , `/open-signin` , `/logout` | auth flow |
 | GET/POST/DELETE | `/api/logs` | frontend log relay (last 500) |
+
+**Errors** (streaming routes, `api/errors.py`): `{"detail": {"code", "message"}}` — `invalid_id` 400, `unavailable` / `no_audio` 404, `auth_required` 401, `node_missing` 503, `extract_failed` / `segment_unavailable` 502, `bad_range` 416. Library routes still use string `detail`s. There is no readiness-polling route: `/play` returning means the stream is resolved.
 
 Response shapes are consumed directly by the TypeScript client (`frontend/src/api.ts` defines the types). No v1-style bridge normalization layer — the frontend adapts.
 
@@ -420,15 +423,14 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 | Component | Purpose |
 |---|---|
-| `PlayerBar` (persistent) | play/pause/stop, seek slider, time, volume, thumbnail/title |
-| `SegmentBar` | one cell per segment, colored by status (cached/downloading/queued/error), click-to-seek; polled at 500 ms **with an in-flight guard** (§10 P12) |
+| `PlayerBar` (persistent) | play/pause/stop, time, volume, thumbnail/title; segment bar (one cell per segment, colored by status, click-to-seek; `/chunks` polled at 500 ms **with an in-flight guard**, §10 P12). Load sequence: `/play` (abortable) → generation check → `audio.src`; error codes mapped to text (`player/errors.ts`); one reload after a mid-stream network error; TTFA logged to the API relay |
 | `Search` | query box, results list, play per result |
 | `Library` | liked songs list |
 | `Playlists` | user playlists + tracks |
 | `Auth` | import-from-browser buttons, sign-in, status, logout |
 | `Logs` | backend stdout, streaming logs, API log relay |
 
-Queue state (list of songs, current index, next/previous) is **frontend-owned** in `state.ts` — no backend queue API.
+Queue state (list of songs, current index, next/previous) is **frontend-owned** in `state.ts` — no backend queue API. Songs, current index and volume persist in `localStorage` (`amp.queue.v1`, debounced 500 ms) and are restored paused. When < 20 s remain or past 80 % of the current song, the next song is prefetched once (`/buffer?mode=prefetch`).
 
 ### 8.3 Player
 
@@ -548,7 +550,7 @@ Segment table (originally an MPD parser; now the fMP4 `sidx`, improvement-plan P
 *Verify*: with one pinned song — first audio < 300 ms; `curl -r 0-1023` returns 206 with correct bytes; seek works; second launch serves from cache instantly.
 
 **Phase 3 — Tauri shell + player**
-sidecar spawn + token, ApiClient, PlayerBar + SegmentBar, Search/Library/Auth pages, queue state.
+sidecar spawn + token, ApiClient, PlayerBar (with segment bar), Search/Library/Auth pages, queue state.
 *Verify*: play/pause/seek/next from the UI; segment bar updates; auth flow works from the UI.
 
 **Phase 4 — Polish**

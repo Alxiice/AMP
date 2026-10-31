@@ -68,6 +68,10 @@ jobs:
         working-directory: amp/frontend
         run: npm ci
 
+      - name: Frontend unit tests (vitest)
+        working-directory: amp/frontend
+        run: npm test
+
       - name: Build Tauri app (.deb)
         working-directory: amp/frontend
         run: npx tauri build --bundles deb

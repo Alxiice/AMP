@@ -76,7 +76,7 @@ class TestServe:
     def test_range_first_segment_failure_returns_json_error(self, tmp_path):
         status, headers, body = serve_audio_range(FakeSource(tmp_path, fail={0}), SONG, "bytes=10-30")
         assert status == 502
-        assert body["code"] == "segment_unavailable"
+        assert body["detail"]["code"] == "segment_unavailable"
         assert "Content-Range" not in headers and "Content-Length" not in headers
 
     def test_range_mid_stream_failure_raises(self, tmp_path):
@@ -98,7 +98,7 @@ class TestServe:
     def test_no_stream_info_maps_extraction_code(self, tmp_path, code, status):
         result = serve_audio_range(FakeSource(tmp_path, info=False, code=code), SONG)
         assert result[0] == status
-        assert result[2]["code"] == (code or "extract_failed")
+        assert result[2]["detail"]["code"] == (code or "extract_failed")
 
 
 class TestAudioEndpoint:
@@ -111,7 +111,7 @@ class TestAudioEndpoint:
              patch.object(svc, "ensure_segment", source.ensure_segment):
             resp = client_no_auth.get(f"/api/stream/{SONG}/audio", headers={"Range": "bytes=0-"})
         assert resp.status_code == 502
-        assert resp.json()["code"] == "segment_unavailable"
+        assert resp.json()["detail"]["code"] == "segment_unavailable"
         assert "content-range" not in resp.headers
 
     def test_mid_stream_failure_aborts_response(self, client_no_auth, tmp_path):
