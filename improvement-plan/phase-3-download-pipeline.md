@@ -158,11 +158,13 @@ Rewrite the existing `TestDownloadManager`, epoch and LRU tests against the new 
 
 ## 5. Acceptance criteria
 
-- [ ] Unit suite green. The new modules each have a test file.
-- [ ] Manual: play a song, seek to 75%, then back to 10%. No stall over 1 s on a cached region, and no "Too little data for declared Content-Length" (h11) error in `app.log`.
-- [ ] Manual: set `CACHE_MAX_SIZE_MB=20`, play 6+ songs, replay the first one. Its recently played segments are still cached (LRU), and the current song never stalls because of eviction.
-- [ ] `grep -n "time.sleep(0.05)\|_downloading\|_seg_status" -r backend/services` returns nothing.
-- [ ] The public `StreamingService` methods used by `endpoints.py` keep the same signatures (or endpoints are updated in the same PR).
+> **Done 2026-10-31** (AGENTS.md Revision 11). The two manual checks were scripted over HTTP against the live backend, not clicked in the Tauri UI.
+
+- [x] Unit suite green. The new modules each have a test file.
+- [x] Manual: play a song, seek to 75%, then back to 10%. No stall over 1 s on a cached region, and no "Too little data for declared Content-Length" (h11) error in `app.log`.
+- [x] Manual: set `CACHE_MAX_SIZE_MB=20`, play 6+ songs, replay the first one. Its recently played segments are still cached (LRU), and the current song never stalls because of eviction.
+- [x] `grep -n "time.sleep(0.05)\|_downloading\|_seg_status" -r backend/services` returns nothing.
+- [x] The public `StreamingService` methods used by `endpoints.py` keep the same signatures (or endpoints are updated in the same PR).
 
 ## 6. Risks and notes
 

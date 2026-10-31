@@ -13,11 +13,8 @@ import pytest
 
 from backend.services.streaming import (
     BoundedDict,
-    DownloadManager,
-    PlaybackInfo,
     Priority,
-    SegmentStatus,
-    SegmentTask,
+    SegState,
     StreamingService,
     validate_song_id,
 )
@@ -102,110 +99,6 @@ class TestBoundedDict:
 
 
 # ---------------------------------------------------------------------------
-# SegmentTask priority
-# ---------------------------------------------------------------------------
-
-
-class TestSegmentTask:
-    def test_priority_ordering(self):
-        t1 = SegmentTask("song", 0, Priority.CRITICAL, 0, seq=1)
-        t2 = SegmentTask("song", 1, Priority.NORMAL, 0, seq=2)
-        assert t1 < t2  # CRITICAL < NORMAL
-
-    def test_seq_tiebreaker(self):
-        t1 = SegmentTask("song", 0, Priority.NORMAL, 0, seq=1)
-        t2 = SegmentTask("song", 1, Priority.NORMAL, 0, seq=2)
-        assert t1 < t2
-
-
-# ---------------------------------------------------------------------------
-# DownloadManager
-# ---------------------------------------------------------------------------
-
-
-class TestDownloadManager:
-    def test_enqueue_and_dedupe(self):
-        dm = DownloadManager(num_workers=1)
-        processed = []
-        dm.set_handler(lambda task: processed.append(task))
-        dm.start()
-        try:
-            # Enqueue same segment twice — second should be deduped
-            assert dm.enqueue("song1", 0, Priority.CRITICAL, 0) is True
-            assert dm.enqueue("song1", 0, Priority.CRITICAL, 0) is False
-
-            # Different segment should succeed
-            assert dm.enqueue("song1", 1, Priority.NORMAL, 0) is True
-
-            # Wait for processing
-            time.sleep(0.5)
-            assert len(processed) == 2
-        finally:
-            dm.stop()
-
-    def test_priority_order(self):
-        dm = DownloadManager(num_workers=1)
-        processed = []
-        dm.set_handler(lambda task: processed.append(task.index))
-        dm.start()
-        try:
-            # Enqueue in reverse priority order
-            dm.enqueue("song1", 0, Priority.NORMAL, 0)
-            dm.enqueue("song1", 1, Priority.HIGH, 0)
-            dm.enqueue("song1", 2, Priority.CRITICAL, 0)
-
-            time.sleep(0.5)
-            # Should be processed in priority order: CRITICAL(2), HIGH(1), NORMAL(0)
-            assert processed == [2, 1, 0]
-        finally:
-            dm.stop()
-
-    def test_is_downloading(self):
-        dm = DownloadManager(num_workers=1)
-        # Block the handler so we can check is_downloading
-        import threading
-        block = threading.Event()
-        dm.set_handler(lambda task: block.wait(timeout=5))
-        dm.start()
-        try:
-            dm.enqueue("song1", 0, Priority.CRITICAL, 0)
-            time.sleep(0.1)  # let worker pick it up
-            assert dm.is_downloading("song1", 0) is True
-            block.set()  # release
-            time.sleep(0.2)
-            assert dm.is_downloading("song1", 0) is False
-        finally:
-            block.set()
-            dm.stop()
-
-    def test_stop(self):
-        dm = DownloadManager(num_workers=2)
-        dm.set_handler(lambda task: None)
-        dm.start()
-        dm.stop()
-        assert dm._executor is None
-
-
-# ---------------------------------------------------------------------------
-# PlaybackInfo
-# ---------------------------------------------------------------------------
-
-
-class TestPlaybackInfo:
-    def test_to_dict(self):
-        info = PlaybackInfo(
-            song_id="test", position_ms=5000, is_playing=True,
-            volume=0.8, epoch=3, last_updated=1234.5,
-        )
-        d = info.to_dict()
-        assert d["song_id"] == "test"
-        assert d["position_ms"] == 5000
-        assert d["is_playing"] is True
-        assert d["volume"] == 0.8
-        assert d["epoch"] == 3
-
-
-# ---------------------------------------------------------------------------
 # StreamingService — epoch management (P18)
 # ---------------------------------------------------------------------------
 
@@ -230,76 +123,6 @@ class TestEpochManagement:
         svc.bump_epoch("song2")
         assert svc.get_epoch("song1") == 2
         assert svc.get_epoch("song2") == 1
-
-
-# ---------------------------------------------------------------------------
-# StreamingService — segment paths
-# ---------------------------------------------------------------------------
-
-
-class TestSegmentPaths:
-    def test_init_path(self, temp_dirs):
-        from backend.config import settings
-        svc = StreamingService()
-        path = svc._segment_path("dQw4w9WgXcQ", -1)
-        assert path.name == "init.bin"
-        assert path.parent.name == "dQw4w9WgXcQ"
-
-    def test_segment_path(self, temp_dirs):
-        svc = StreamingService()
-        path = svc._segment_path("dQw4w9WgXcQ", 5)
-        assert path.name == "0005.bin"
-
-    def test_segment_path_zero_padded(self, temp_dirs):
-        svc = StreamingService()
-        path = svc._segment_path("dQw4w9WgXcQ", 0)
-        assert path.name == "0000.bin"
-
-
-# ---------------------------------------------------------------------------
-# StreamingService — atomic write (P15)
-# ---------------------------------------------------------------------------
-
-
-class TestAtomicWrite:
-    def test_atomic_write(self, temp_dirs):
-        svc = StreamingService()
-        data = b"\x00\x01\x02\x03" * 1000
-        svc._atomic_write_segment("dQw4w9WgXcQ", 0, data)
-        path = svc._segment_path("dQw4w9WgXcQ", 0)
-        assert path.exists()
-        assert path.read_bytes() == data
-        # No .tmp file should remain
-        assert not path.with_suffix(".tmp").exists()
-
-    def test_atomic_write_init(self, temp_dirs):
-        svc = StreamingService()
-        data = b"\xff\xfe" * 500
-        svc._atomic_write_segment("dQw4w9WgXcQ", -1, data)
-        path = svc._segment_path("dQw4w9WgXcQ", -1)
-        assert path.exists()
-        assert path.read_bytes() == data
-
-
-# ---------------------------------------------------------------------------
-# StreamingService — segment status
-# ---------------------------------------------------------------------------
-
-
-class TestSegmentStatus:
-    def test_default_pending(self, temp_dirs):
-        svc = StreamingService()
-        assert svc.get_segment_status("song1", 0) == SegmentStatus.PENDING
-
-    def test_set_and_get(self, temp_dirs):
-        svc = StreamingService()
-        svc.set_segment_status("song1", 0, SegmentStatus.DOWNLOADING)
-        assert svc.get_segment_status("song1", 0) == SegmentStatus.DOWNLOADING
-
-    def test_independent_per_song(self, temp_dirs):
-        svc = StreamingService()
-        svc.set_segment_status("song1", 0, SegmentStatus.DOWNLOADED)
-        assert svc.get_segment_status("song2", 0) == SegmentStatus.PENDING
 
 
 # ---------------------------------------------------------------------------
@@ -426,11 +249,14 @@ class TestCdn403:
         states = []
         cookie_files = []
 
-        def attempt(*args, **kwargs):
+        urls = []
+
+        def fetch(http, url, headers, start, end, dest, timeout):
             states.append(auth.state)
+            urls.append(url)
             if len(states) == 1:
                 raise _Auth403Error("403 Forbidden")
-            return True
+            return end - start + 1
 
         def extract_with_client(sid, client, label, cookie_file):
             states.append(auth.state)
@@ -439,12 +265,14 @@ class TestCdn403:
 
         fresh = _make_stream_info(song_id, 3, url="https://cdn.example.com/fresh")
         with patch("backend.config.settings.YTDLP_PLAYER_CLIENTS", ["default"]), \
-             patch.object(svc, "_download_segment_attempt", side_effect=attempt), \
+             patch("backend.services.streaming.service.fetch_segment", side_effect=fetch), \
              patch.object(svc._extractor, "_extract_with_client", side_effect=extract_with_client), \
              patch.object(svc, "_build_from_stream", return_value=fresh):
-            svc._download_segment_with_retry(song_id, 0, svc.get_epoch(song_id))
+            assert svc._registry.claim((song_id, 0))
+            svc._run_download(song_id, 0)
 
-        assert svc.get_segment_status(song_id, 0) == SegmentStatus.DOWNLOADED
+        assert svc.get_segment_status(song_id, 0) == SegState.DONE
+        assert urls == ["https://cdn.example.com/a", "https://cdn.example.com/fresh"]
         assert len(states) == 3  # 403 attempt, refresh extraction, retry attempt
         assert all(s == AuthState.SIGNED_IN for s in states)
         assert auth.state == AuthState.SIGNED_IN
@@ -643,11 +471,11 @@ class TestSidxTable:
         assert info.itag == "140"
 
         # Head bytes already cover the init segment: cached as init.bin
-        init = svc._segment_path("BAgTQhR8MLo", -1)
+        init = svc._cache.segment_path("BAgTQhR8MLo", -1)
         assert init.read_bytes() == head
-        assert svc.get_segment_status("BAgTQhR8MLo", -1) == SegmentStatus.DOWNLOADED
+        assert svc.get_segment_status("BAgTQhR8MLo", -1) == SegState.DONE
 
-        manifest = json.loads(svc._layout_path("BAgTQhR8MLo").read_text())
+        manifest = json.loads(svc._cache.layout_path("BAgTQhR8MLo").read_text())
         assert manifest["layout_id"] == info.layout_id
         assert manifest["method"] == "sidx"
         assert manifest["total_bytes"] == FIXTURE_FILESIZE
@@ -697,7 +525,7 @@ class TestSidxTable:
         svc = StreamingService()
         info, _ = _build(svc, _sidx_stream(filesize=FIXTURE_FILESIZE + 1), head)
         assert info.is_dash is False
-        assert not svc._segment_path("BAgTQhR8MLo", -1).exists()
+        assert not svc._cache.segment_path("BAgTQhR8MLo", -1).exists()
 
     def test_no_sidx_falls_back(self, temp_dirs):
         from backend.tests.test_mp4 import box
@@ -724,9 +552,9 @@ class TestLayoutIdentity:
         # Layout A: proportional (e.g. an earlier itag 251 extraction)
         info_a = svc._build_from_stream(song_id, _extracted(
             song_id, ext="webm", itag="251", mime_type="audio/webm", filesize=4_000_000, duration_ms=258_000))
-        svc._atomic_write_segment(song_id, 0, b"old layout bytes")
-        svc._record_segment_db(song_id, 0, 0, 15, 16, 5000, info_a.layout_id)
-        svc.set_segment_status(song_id, 0, SegmentStatus.DOWNLOADED)
+        svc._cache.write_segment(song_id, 0, b"old layout bytes")
+        svc._cache.record_segment(song_id, 0, 0, 15, 16, 5000, info_a.layout_id)
+        svc._registry.mark_done((song_id, 0))
 
         # Layout B: sidx
         head = FIXTURE_HEAD.read_bytes()
@@ -734,10 +562,10 @@ class TestLayoutIdentity:
             info_b = svc._build_from_stream(song_id, _sidx_stream())
 
         assert info_b.layout_id != info_a.layout_id
-        assert not svc._segment_path(song_id, 0).exists()
-        assert svc.get_segment_status(song_id, 0) == SegmentStatus.PENDING
-        assert svc._read_layout_id(song_id) == info_b.layout_id
-        assert svc._segment_path(song_id, -1).exists()  # new init cached after the purge
+        assert not svc._cache.segment_path(song_id, 0).exists()
+        assert svc.get_segment_status(song_id, 0) == SegState.MISSING
+        assert svc._cache.read_layout_id(song_id) == info_b.layout_id
+        assert svc._cache.segment_path(song_id, -1).exists()  # new init cached after the purge
         from backend.database.models import Segment
         from backend.database.session import session_scope
         with session_scope() as session:
@@ -749,9 +577,9 @@ class TestLayoutIdentity:
         svc = StreamingService()
         stream = _extracted(song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000)
         info = svc._build_from_stream(song_id, stream)
-        svc._atomic_write_segment(song_id, 0, b"keep me")
+        svc._cache.write_segment(song_id, 0, b"keep me")
         assert svc._build_from_stream(song_id, stream).layout_id == info.layout_id
-        assert svc._segment_path(song_id, 0).read_bytes() == b"keep me"
+        assert svc._cache.segment_path(song_id, 0).read_bytes() == b"keep me"
 
     def test_reconcile_deletes_dir_without_manifest(self, temp_dirs):
         from backend.config import settings
@@ -760,7 +588,7 @@ class TestLayoutIdentity:
         legacy.mkdir(parents=True)
         (legacy / "0000.bin").write_bytes(b"pre-phase-2 proportional segment")
         svc = StreamingService()
-        svc._record_segment_db("dQw4w9WgXcQ", 0, 0, 31, 32, 5000, None)
+        svc._cache.record_segment("dQw4w9WgXcQ", 0, 0, 31, 32, 5000, None)
         svc.reconcile_cache()
         assert not legacy.exists()
         from backend.database.models import Segment
@@ -773,17 +601,17 @@ class TestLayoutIdentity:
         svc = StreamingService()
         info = svc._build_from_stream(song_id, _extracted(
             song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000))
-        svc._atomic_write_segment(song_id, 0, b"a" * 10)
-        svc._record_segment_db(song_id, 0, 0, 9, 10, 5000, info.layout_id)
-        svc._atomic_write_segment(song_id, 1, b"b" * 10)
-        svc._record_segment_db(song_id, 1, 10, 19, 10, 5000, "someotherlayout0")
+        svc._cache.write_segment(song_id, 0, b"a" * 10)
+        svc._cache.record_segment(song_id, 0, 0, 9, 10, 5000, info.layout_id)
+        svc._cache.write_segment(song_id, 1, b"b" * 10)
+        svc._cache.record_segment(song_id, 1, 10, 19, 10, 5000, "someotherlayout0")
 
         fresh = StreamingService()
         fresh.reconcile_cache()
-        assert svc._segment_path(song_id, 0).exists()
-        assert fresh.get_segment_status(song_id, 0) == SegmentStatus.DOWNLOADED
-        assert not svc._segment_path(song_id, 1).exists()
-        assert svc._layout_path(song_id).exists()
+        assert svc._cache.segment_path(song_id, 0).exists()
+        assert fresh.get_segment_status(song_id, 0) == SegState.DONE
+        assert not svc._cache.segment_path(song_id, 1).exists()
+        assert svc._cache.layout_path(song_id).exists()
 
     def test_manifest_not_counted_or_evicted(self, temp_dirs):
         song_id = "BAgTQhR8MLo"
@@ -792,9 +620,9 @@ class TestLayoutIdentity:
             song_id, ext="webm", itag="251", filesize=4_000_000, duration_ms=258_000))
         info = svc.get_cache_info()
         assert info["file_count"] == 0
-        svc._atomic_write_segment(song_id, 0, b"\0" * 1_200_000)  # over the 1 MB test limit
+        svc._cache.write_segment(song_id, 0, b"\0" * 1_200_000)  # over the 1 MB test limit
         svc.cleanup_cache()
-        assert svc._layout_path(song_id).exists()
+        assert svc._cache.layout_path(song_id).exists()
 
 
 class TestSegmentsTableMigration:
@@ -816,3 +644,200 @@ class TestSegmentsTableMigration:
         assert "layout_id" in cols
         with engine.connect() as conn:
             assert conn.execute(text("SELECT COUNT(*) FROM segments")).scalar() == 0
+
+
+# ---------------------------------------------------------------------------
+# Download pipeline (Phase 3): ensure_segment, registry wiring, buffer policy
+# ---------------------------------------------------------------------------
+
+
+def _fake_fetch(delay=0.0, calls=None, fail=()):
+    """fetch_segment stand-in: writes the right number of bytes after delay."""
+    lock = __import__("threading").Lock()
+
+    def fetch(http, url, headers, start, end, dest, timeout):
+        index = -1 if dest.name == "init.bin" else int(dest.stem)
+        with lock:
+            if calls is not None:
+                calls.append(index)
+        if delay:
+            time.sleep(delay)
+        if index in fail:
+            from backend.services.streaming import _PermanentError
+            raise _PermanentError("404 for test")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"\0" * (end - start + 1))
+        return end - start + 1
+
+    return fetch
+
+
+class TestEnsureSegment:
+    SONG = "dQw4w9WgXcQ"
+
+    def _svc(self, n=30):
+        svc = StreamingService()
+        svc._stream_info_cache.set(self.SONG, _make_stream_info(self.SONG, n))
+        return svc
+
+    def test_done_returns_path_without_fetch(self, temp_dirs):
+        svc = self._svc()
+        calls = []
+        with patch("backend.services.streaming.service.fetch_segment", side_effect=_fake_fetch(calls=calls)):
+            p1 = svc.ensure_segment(self.SONG, 0)
+            p2 = svc.ensure_segment(self.SONG, 0)
+        assert p1 == p2 and p1.stat().st_size == 1000
+        assert calls == [0]
+
+    def test_sync_and_worker_single_download(self, temp_dirs):
+        """F8: a request handler and a worker asking at once → one HTTP fetch, both DONE."""
+        import threading
+
+        svc = self._svc()
+        calls = []
+        with patch("backend.services.streaming.service.fetch_segment",
+                   side_effect=_fake_fetch(delay=0.2, calls=calls)):
+            svc._dl_manager.start()
+            try:
+                svc._dl_manager.enqueue(self.SONG, 4, Priority.CRITICAL, 0)
+                results = []
+                t = threading.Thread(target=lambda: results.append(svc.ensure_segment(self.SONG, 4)))
+                t.start()
+                t.join(5)
+            finally:
+                svc._dl_manager.stop()
+        assert calls == [4]
+        assert results and results[0].exists()
+        assert svc.get_segment_status(self.SONG, 4) == SegState.DONE
+
+    def test_sync_claims_queued_item(self, temp_dirs):
+        """F7: a queued key is fetched by the request handler, not after the queue drains."""
+        svc = self._svc()
+        svc._dl_manager = __import__("backend.services.streaming", fromlist=["DownloadManager"]).DownloadManager(
+            svc._registry, num_workers=1)
+        svc._dl_manager.set_handler(svc._process_task)
+        calls = []
+        with patch("backend.services.streaming.service.fetch_segment",
+                   side_effect=_fake_fetch(delay=0.1, calls=calls)):
+            for i in range(21):
+                svc._dl_manager.enqueue(self.SONG, i, Priority.NORMAL, 0)
+            svc._dl_manager.start()
+            try:
+                t0 = time.time()
+                svc.ensure_segment(self.SONG, 20)  # last in the queue
+                elapsed = time.time() - t0
+            finally:
+                svc._dl_manager.stop()
+        assert elapsed < 1.0  # 21 x 0.1 s if it had waited for the queue
+        assert calls.count(20) == 1
+
+    def test_failure_raises_segment_unavailable(self, temp_dirs):
+        from backend.services.streaming import SegmentUnavailable
+
+        svc = self._svc()
+        with patch("backend.services.streaming.service.fetch_segment", side_effect=_fake_fetch(fail={2})):
+            with pytest.raises(SegmentUnavailable) as e:
+                svc.ensure_segment(self.SONG, 2)
+        assert "404 for test" in e.value.reason
+        assert svc.get_segment_status(self.SONG, 2) == SegState.ERROR
+
+    def test_wait_times_out(self, temp_dirs):
+        from backend.services.streaming import SegmentUnavailable
+
+        svc = self._svc()
+        svc._registry.claim((self.SONG, 1))  # someone else is downloading it, forever
+        with pytest.raises(SegmentUnavailable):
+            svc.ensure_segment(self.SONG, 1, timeout=0.1)
+
+    def test_vanished_done_file_is_refetched(self, temp_dirs):
+        svc = self._svc()
+        calls = []
+        with patch("backend.services.streaming.service.fetch_segment", side_effect=_fake_fetch(calls=calls)):
+            path = svc.ensure_segment(self.SONG, 0)
+            path.unlink()
+            svc.ensure_segment(self.SONG, 0)
+        assert calls == [0, 0]
+
+    def test_layout_change_during_download_discards_bytes(self, temp_dirs):
+        svc = self._svc()
+        other = _make_stream_info(self.SONG, 31)  # different segment count → different layout_id
+
+        def fetch_then_swap(*args):
+            size = _fake_fetch()(*args)
+            svc._stream_info_cache.set(self.SONG, other)
+            return size
+
+        with patch("backend.services.streaming.service.fetch_segment", side_effect=fetch_then_swap):
+            svc._registry.claim((self.SONG, 0))
+            svc._run_download(self.SONG, 0)
+        assert svc.get_segment_status(self.SONG, 0) == SegState.ERROR
+        assert not svc._cache.segment_path(self.SONG, 0).exists()
+
+    def test_chunks_from_registry_after_eviction(self, temp_dirs, monkeypatch):
+        from backend.config import settings
+
+        monkeypatch.setattr(settings, "CACHE_MAX_SIZE_MB", 1)
+        svc = self._svc()
+        with patch("backend.services.streaming.service.fetch_segment", side_effect=_fake_fetch()):
+            svc.ensure_segment(self.SONG, 0)
+        statuses = {c["index"]: c["status"] for c in svc.get_all_segment_statuses(self.SONG)}
+        assert statuses[0] == "downloaded" and statuses[1] == "pending" and statuses[-1] == "pending"
+        svc._cache.remove_segment(self.SONG, 0)
+        with patch("pathlib.Path.exists", side_effect=AssertionError("no filesystem calls")):
+            statuses = {c["index"]: c["status"] for c in svc.get_all_segment_statuses(self.SONG)}
+        assert statuses[0] == "pending"
+
+
+class TestBufferPolicy:
+    SONG = "dQw4w9WgXcQ"
+
+    def test_position_update_noop_within_segment(self, temp_dirs):
+        svc = StreamingService()
+        svc._stream_info_cache.set(self.SONG, _make_stream_info(self.SONG, 60, seg_ms=5000))
+        svc._dl_manager = MagicMock()
+        svc.start_playback(self.SONG)
+        svc._dl_manager.reset_mock()
+        for pos in (5_100, 7_000, 9_900):  # all inside segment 1
+            svc.update_position(pos)
+        first_batch = svc._dl_manager.enqueue.call_count
+        assert first_batch > 0
+        assert {c.args[1] for c in svc._dl_manager.enqueue.call_args_list} >= {1, 2, 3}
+        svc.update_position(10_100)  # segment 2: a new batch
+        assert svc._dl_manager.enqueue.call_count > first_batch
+        # 3 reports in one segment → one batch: the batch of 3 is exactly one buffer_plan
+        from backend.services.streaming import buffer_plan
+        from backend.config import settings
+        plan = buffer_plan(svc._stream_info_cache.get(self.SONG), 1, settings.SEGMENT_BUFFER_AHEAD_SEC * 1000)
+        assert first_batch == len(plan)
+
+    def test_seek_requests_from_new_index_with_new_epoch(self, temp_dirs):
+        svc = StreamingService()
+        svc._stream_info_cache.set(self.SONG, _make_stream_info(self.SONG, 60, seg_ms=5000))
+        svc._dl_manager = MagicMock()
+        svc.start_playback(self.SONG)
+        svc._dl_manager.reset_mock()
+        result = svc.seek(150_000)
+        assert result["segment_index"] == 30 and result["epoch"] == 1
+        first = svc._dl_manager.enqueue.call_args_list[1].args  # [0] is the init
+        assert first == (self.SONG, 30, Priority.CRITICAL, 1)
+        assert svc.get_playback_state()["current_segment_index"] == 30
+
+    def test_start_playback_unqueues_other_songs(self, temp_dirs):
+        svc = StreamingService()
+        other = "BAgTQhR8MLo"
+        svc._registry.request((other, 5), Priority.NORMAL, 0)
+        svc._registry.claim((other, 6))
+        svc._stream_info_cache.set(self.SONG, _make_stream_info(self.SONG, 3))
+        svc._dl_manager = MagicMock()
+        svc.start_playback(self.SONG)
+        assert svc.get_segment_status(other, 5) == SegState.MISSING
+        assert svc.get_segment_status(other, 6) == SegState.IN_FLIGHT  # in flight: allowed to finish
+
+    def test_stop_unqueues_but_does_not_bump_epoch(self, temp_dirs):
+        svc = StreamingService()
+        svc._stream_info_cache.set(self.SONG, _make_stream_info(self.SONG, 10))
+        svc.start_playback(self.SONG)  # real DownloadManager, not started: items stay queued
+        assert svc.get_segment_status(self.SONG, 0) == SegState.QUEUED
+        svc.stop_playback()
+        assert svc.get_segment_status(self.SONG, 0) == SegState.MISSING
+        assert svc.get_epoch(self.SONG) == 0

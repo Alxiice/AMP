@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     HTTP_TIMEOUT_CONNECT_S: float = 5.0
     HTTP_TIMEOUT_READ_S: float = 30.0
     MAX_RETRIES: int = 3
+    SEGMENT_SYNC_TIMEOUT_S: float = 15.0  # /audio waits this long for a segment before failing
 
     # --- Computed paths (set by configure_paths) ---
     # Private attributes: never monkeypatch these directly (pydantic 2.14's

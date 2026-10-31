@@ -108,7 +108,9 @@ amp/
 │   ├── services/
 │   │   ├── auth.py             # AuthService, CredentialStore, SAPISIDHASH
 │   │   ├── youtube.py          # YouTubeService (ytmusicapi wrapper)
-│   │   └── streaming.py        # StreamingService + DownloadManager + parser
+│   │   ├── extractor.py        # StreamExtractor: single-flight yt-dlp extraction
+│   │   └── streaming/          # service.py (facade), registry.py, downloader.py,
+│   │                           # cache.py, serving.py, playback.py
 │   ├── database/
 │   │   ├── models.py           # Song, Playlist, PlaylistSong, LikedSong, Segment
 │   │   └── session.py          # engine (WAL), session factory, init
@@ -159,6 +161,7 @@ amp/
 | `DOWNLOAD_WORKERS` | `4` | |
 | `HTTP_TIMEOUT_CONNECT_S` / `HTTP_TIMEOUT_READ_S` | `5` / `30` | |
 | `MAX_RETRIES` | `3` | backoff 0.5 / 1 / 2 s + jitter |
+| `SEGMENT_SYNC_TIMEOUT_S` | `15` | `ensure_segment` wait for a segment owned by another thread (§6.5) |
 
 Computed paths (cache, segments, logs, DB file) are private attributes set by `Settings.configure_paths(data_dir=None, db_file=None)`, which `model_post_init` calls with the defaults above. Tests and the future `--data-dir` option (improvement-plan Phase 6) call it to redirect storage; `snapshot_paths()` / `restore_paths()` undo the change. Never monkeypatch the private attributes (§10 P27).
 
@@ -297,17 +300,23 @@ Used for WebM (itag 251) and for MP4 streams without a usable `sidx`. Size from 
 
 ### 6.5 Segment download pipeline
 
-`download_segment(song_id, index)` — the robustness-critical path:
+All per-segment state lives in one place, the **`SegmentRegistry`** (`services/streaming/registry.py`, one lock): `MISSING → QUEUED → IN_FLIGHT → DONE | ERROR`, with the best requested priority and epoch while queued and a `threading.Event` set on completion.
 
-1. **Dedupe**: skip if status is DOWNLOADED or already in `_downloading` (per-song set, lock-protected).
+- `request(key, priority, epoch)`: no-op if DONE or IN_FLIGHT; re-ranks a QUEUED entry (new heap item) if the request has a newer epoch or a better priority; queues MISSING / ERROR.
+- Workers pop heap items and `claim(key, priority, epoch)`: it only succeeds if that exact item is still current, so superseded duplicates are skipped. The heap is ordered by (priority, newer epoch first, request order).
+- Request handlers call **`ensure_segment(song_id, index)`**: DONE → path; IN_FLIGHT → wait on the event (`SEGMENT_SYNC_TIMEOUT_S`, 15 s); otherwise claim it and fetch in the handler's thread (jumping the queue; the queued item is then skipped). Failure or timeout raises `SegmentUnavailable`. No polling.
+
+`fetch_segment()` (`downloader.py`) — the robustness-critical path:
+
+1. **Single owner**: only the caller holding the registry claim downloads a segment, so a worker and a request handler can never fetch the same one at once.
 2. **HTTP GET** with `Range: bytes=start-end` and CDN headers (`Cookie` from AuthService — without it, 403, §10 P1). Timeouts from config.
 3. **Verify the response**: status must be **206**, `Content-Range` must match the requested range, and received byte count must equal `byte_end - byte_start + 1`. A 200 (range ignored) or short read = failure; never write the file.
-4. **Atomic write**: write to `{index:04d}.bin.tmp`, `os.replace()` to final name. A crash mid-download can never leave a corrupt segment that looks complete.
-5. **Record**: insert/update `segments` DB row (status, size, `last_accessed`), update in-memory status.
-6. **Retry**: up to `MAX_RETRIES` with backoff 0.5/1/2 s + jitter, re-queued at same priority. Distinguish:
+4. **Atomic write**: stream into a uniquely named `tempfile.mkstemp(dir=song_dir, prefix="NNNN.", suffix=".tmp")`, fsync, `os.replace()` to the final name (retrying briefly on Windows `PermissionError`). A crash mid-download can never leave a corrupt segment that looks complete, and two writers never share a tmp path.
+5. **Record**: insert/update the `segments` DB row and the cache's size map; complete the registry key (wakes waiters).
+6. **Retry**: up to `MAX_RETRIES` attempts in the owning thread, backoff 0.5/1/2 s + jitter. Distinguish:
    - **403** → refresh stream URL once (clear song caches, re-extract, rebuild segment table — byte layout may change), then retry. Other 4xx → ERROR, no retry. A CDN 403 **does not touch auth state**: the refresh still extracts with the user's cookies (§5.4).
    - **429 / 5xx / timeout** → backoff and re-queue (transient).
-7. After every successful download, run `cleanup_cache()` (cheap check) and update `last_accessed`.
+7. After every successful download, `CacheStore.maybe_evict()` — O(1) while under the limit. If the song's layout changed while the bytes were in flight, they are deleted and the key is marked ERROR.
 
 Files: `.amp/cache/segments/{song_id}/init.bin`, `{index:04d}.bin` and `layout.json` (§6.6).
 
@@ -315,9 +324,10 @@ Files: `.amp/cache/segments/{song_id}/init.bin`, `{index:04d}.bin` and `layout.j
 
 - Metadata in `segments` table: `song_id, index, byte_start, byte_end, size_bytes, duration_ms, status, file_path, layout_id, last_accessed` (PK: `song_id, index`). `init_db()` recreates the table if it lacks a column (it is only a cache; reconciliation then removes the files).
 - **Cache identity**: segment files are only valid for the byte layout they were cut from. Each song directory holds `layout.json` (`layout_id, method, itag, mime_type, total_bytes, duration_ms, init_range, segments: [[start, end, dur], …]`, written atomically). When a newly built table has a different `layout_id` (e.g. a refresh picked itag 251 instead of 140, or the file changed), the song's directory and DB rows are purged before the new manifest is written. `layout.json` is never counted or evicted by the LRU.
-- `cleanup_cache()`: sum file sizes; if over `CACHE_MAX_SIZE_MB`, evict by `last_accessed ASC` until ≤ 80% of max. Delete file + DB row. Never evict segments of the currently-playing song ahead of the playhead.
+- **LRU** (`CacheStore`, `services/streaming/cache.py`): the LRU clock is file **mtime** — set by the download, bumped by `touch()` whenever a segment is served (at most once per 30 s per file). A per-file size map keeps a running total (full scan only at startup or in `cleanup_cache()`). Over `CACHE_MAX_SIZE_MB` → sort by mtime, evict to 80 %, skipping the playing song's `init.bin` and every segment from `current_index − SEGMENT_BEHIND` on, IN_FLIGHT segments and `layout.json`. Eviction deletes the file and DB row and sets the registry key back to MISSING. (`last_accessed` in the DB is no longer written.)
 - **Startup reconciliation**: scan `SEGMENTS_DIR`; a song directory without `layout.json` is deleted (this also clears pre-Phase-2 caches); delete orphan files (no DB row), delete rows with missing files, verify file sizes match `size_bytes` and `layout_id` matches the manifest (mismatch → delete both). This heals any crash damage.
-- In-memory caches (`_stream_info`, `_stream_urls`, `_segment_tables`) are **bounded**: `functools.lru_cache(maxsize=256)` or a dict with a size cap. v1 leaked these.
+- Startup reconciliation also rebuilds the registry (DONE for every file that matches its `layout.json` and DB row), so `/chunks` is served from memory with no filesystem calls.
+- In-memory caches (stream info, extracted streams, failures) are **bounded** dicts (256 entries). v1 leaked these.
 
 ### 6.7 Local audio endpoint — real Range support
 
@@ -332,7 +342,7 @@ Virtual byte layout: `[init][segment 0][segment 1]...[segment N-1]`. All offsets
 | `Range: bytes=a-` | `206`, from `a` to end |
 | Unsatisfiable | `416` with `Content-Range: bytes */total` |
 
-Serving: map the requested byte window to segment files (a window can span two segments — read across the boundary), reading only the needed byte ranges from disk. **Missing segment → download it synchronously before responding** (this is the G1 path: first request waits ~200 ms for init+segment 0). Content-Type from `StreamInfo.mime_type`. `Cache-Control: no-cache`.
+Serving (`services/streaming/serving.py`): map the requested byte window to segment files (a window can span segments), reading only the needed byte ranges from disk. **The first segment is `ensure_segment`ed before the response headers are returned**: if it can't be delivered the response is JSON (`502 segment_unavailable`, or 404/401/502/503 from the extraction error code) instead of a 206 promising bytes. A later segment that can't be delivered **raises inside the body generator**, so Starlette aborts the connection (a retryable network error for the browser) — the body is never silently shorter than `Content-Length`. A file evicted between `ensure_segment` and `open` is fetched once more. Content-Type from `StreamInfo.mime_type`. `Cache-Control: no-cache`. Handlers are sync and block in Starlette's threadpool (P21).
 
 ### 6.8 Buffer-ahead & priorities
 
@@ -341,17 +351,19 @@ On `POST /api/stream/{song_id}/play` (or first audio request):
 - Queue **init** and the **segment at the playhead** at CRITICAL.
 - Queue next 2 segments HIGH, then NORMAL until `SEGMENT_BUFFER_AHEAD_SEC` (30 s) of audio **ahead of the playhead** is covered. The window is measured from the playhead segment, not from the song start (accumulate `duration_ms` from the start index, O(n)).
 - Keep `SEGMENT_BEHIND` (2) segments behind the playhead cached (don't evict).
-- `DownloadManager`: `PriorityQueue` + `ThreadPoolExecutor(4)`, daemon threads, started at app startup, shut down on app shutdown.
+- Position reports (every 2 s) only re-request when the playhead entered a new segment since the last buffer-ahead.
+- Starting another song unqueues (not cancels) the previous songs' queued segments; stop does the same for the current song. In-flight downloads always finish.
+- `DownloadManager`: `PriorityQueue` + `ThreadPoolExecutor(4)`, started at app startup, shut down on app shutdown. The heap only holds hints; the registry decides.
 
-### 6.9 Seek — epoch-based cancellation
+### 6.9 Seek — epoch-based priority
 
-`seek_to_position(position_ms)`:
+`seek(position_ms)`:
 
-1. Bump the song's **epoch** (monotonic counter). Workers check the epoch before writing a segment; a stale worker (old epoch) discards its result and does not update status.
+1. Bump the song's **epoch** (monotonic counter).
 2. Map `position_ms → segment index` via the segment table (exact durations with a sidx table).
-3. Re-queue from the new position with buffer-ahead priorities.
+3. Request from the new position with buffer-ahead priorities and the new epoch.
 
-This fixes v1's race where an in-flight download for a pre-seek position completed and overwrote status with stale data.
+The epoch is a **priority**, not a cancellation: the new requests outrank everything queued before the seek (a still-queued segment is re-ranked, not dropped — the pre-Phase-3 bug was that it was silently skipped until the next position report). Downloads already in flight finish, because their bytes are valid. (Before Phase 3, stale workers were meant to "discard" results, but the file was written regardless.)
 
 ### 6.10 PlaybackSession (in-memory)
 
@@ -493,7 +505,7 @@ New in v2 (from the v1 review):
 - **P15 — Atomic writes only.** tmp file + `os.replace()`. A crash must never leave a partial segment that looks complete.
 - **P16 — Implement Range for real.** The browser's `<audio>` seeks via Range. Advertising `Accept-Ranges` without honoring the header breaks seeking.
 - **P17 — Bind `127.0.0.1`, require the token, validate `Host`.** The API reads the user's YouTube session (liked songs) and controls playback. v1's `0.0.0.0` + `CORS *` + no auth let any LAN peer or any open webpage drive it.
-- **P18 — Seek needs an epoch.** Bump a per-song epoch on seek; stale in-flight downloads discard their results.
+- **P18 — Seek needs an epoch.** Bump a per-song epoch on seek; requests with the newer epoch outrank everything queued before it. In-flight downloads finish (their bytes are valid); queued ones are re-ranked, never dropped.
 - **P19 — Bound in-memory caches.** v1's `_stream_info_cache` etc. grew forever. Use `lru_cache` or a capped dict.
 - **P20 — SQLite WAL + busy_timeout.** Concurrent workers + handlers will hit `database is locked` otherwise.
 - **P21 — Blocking I/O in `async def` freezes the event loop.** Handlers doing HTTP/yt-dlp/file I/O are plain `def`.
@@ -512,7 +524,7 @@ New from refactoring Phase 0 (AGENTS.md Revision 7):
 
 ## 11. Testing
 
-- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `mp4.py` index parser (synthetic boxes, sidx v0/v1, truncation, plus a real itag 140 header fixture), `extractor.py`, layout identity, segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), DownloadManager priority/dedupe/epoch, endpoints (TestClient).
+- **Unit** (`pytest -m "not integration"`, fully mocked, no network): config, models, `mp4.py` index parser (synthetic boxes, sidx v0/v1, truncation, plus a real itag 140 header fixture), `extractor.py`, layout identity, segment byte-range math, Range-header mapping (§6.7), auth (SAPISIDHASH, CredentialStore), SegmentRegistry state machine, DownloadManager ordering/superseded items, `fetch_segment` verification + unique tmp files, CacheStore LRU/accounting, serving (no short bodies), playback policy, endpoints (TestClient).
 - **Integration** (`pytest -m integration`, network, ~2 min, cookies optional): `test_integration.py` pins `dQw4w9WgXcQ` (Rick Astley) and `LTDxBgP0lqA` (The Weeknd — Blinding Lights); `test_integration_download.py` downloads every segment of `BAgTQhR8MLo` (override with `AMP_TEST_SONG_ID`, e.g. `Tmz3mpOq8aE`). Both must handle streams without an init segment (`has_init=False`). If a pinned song breaks (removed/region-blocked), update the ID — accepted per scope. Run after every yt-dlp upgrade.
   - manifest fetch + parse end-to-end
   - init + first 3 segments download, sizes verified
