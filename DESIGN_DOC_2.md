@@ -154,6 +154,7 @@ amp/
 | `SEGMENT_BUFFER_AHEAD_SEC` | `30` | how far ahead to pre-fetch |
 | `SEGMENT_BEHIND` | `2` | segments kept behind playhead for seek-back |
 | `STREAM_FORMAT` | `140` | itag; 251 allowed |
+| `YTDLP_PLAYER_CLIENTS` | `["visionos", "default"]` | yt-dlp player clients tried in order; `default` = yt-dlp's choice (§6.2) |
 | `DOWNLOAD_WORKERS` | `4` | |
 | `HTTP_TIMEOUT_CONNECT_S` / `HTTP_TIMEOUT_READ_S` | `5` / `30` | |
 | `MAX_RETRIES` | `3` | backoff 0.5 / 1 / 2 s + jitter |
@@ -230,20 +231,26 @@ def build_ydl_opts(player_client, fmt, cookie_file):
         opts["cookiefile"] = cookie_file                 # Netscape temp file, 0600, deleted in finally (P23)
     return opts
 
-info = YoutubeDL(build_ydl_opts(None, "bestaudio/best", cookie_file)).extract_info(
-    f"https://www.youtube.com/watch?v={song_id}", download=False)
-fmt = select_audio_format(info)      # prefer itag STREAM_FORMAT, then m4a audio-only, then best audio
-wait_until(fmt.get("available_at"))  # §10 P26, capped at 30 s
-url = fmt["url"]
+for client in settings.YTDLP_PLAYER_CLIENTS:          # "default" = yt-dlp's own choice
+    opts = build_ydl_opts(client, "bestaudio/best", cookie_file_if_client_supports_cookies)
+    opts["ignore_no_formats_error"] = True             # warn, don't raise; we choose in Python
+    info = YoutubeDL(opts).extract_info(f"https://www.youtube.com/watch?v={song_id}", download=False)
+    stream = select_audio_format(info)   # itag STREAM_FORMAT > m4a audio-only > any audio-only; never muxed video
+    if stream: break                     # "Video unavailable"/"Private video" stops the rotation
+wait_until(stream.available_at)          # §10 P26, capped at 30 s
 ```
 
+Extraction lives in `services/extractor.py` (`StreamExtractor`), which returns an `ExtractedStream`: URL, itag, ext, MIME type, codec, file size (`filesize` or the URL's `clen=`), duration (`info["duration"]`), title, and expiry (the URL's `expire=` minus 5 min). It has no FastAPI imports and no knowledge of segments.
+
 - Use `www.youtube.com` watch URLs: `music.youtube.com` triggers "The page needs to be reloaded" more often.
-- **Client order**: yt-dlp's default client first. Without a PO token, `android` returns only muxed itag 18 (360p video), never audio-only 140 (§10 P26). Other clients (`android`, `web_safari`, `tv_embedded`, `mweb`) remain as fallbacks, each with `bestaudio/best` → `best` → `worst`.
+- **Client order** is the `YTDLP_PLAYER_CLIENTS` setting, default `["visionos", "default"]`, one extraction per client (at most 2, not 24). Measured 2026-10-31 (yt-dlp 2026.10.26): `visionos` returns itag 140 with no `available_at` delay (~1 s), but yt-dlp drops it when cookies are passed, so it runs anonymously. `default` (tv_samsung) returns itag 140 after a ~5 s delay and uses cookies when signed in. `web`, `web_music`, `web_safari`, `tv`, `ios`, `mweb`, `android_vr` returned no audio-only formats; `android` without a PO token returns only muxed itag 18 (§10 P26).
+- **Single flight**: concurrent callers for a song share one extraction, and one stream-info build. Failures are negative-cached (5 min, 30 min for `unavailable`). A 403 refresh passes the URL that failed, so N workers cause one re-extraction.
+- `/api/health` reports `services.extractor: {node, ejs, yt_dlp}`. Without `node`, extraction fails at once with `node_missing`.
 - No TLS shortcuts: `nocheckcertificate` is never set.
 
-Fetch the URL with CDN headers (cookie when signed in, §10 P1). If the body starts with `<?xml` or `<MPD` → DASH path. Otherwise → progressive path. Cache the URL per song (expires ~6 h; refresh on 403, §6.5).
+Fetch the URL with CDN headers (cookie when signed in, §10 P1). If the body starts with `<?xml` or `<MPD` → DASH path. Otherwise → progressive path, segmented from the extracted size and duration (HEAD / `Range: bytes=0-0` probe only when the size is unknown). The extracted stream is cached until its URL expires; refresh on 403 (§6.5).
 
-> **Current state**: yt-dlp returns direct googlevideo URLs, never MPD manifests, so the DASH path never runs and every song goes through the progressive fallback (F4). The strategy list is hard-coded and each request may extract more than once (F5). Improvement-plan Phases 1–2 close this.
+> **Current state**: yt-dlp returns direct googlevideo URLs, never MPD manifests, so the DASH path never runs and every song goes through the progressive fallback (F4). Phase 1 gave the progressive path real durations and sizes; Phase 2 adds a real segment table.
 
 ### 6.3 Manifest parsing (`utils/dash.py`)
 

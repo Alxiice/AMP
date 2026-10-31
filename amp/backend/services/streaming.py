@@ -1,7 +1,7 @@
 """StreamingService — DASH segment streaming core.
 
 Includes:
-  - SegmentFetcher (yt-dlp -> manifest URL)
+  - Stream info: StreamExtractor (services/extractor.py) -> segment table
   - ManifestParser (uses utils/dash.py)
   - DownloadManager (PriorityQueue + ThreadPoolExecutor, 4 workers)
   - PlaybackSession (in-memory, epoch-based)
@@ -30,6 +30,13 @@ from backend.config import settings
 from backend.database.models import Segment
 from backend.database.session import session_scope
 from backend.services.auth import get_auth_service
+from backend.services.extractor import (
+    BoundedDict,
+    ExtractedStream,
+    ExtractionError,
+    SingleFlight,
+    StreamExtractor,
+)
 from backend.utils.dash import (
     StreamInfo,
     SegmentInfo as DashSegmentInfo,
@@ -50,63 +57,6 @@ def validate_song_id(song_id: str) -> str:
     if not SONG_ID_RE.match(song_id):
         raise ValueError(f"Invalid song_id: {song_id!r}")
     return song_id
-
-
-def build_ydl_opts(player_client: Optional[str], fmt: Optional[str], cookie_file: Optional[str]) -> Dict[str, Any]:
-    """Build yt-dlp options with the shapes yt-dlp actually honours.
-
-    - js_runtimes is a top-level {runtime: {config}} dict (P2), not an extractor arg.
-    - extractor_args is {extractor: {key: [values]}} — a plain list is silently ignored.
-    - player_client=None keeps yt-dlp's default client selection.
-    """
-    opts: Dict[str, Any] = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "socket_timeout": 15,
-        "js_runtimes": {"node": {}},
-    }
-    if player_client:
-        opts["extractor_args"] = {"youtube": {"player_client": [player_client]}}
-    if fmt:
-        opts["format"] = fmt
-    if cookie_file:
-        opts["cookiefile"] = cookie_file
-    return opts
-
-
-# Some clients (e.g. TVHTML5) return URLs that 403 until a few seconds after
-# extraction; yt-dlp exposes this as the format's available_at timestamp.
-MAX_AVAILABLE_AT_WAIT_S = 30
-
-
-def _wait_until_available(fmt: Dict[str, Any], song_id: str) -> None:
-    """Sleep until the format's URL is live (yt-dlp's available_at), capped."""
-    available_at = fmt.get("available_at")
-    if not available_at:
-        return
-    delay = available_at - time.time()
-    if delay > 0:
-        delay = min(delay, MAX_AVAILABLE_AT_WAIT_S)
-        logger.info("Stream URL for %s not live yet, waiting %.1fs (available_at)", song_id, delay)
-        time.sleep(delay)
-
-
-def log_extraction_dependencies() -> None:
-    """Log whether yt-dlp's JS challenge solver prerequisites are present (P2)."""
-    import importlib.util
-    import shutil
-
-    node = shutil.which("node")
-    if node:
-        logger.info("JS runtime: node found at %s", node)
-    else:
-        logger.warning("JS runtime: node NOT found on PATH — yt-dlp cannot solve YouTube JS challenges")
-
-    if importlib.util.find_spec("yt_dlp_ejs") is not None:
-        logger.info("yt_dlp_ejs: importable")
-    else:
-        logger.warning('yt_dlp_ejs: NOT importable — install with: pip install -U "yt-dlp[default]"')
 
 
 # ---------------------------------------------------------------------------
@@ -163,49 +113,6 @@ class PlaybackInfo:
             "epoch": self.epoch,
             "last_updated": self.last_updated,
         }
-
-
-# ---------------------------------------------------------------------------
-# Bounded in-memory cache (P19)
-# ---------------------------------------------------------------------------
-
-
-class BoundedDict:
-    """A dict with a max size; evicts oldest (insertion order) when full."""
-
-    def __init__(self, maxsize: int = 256) -> None:
-        self._data: Dict[str, Any] = {}
-        self._maxsize = maxsize
-        self._lock = threading.Lock()
-
-    def get(self, key: str) -> Any:
-        with self._lock:
-            return self._data.get(key)
-
-    def set(self, key: str, value: Any) -> None:
-        with self._lock:
-            if key in self._data:
-                del self._data[key]
-            elif len(self._data) >= self._maxsize:
-                oldest = next(iter(self._data))
-                del self._data[oldest]
-            self._data[key] = value
-
-    def delete(self, key: str) -> None:
-        with self._lock:
-            self._data.pop(key, None)
-
-    def clear(self) -> None:
-        with self._lock:
-            self._data.clear()
-
-    def __contains__(self, key: str) -> bool:
-        with self._lock:
-            return key in self._data
-
-    def __len__(self) -> int:
-        with self._lock:
-            return len(self._data)
 
 
 # ---------------------------------------------------------------------------
@@ -310,20 +217,17 @@ class DownloadManager:
 class StreamingService:
     """Thread-safe singleton: DASH segment streaming, cache, playback session."""
 
-    STREAM_URL_TTL_S = 6 * 3600  # ~6 hours (P4)
-    EXTRACT_FAILURE_TTL_S = 300  # 5 min negative cache for failed extractions
-
     def __init__(self) -> None:
         self._lock = threading.RLock()
         self._auth = get_auth_service()
+        self._extractor = StreamExtractor(self._auth)
         self._dl_manager = DownloadManager()
         self._dl_manager.set_handler(self._process_task)
 
         # Bounded in-memory caches (P19)
         self._stream_info_cache: BoundedDict = BoundedDict(256)
-        self._stream_url_cache: BoundedDict = BoundedDict(256)      # song_id -> (url, fetched_at)
         self._segment_table_cache: BoundedDict = BoundedDict(256)   # song_id -> StreamInfo
-        self._extract_failures: Dict[str, float] = {}               # song_id -> failed_at (negative cache)
+        self._info_flight: SingleFlight[str, Optional[StreamInfo]] = SingleFlight()
         self._epochs: Dict[str, int] = {}                            # song_id -> epoch
         self._epochs_lock = threading.Lock()
 
@@ -478,7 +382,7 @@ class StreamingService:
             self._dl_manager.enqueue(song_id, idx, pri, epoch)
             ahead_ms += info.segments[idx].duration_ms
 
-    # --- Stream info (manifest fetch + parse) ---
+    # --- Stream info (extraction + manifest/probe), single-flight per song ---
 
     def get_stream_info(self, song_id: str) -> Optional[StreamInfo]:
         validate_song_id(song_id)
@@ -489,23 +393,38 @@ class StreamingService:
         if cached is not None:
             return cached
 
+        def load() -> Optional[StreamInfo]:
+            # Re-check: a flight that just landed may have filled the cache
+            cached = self._stream_info_cache.get(song_id)
+            if cached is not None:
+                return cached
+            return self._store_stream_info(song_id, self._build_stream_info(song_id))
+
         try:
-            info = self._build_stream_info(song_id)
-            if info:
-                self._stream_info_cache.set(song_id, info)
-                self._segment_table_cache.set(song_id, info)
-            return info
+            return self._info_flight.do(song_id, load)
+        except ExtractionError as e:
+            logger.warning("No stream for %s: %s (%s)", song_id, e.code, e)
+            return None
         except Exception as e:
             logger.error("Failed to build stream info for %s: %s", song_id, e)
             return None
 
-    def _build_stream_info(self, song_id: str) -> Optional[StreamInfo]:
-        """Fetch stream URL via yt-dlp, then fetch manifest and parse."""
-        url = self._get_stream_url(song_id)
-        if not url:
-            logger.error("No stream URL for %s", song_id)
-            return None
+    def _store_stream_info(self, song_id: str, info: Optional[StreamInfo]) -> Optional[StreamInfo]:
+        if info:
+            self._stream_info_cache.set(song_id, info)
+            self._segment_table_cache.set(song_id, info)
+        else:
+            self._stream_info_cache.delete(song_id)
+            self._segment_table_cache.delete(song_id)
+        return info
 
+    def _build_stream_info(self, song_id: str) -> Optional[StreamInfo]:
+        """Extract the stream (raises ExtractionError), then build its segment table."""
+        return self._build_from_stream(song_id, self._extractor.get(song_id))
+
+    def _build_from_stream(self, song_id: str, stream: ExtractedStream) -> Optional[StreamInfo]:
+        """Fetch the start of the URL to tell a DASH manifest from a progressive file."""
+        url = stream.url
         headers = self._auth.get_cdn_headers()
 
         # Fetch the URL to check if it's DASH (XML) or progressive (binary)
@@ -540,12 +459,11 @@ class StreamingService:
                     timeout=(settings.HTTP_TIMEOUT_CONNECT_S, settings.HTTP_TIMEOUT_READ_S),
                 )
                 manifest_resp.raise_for_status()
-                title = self._get_song_title(song_id)
                 info = parse_mpd(
                     manifest_resp.content,
                     song_id=song_id,
-                    title=title,
-                    mime_hint="audio/mp4",
+                    title=stream.title,
+                    mime_hint=stream.mime_type,
                 )
                 info.base_url = url if not info.base_url else info.base_url
                 logger.info(
@@ -557,18 +475,22 @@ class StreamingService:
                 logger.error("Failed to parse DASH manifest for %s: %s", song_id, e)
                 return None
         else:
-            return self._build_progressive_info(song_id, url, headers)
+            return self._build_progressive_info(song_id, stream, headers)
 
-    def _build_progressive_info(self, song_id: str, url: str, headers: Dict[str, str]) -> Optional[StreamInfo]:
-        """Progressive fallback: determine file size, create proportional segments."""
-        total_bytes = self._probe_content_length(url, headers)
+    def _build_progressive_info(
+        self, song_id: str, stream: ExtractedStream, headers: Dict[str, str],
+    ) -> Optional[StreamInfo]:
+        """Progressive fallback: proportional segments from the extracted size and duration."""
+        url = stream.url
+        total_bytes = stream.filesize or self._probe_content_length(url, headers)
         if total_bytes <= 0:
             logger.error("Cannot determine size for progressive stream %s", song_id)
             return None
 
-        duration_ms = self._get_song_duration(song_id)
+        duration_ms = stream.duration_ms
         if duration_ms <= 0:
-            duration_ms = 180_000  # fallback 3 min
+            logger.error("Unknown duration for progressive stream %s", song_id)
+            return None
 
         bytes_per_ms = total_bytes / duration_ms
         seg_duration_ms = settings.SEGMENT_TARGET_SEC * 1000
@@ -591,36 +513,23 @@ class StreamingService:
 
         info = StreamInfo(
             song_id=song_id,
-            title=self._get_song_title(song_id),
+            title=stream.title,
             duration_ms=duration_ms,
-            mime_type="audio/mp4",
+            mime_type=stream.mime_type,
             init_range=(0, -1),  # no init segment — first segment starts at byte 0
             segments=segments,
             is_dash=False,
             base_url=url,
         )
         logger.info(
-            "Progressive fallback for %s: %d segments, %d bytes",
-            song_id, len(segments), total_bytes,
+            "Progressive stream for %s: %d segments, %d bytes, %.1fs, %s",
+            song_id, len(segments), total_bytes, duration_ms / 1000, stream.mime_type,
         )
         return info
 
     def _probe_content_length(self, url: str, headers: Dict[str, str]) -> int:
-        """P5: Three strategies to get content length. Returns 0 on failure."""
-        # Strategy 1: clen= param
-        try:
-            clen_url = url + ("&" if "?" in url else "?") + "clen=1"
-            resp = self._http.head(
-                clen_url, headers=headers, allow_redirects=True,
-                timeout=(settings.HTTP_TIMEOUT_CONNECT_S, settings.HTTP_TIMEOUT_READ_S),
-            )
-            cl = resp.headers.get("Content-Length")
-            if cl and int(cl) > 0:
-                return int(cl)
-        except Exception:
-            pass
-
-        # Strategy 2: HEAD on original URL
+        """P5: content length when extraction didn't provide it. Returns 0 on failure."""
+        # Strategy 1: HEAD
         try:
             resp = self._http.head(
                 url, headers=headers, allow_redirects=True,
@@ -632,7 +541,7 @@ class StreamingService:
         except Exception:
             pass
 
-        # Strategy 3: Range probe bytes=0-0
+        # Strategy 2: Range probe bytes=0-0
         try:
             resp = self._http.get(
                 url, headers={**headers, "Range": "bytes=0-0"},
@@ -648,276 +557,13 @@ class StreamingService:
 
         return 0
 
-    def _get_stream_url(self, song_id: str) -> Optional[str]:
-        """Get the stream URL via yt-dlp. Cached per song with TTL (P3, P4).
-
-        Also has a negative cache: if extraction recently failed, return None
-        immediately without retrying yt-dlp (avoids hammering on broken videos).
-        """
-        cached = self._stream_url_cache.get(song_id)
-        if cached is not None:
-            url, fetched_at = cached
-            if time.time() - fetched_at < self.STREAM_URL_TTL_S:
-                return url
-            logger.info("Stream URL expired for %s, refreshing", song_id)
-
-        # Negative cache: skip if recently failed
-        failed_at = self._extract_failures.get(song_id)
-        if failed_at is not None:
-            if time.time() - failed_at < self.EXTRACT_FAILURE_TTL_S:
-                logger.debug("Skipping extraction for %s (recently failed)", song_id)
-                return None
-            else:
-                del self._extract_failures[song_id]
-
-        return self._extract_stream_url(song_id)
-
-    def _extract_stream_url(self, song_id: str) -> Optional[str]:
-        """Use yt-dlp to extract the stream URL. P2: js_runtimes=node required.
-
-        Multi-strategy approach to avoid "The page needs to be reloaded" error:
-        - Tries multiple player clients (android, web_safari, tv_embedded, mweb)
-        - Uses www.youtube.com (music.youtube.com subdomain triggers reload more often)
-        - Format selector: 'bestaudio/best' then falls back to 'best'
-
-        Until Phase 0 the options used list-form extractor_args, which yt-dlp
-        ignores, so every attempt ran with yt-dlp's default client. With the
-        shape fixed (build_ydl_opts) the rotation below takes effect.
-        """
-        cookie_file = None
+    def refresh_stream_url(self, song_id: str, stale_url: Optional[str] = None) -> Optional[str]:
+        """Re-extract the stream URL (P4: on 403); once per stale URL."""
         try:
-            if self._auth.is_authenticated:
-                cookie_file = self._auth.write_netscape_cookie_file()
-
-            watch_url = f"https://www.youtube.com/watch?v={song_id}"
-
-            # Strategy list: (player_client, format_selector); None = yt-dlp's
-            # default client. Default goes first: without a PO token, android
-            # only returns muxed itag 18 (360p video), never audio-only itag 140.
-            # "worst" is the last resort per client. Phase 1 makes this a setting.
-            strategies: List[Tuple[Optional[str], str]] = [
-                (None, "bestaudio/best"),
-                (None, "best"),
-                (None, "worst"),
-                ("android", "bestaudio/best"),
-                ("android", "best"),
-                ("android", "worst"),
-                ("web_safari", "bestaudio/best"),
-                ("web_safari", "best"),
-                ("web_safari", "worst"),
-                ("tv_embedded", "bestaudio/best"),
-                ("tv_embedded", "best"),
-                ("tv_embedded", "worst"),
-                ("mweb", "bestaudio/best"),
-                ("mweb", "best"),
-                ("mweb", "worst"),
-            ]
-
-            for player_client, fmt in strategies:
-                client_label = player_client or "default"
-                logger.info(
-                    "Trying extraction for %s: player_client=%s, format=%s",
-                    song_id, client_label, fmt,
-                )
-
-                ydl_opts = build_ydl_opts(player_client, fmt, cookie_file)
-                prefer_audio = (fmt in ("best", "worst"))
-                url = self._try_extract(ydl_opts, watch_url, song_id, prefer_audio=prefer_audio)
-
-                if url:
-                    self._stream_url_cache.set(song_id, (url, time.time()))
-                    self._extract_failures.pop(song_id, None)
-                    logger.info(
-                        "Extracted stream URL for %s via player_client=%s, format=%s",
-                        song_id, client_label, fmt,
-                    )
-                    return url
-
-                logger.warning(
-                    "Extraction failed for %s with player_client=%s, format=%s — trying next strategy",
-                    song_id, client_label, fmt,
-                )
-
-            logger.error("No stream URL found for %s after all %d strategies", song_id, len(strategies))
-            self._log_available_formats(song_id, cookie_file)
-            self._extract_failures[song_id] = time.time()
+            return self._extractor.refresh(song_id, stale_url).url
+        except ExtractionError as e:
+            logger.warning("Refresh failed for %s: %s (%s)", song_id, e.code, e)
             return None
-
-        except Exception as e:
-            logger.error("yt-dlp extraction failed for %s: %s", song_id, e)
-            self._extract_failures[song_id] = time.time()
-            return None
-        finally:
-            if cookie_file:
-                try:
-                    os.unlink(cookie_file)  # P23: always delete
-                except OSError:
-                    pass
-
-    def _log_available_formats(self, song_id: str, cookie_file: Optional[str]) -> None:
-        """Diagnostic: extract with no format selector and log available format IDs.
-
-        Called when all extraction strategies fail, to help debug why a video
-        has no playable formats (region-lock, age-restriction, etc.).
-        """
-        try:
-            from yt_dlp import YoutubeDL
-
-            watch_url = f"https://www.youtube.com/watch?v={song_id}"
-            ydl_opts = build_ydl_opts(None, None, cookie_file)
-            ydl_opts["listformats"] = True
-
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(watch_url, download=False)
-
-            formats = info.get("formats", [])
-            if not formats:
-                logger.error("Diagnostic for %s: no formats returned at all (video may be private, deleted, or region-locked)", song_id)
-                return
-
-            fmt_list = []
-            for f in formats:
-                fid = f.get("format_id", "?")
-                ext = f.get("ext", "?")
-                acodec = f.get("acodec", "?")
-                vcodec = f.get("vcodec", "?")
-                abr = f.get("abr", f.get("tbr", 0))
-                url_present = "yes" if f.get("url") else "NO"
-                fmt_list.append(f"  itag={fid} ext={ext} acodec={acodec} vcodec={vcodec} abr={abr} url={url_present}")
-
-            audio_count = sum(1 for f in formats if f.get("acodec") and f["acodec"] != "none")
-            logger.error(
-                "Diagnostic for %s: %d total formats, %d with audio:\n%s",
-                song_id, len(formats), audio_count, "\n".join(fmt_list),
-            )
-        except Exception as e:
-            logger.error("Diagnostic extraction failed for %s: %s", song_id, e)
-
-    def _try_extract(
-        self,
-        ydl_opts: Dict[str, Any],
-        watch_url: str,
-        song_id: str,
-        prefer_audio: bool = False,
-    ) -> Optional[str]:
-        """Single yt-dlp extraction attempt. Returns the stream URL or None.
-
-        Catches DownloadError internally so the caller's fallback logic can
-        run. Prefers itag 140 (AAC/MP4) from the formats list over yt-dlp's
-        auto-selected format (which may be Opus/WebM itag 251).
-
-        If yt-dlp raises "Requested format is not available", retries without
-        a format selector so yt-dlp uses its default and we can filter in Python.
-        """
-        from yt_dlp import YoutubeDL
-        from yt_dlp.utils import DownloadError
-
-        info = None
-
-        # First attempt: with the specified format selector
-        try:
-            with YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(watch_url, download=False)
-        except DownloadError as e:
-            err_str = str(e)
-            if "not available" in err_str.lower() or "format is not available" in err_str.lower():
-                # Format selector matched nothing — retry without format key
-                # so yt-dlp uses its default and returns all formats for Python-side filtering
-                logger.info(
-                    "Format selector '%s' matched nothing for %s, retrying without format selector",
-                    ydl_opts.get("format", "(default)"), song_id,
-                )
-                retry_opts = {k: v for k, v in ydl_opts.items() if k != "format"}
-                try:
-                    with YoutubeDL(retry_opts) as ydl:
-                        info = ydl.extract_info(watch_url, download=False)
-                except DownloadError as e2:
-                    logger.warning("yt-dlp retry without format also failed for %s: %s", song_id, e2)
-                    return None
-                except Exception as e2:
-                    logger.error("yt-dlp retry without format error for %s: %s", song_id, e2)
-                    return None
-            else:
-                logger.warning("yt-dlp format selection failed for %s: %s", song_id, e)
-                return None
-        except Exception as e:
-            logger.error("yt-dlp extraction error for %s: %s", song_id, e)
-            return None
-
-        if info is None:
-            return None
-
-        fmt = self._select_audio_format(info, song_id, prefer_audio)
-        if fmt is None:
-            return None
-        _wait_until_available(fmt, song_id)
-        return fmt["url"]
-
-    def _select_audio_format(
-        self, info: Dict[str, Any], song_id: str, prefer_audio: bool
-    ) -> Optional[Dict[str, Any]]:
-        """Pick the format dict (with a "url") to stream from a yt-dlp info dict."""
-        # First, scan formats list for our preferred itag (140 = AAC/MP4)
-        if "formats" in info:
-            for f in info["formats"]:
-                if (
-                    str(f.get("format_id", "")) == settings.STREAM_FORMAT
-                    and f.get("acodec")
-                    and f["acodec"] != "none"
-                    and f.get("url")
-                ):
-                    return f
-
-        # Use yt-dlp's selected format URL
-        if "url" in info:
-            if prefer_audio:
-                acodec = info.get("acodec", "")
-                vcodec = info.get("vcodec", "none")
-                if vcodec != "none" and acodec != "none":
-                    # Has both video and audio — try to find audio-only in formats
-                    pass  # fall through to formats filtering
-                elif acodec and acodec != "none":
-                    return info
-            else:
-                return info
-
-        # Filter from formats list for audio-only
-        if "formats" in info:
-            audio_formats = [
-                f for f in info["formats"]
-                if f.get("acodec") and f["acodec"] != "none" and f.get("url")
-            ]
-            if not audio_formats:
-                # No audio-only formats — log available formats for debugging
-                avail = [f.get("format_id", "?") for f in info.get("formats", [])[:10]]
-                logger.error("No audio formats for %s. Available: %s", song_id, avail)
-                return None
-
-            # Prefer MP4 container (m4a) for webview compatibility
-            mp4_audio = [f for f in audio_formats if f.get("ext") in ("mp4", "m4a")]
-            if mp4_audio:
-                mp4_audio.sort(key=lambda f: f.get("abr") or f.get("tbr") or 0, reverse=True)
-                return mp4_audio[0]
-
-            # Fall back to highest bitrate audio
-            audio_formats.sort(key=lambda f: f.get("abr") or f.get("tbr") or 0, reverse=True)
-            return audio_formats[0]
-
-        # requested_formats (DASH/HLS split)
-        if "requested_formats" in info:
-            for f in info["requested_formats"]:
-                if f.get("acodec") and f["acodec"] != "none" and f.get("url"):
-                    return f
-
-        return None
-
-    def refresh_stream_url(self, song_id: str) -> Optional[str]:
-        """Force refresh the stream URL (P4: on 403)."""
-        self._stream_url_cache.delete(song_id)
-        self._stream_info_cache.delete(song_id)
-        self._segment_table_cache.delete(song_id)
-        self._extract_failures.pop(song_id, None)
-        return self._extract_stream_url(song_id)
 
     # --- Segment status ---
 
@@ -1025,9 +671,10 @@ class StreamingService:
             except _Auth403Error:
                 # P4: refresh stream URL and rebuild. A CDN 403 means the signed
                 # URL expired — not the YouTube session, so auth state is untouched
-                # and the refresh still extracts with cookies.
+                # and the refresh still extracts with cookies. Passing the URL that
+                # got the 403 lets concurrent workers share one re-extraction.
                 logger.warning("403 on %s seg %d, refreshing stream URL", song_id, index)
-                new_info = self._rebuild_after_403(song_id)
+                new_info = self._rebuild_after_403(song_id, url)
                 if new_info is None:
                     self.set_segment_status(song_id, index, SegmentStatus.ERROR)
                     return
@@ -1218,14 +865,23 @@ class StreamingService:
         except Exception:
             pass
 
-    def _rebuild_after_403(self, song_id: str) -> Optional[StreamInfo]:
-        """Refresh stream URL and rebuild segment table (P4)."""
-        self.refresh_stream_url(song_id)
-        info =self._build_stream_info(song_id)
-        if info:
-            self._stream_info_cache.set(song_id, info)
-            self._segment_table_cache.set(song_id, info)
-        return info
+    def _rebuild_after_403(self, song_id: str, stale_url: str) -> Optional[StreamInfo]:
+        """Refresh stream URL and rebuild segment table (P4), once per stale URL."""
+        def load() -> Optional[StreamInfo]:
+            cached = self._stream_info_cache.get(song_id)
+            if cached is not None and cached.base_url != stale_url:
+                return cached  # another worker already rebuilt it
+            # stale_url is the segment URL; for progressive streams that is the
+            # extracted URL itself (DASH BaseURL may differ — Phase 2).
+            stream = self._extractor.refresh(song_id, stale_url)
+            return self._store_stream_info(song_id, self._build_from_stream(song_id, stream))
+
+        try:
+            return self._info_flight.do(song_id, load)
+        except ExtractionError as e:
+            logger.warning("Refresh failed for %s: %s (%s)", song_id, e.code, e)
+            self._store_stream_info(song_id, None)
+            return None
 
     # --- Cache management (§6.6) ---
 
@@ -1545,26 +1201,6 @@ class StreamingService:
                 if not chunk:
                     break
                 yield chunk
-
-    # --- DB helpers ---
-
-    def _get_song_title(self, song_id: str) -> str:
-        try:
-            from backend.database.models import Song
-            with session_scope() as session:
-                song = session.get(Song, song_id)
-                return song.title if song else ""
-        except Exception:
-            return ""
-
-    def _get_song_duration(self, song_id: str) -> int:
-        try:
-            from backend.database.models import Song
-            with session_scope() as session:
-                song = session.get(Song, song_id)
-                return song.duration_ms if song else 0
-        except Exception:
-            return 0
 
     def get_stream_info_summary(self, song_id: str) -> Optional[Dict[str, Any]]:
         """Return a JSON-serializable summary of StreamInfo."""
