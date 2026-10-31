@@ -12,6 +12,8 @@ P21: Blocking handlers are plain `def` (threadpool), never `async def`.
 
 from __future__ import annotations
 
+import os
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request
@@ -72,7 +74,23 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
     # Token is optional — if not set, the API is open (no Bearer auth required).
     # Host header validation always applies (DNS-rebinding guard, P17).
 
-    app = FastAPI(title="AMP v2 Backend", version="2.0.0")
+    # Sync work in an async lifespan is fine here: nothing is served yet / anymore
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        init_db()
+        get_extraction_dependencies()  # computed once, logged (P2)
+        get_auth_service()  # loads the credential store now, so a v1→v2 migration is in the startup log
+        svc = get_streaming_service()
+        svc.start()
+        auth_mode = "token required" if token else "open (no token)"
+        logger.info("AMP v2 backend started on %s:%d (auth=%s)", settings.HOST, settings.PORT, auth_mode)
+        try:
+            yield
+        finally:
+            get_streaming_service().stop()
+            logger.info("AMP v2 backend shut down")
+
+    app = FastAPI(title="AMP v2 Backend", version="2.0.0", lifespan=lifespan)
 
     # --- Auth + Host middleware (P17) ---
     class AuthMiddleware(BaseHTTPMiddleware):
@@ -121,23 +139,6 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
         expose_headers=["Content-Range", "Content-Length", "Content-Type", "Accept-Ranges"],
     )
 
-    # --- Startup / Shutdown ---
-    @app.on_event("startup")
-    def _startup() -> None:
-        init_db()
-        get_extraction_dependencies()  # computed once, logged (P2)
-        get_auth_service()  # loads the credential store now, so a v1→v2 migration is in the startup log
-        svc = get_streaming_service()
-        svc.start()
-        auth_mode = "token required" if token else "open (no token)"
-        logger.info("AMP v2 backend started on %s:%d (auth=%s)", settings.HOST, settings.PORT, auth_mode)
-
-    @app.on_event("shutdown")
-    def _shutdown() -> None:
-        svc = get_streaming_service()
-        svc.stop()
-        logger.info("AMP v2 backend shut down")
-
     # --- Root + Health (no auth required) ---
     @app.get("/")
     def root():
@@ -149,6 +150,8 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
         auth = get_auth_service()
         return {
             "status": "ok",
+            "app": "AMP v2",  # lifecycle.probe_backend: tells an AMP backend from anything else on the port
+            "pid": os.getpid(),
             "services": {
                 "auth": auth.state.value,
                 "streaming": "running",

@@ -7,10 +7,14 @@ variables (or .env) with the defaults defined here.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+APP_IDENTIFIER = "com.amp.v2"  # tauri.conf.json "identifier"
 
 
 def _project_root() -> Path:
@@ -19,8 +23,24 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def is_frozen() -> bool:
+    """True inside the PyInstaller sidecar binary."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def app_data_dir() -> Path:
+    """Per-user data dir, same as Tauri's app_data_dir() for APP_IDENTIFIER."""
+    if sys.platform == "win32":
+        base = Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share")
+    return base / APP_IDENTIFIER
+
+
 # Private path attributes managed by Settings.configure_paths()
-_PATH_ATTRS = ("_root", "_cache_dir", "_segments_dir", "_logs_dir", "_db_file")
+_PATH_ATTRS = ("_root", "_data_dir", "_cache_dir", "_segments_dir", "_logs_dir", "_db_file")
 
 
 class Settings(BaseSettings):
@@ -65,6 +85,7 @@ class Settings(BaseSettings):
     # private-attr storage breaks monkeypatch.undo). Use configure_paths /
     # snapshot_paths / restore_paths instead.
     _root: Path = Path(".")
+    _data_dir: Path = Path(".")
     _cache_dir: Path = Path(".")
     _segments_dir: Path = Path(".")
     _logs_dir: Path = Path(".")
@@ -74,9 +95,18 @@ class Settings(BaseSettings):
         self.configure_paths()
 
     def configure_paths(self, data_dir: Path | None = None, db_file: Path | None = None) -> None:
-        """(Re)compute cache/segments/logs/db paths and create the directories."""
+        """(Re)compute cache/segments/logs/db paths and create the directories.
+
+        Without data_dir: amp/.amp/ and amp/userdb.sqlite from a checkout, or the
+        per-user app data dir in the sidecar binary (__file__ is then PyInstaller's
+        temp extraction dir, wiped on every launch — F16).
+        """
         self._root = _project_root()
+        if data_dir is None and is_frozen():
+            data_dir = app_data_dir()
+            db_file = db_file or data_dir / "userdb.sqlite"
         amp = Path(data_dir) if data_dir is not None else self._root / self.AMP_DIR
+        self._data_dir = amp
         self._cache_dir = amp / "cache"
         self._segments_dir = self._cache_dir / "segments"
         self._logs_dir = amp / "logs"
@@ -96,6 +126,14 @@ class Settings(BaseSettings):
         """Restore computed paths captured by snapshot_paths()."""
         for name in _PATH_ATTRS:
             setattr(self, name, snapshot[name])
+
+    @property
+    def data_dir(self) -> Path:
+        return self._data_dir
+
+    @property
+    def pid_file(self) -> Path:
+        return self._data_dir / "backend.pid"
 
     @property
     def cache_dir(self) -> Path:

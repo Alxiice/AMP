@@ -29,13 +29,17 @@ python -m venv venv
 venv/Scripts/activate          # Unix: source venv/bin/activate
 pip install -r requirements.lock
 
-python -m backend.main --debug  # backend on http://127.0.0.1:8000
+python scripts/build_sidecar.py  # sidecar binary (Tauri requires the file, even in dev)
 
 cd frontend && npm install
-npm run tauri dev               # desktop app (needs the Rust toolchain)
+npm run tauri dev               # desktop app (needs the Rust toolchain); starts its own backend
+npx tauri build                 # installers: src-tauri/target/release/bundle/{msi,nsis}/
 ```
 
-Node.js must be on `PATH`: yt-dlp uses it to solve YouTube's JS challenges.
+The desktop app is the normal entry point: it runs the backend on a free port with its data in
+the per-user app data dir and stops it on exit. For the browser-only setup, run
+`python -m backend.main --debug` (backend on http://127.0.0.1:8000) and `npm run dev`, or use the
+`amp/app.py` debug launcher. Node.js must be on `PATH`: yt-dlp uses it to solve YouTube's JS challenges.
 Full setup, configuration and API reference: [amp/README.md](amp/README.md).
 
 ## Quality checks
