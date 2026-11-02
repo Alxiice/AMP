@@ -2,7 +2,7 @@
 
 > **Purpose**: Authoritative spec for AMP v2. An agent reading only this document should be able to build the project. Where v1 was exploratory, this version is prescriptive: decisions are made, alternatives are named only where they remain open.
 
-> **Status (2026-10-31)**: Phases 1–5 below are implemented; refactoring Phase 0 of [improvement-plan/](improvement-plan/README.md) is done (AGENTS.md Revisions 7–8). Where the current code still differs from this spec, the section says so in a **Current state** note and names the improvement-plan phase that closes the gap. Progress: [AGENTS.md](AGENTS.md).
+> **Status (2026-10-31)**: Phases 1–5 below are implemented, and so are refactoring phases 0–6 (AGENTS.md Revisions 7–14; the plan files were removed in Revision 15 and remain in git history). Progress: [AGENTS.md](AGENTS.md). Readable usage guide and code reference: [docs/](docs/index.md) (MkDocs).
 
 > **Scope note**: Personal prototype. Not for distribution. Cookie-based YouTube extraction is against YouTube's ToS; accepted risk for this project. External tools (yt-dlp, Node.js) are allowed to break; tests pin two known-good video IDs and will be updated if they break.
 
@@ -92,7 +92,7 @@
 (repo root)
 ├── README.md                   # logo, CI badges, quick start, doc index
 ├── DESIGN_DOC_2.md / AGENTS.md # spec / progress tracker
-├── improvement-plan/           # refactoring phases 0–6
+├── mkdocs.yml, docs/           # documentation site (usage + code)
 ├── icon/                       # logo-square.svg, logo-round.svg
 ├── .github/workflows/          # python-ci.yml, tauri-build.yml
 ├── .ruff.toml
@@ -225,7 +225,7 @@ A YouTube audio stream URL (from yt-dlp) is a direct googlevideo URL for one fil
 - **itag 140 (AAC)** is a **fragmented MP4**: `[ftyp][moov][sidx][moof][mdat][moof][mdat]…`. The `sidx` (Segment Index) lists every fragment's byte size and duration: an exact segment table. The **init segment** is everything before the first fragment (`ftyp + moov + sidx`); `init + segments` concatenated is byte-for-byte the CDN file.
 - **itag 251 (WebM/Opus)** keeps its index in `Cues`, which is not parsed: it falls back to proportional chunking with the extracted size and duration (§6.4).
 
-> **History**: v2 originally expected yt-dlp to return a DASH **MPD** manifest and parsed it in `utils/dash.py`. yt-dlp never did, so that path never ran and was removed in improvement-plan Phase 2.
+> **History**: v2 originally expected yt-dlp to return a DASH **MPD** manifest and parsed it in `utils/dash.py`. yt-dlp never did, so that path never ran and was removed in refactoring Phase 2 (AGENTS.md Revision 10).
 
 ### 6.2 Getting the stream URL + index
 
@@ -424,7 +424,7 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 - `setup()`: port = `AMP_PORT` or a free port (bind `127.0.0.1:0`, drop); data dir = `app.path().app_data_dir()` (`%APPDATA%\com.amp.v2` on Windows). Spawn with `--host 127.0.0.1 --port <p> --data-dir <dir> --parent-watch`: in debug builds `<amp>/venv` Python (or `AMP_PYTHON`) `-m backend.main` from `amp/`; in release builds the PyInstaller sidecar `amp-backend` (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>[.exe]`, built by `scripts/build_sidecar.py`). `set_process_group(true)` (a Windows job object): the venv launcher and the PyInstaller bootloader both start a second process. The environment is inherited (Node must stay on `PATH`), plus `PYTHONIOENCODING=utf-8`.
 - Output: stdout/stderr lines decoded with `String::from_utf8_lossy` (P7), kept in a 1000-line ring (`backend_logs`) and emitted as `backend-log`; `Terminated` of the current backend → `backend-status {state: "stopped"}`.
-- Commands: `backend_info() → {port, token}` (token always `null` until improvement-plan 5.6), `backend_logs()`, `restart_backend()`.
+- Commands: `backend_info() → {port, token}` (token always `null` until per-launch tokens (AGENTS.md Known Issues) are done), `backend_logs()`, `restart_backend()`.
 - Exit (`RunEvent::Exit`): write `exit` to the backend's stdin, wait ≤ 2 s, then kill the process tree.
 - **Parent watch** (`--parent-watch`): a daemon thread reads stdin; EOF (the app died, even from the Task Manager) or `exit` → graceful uvicorn shutdown, `os._exit` after 1.5 s at the latest.
 - `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit. At startup a WARNING is logged if the recorded backend still answers `/api/health` with that `pid` (`app: "AMP v2"`). `app.py` uses it for Force Kill.
@@ -439,7 +439,7 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 | `PlayerBar` (persistent) | play/pause/stop, time, volume, thumbnail/title; segment bar (one cell per segment, colored by status, click-to-seek; `/chunks` polled at 500 ms **with an in-flight guard**, §10 P12). Load sequence: `/play` (abortable) → generation check → `audio.src`; error codes mapped to text (`player/errors.ts`); one reload after a mid-stream network error; TTFA logged to the API relay |
 | `Search` | query box, results list, play per result |
 | `Library` | liked songs list; "Sign in to see your library" when signed out / on 401 |
-| `Playlists` | user playlists + tracks; same sign-in prompt |
+| `Playlists` | user playlists as cards (no track view yet); same sign-in prompt |
 | `Auth` | three things: status (+ migration warning), "Sign in with YouTube" (Tauri webview), collapsed "Advanced" (paste Cookie header, Firefox import) |
 | Sidebar | session badge `Signed in` / `Signed out` / `Session expired — reconnect` → `/auth`; `/api/auth/status` polled every 60 s (in-flight guard) and after any 401 from `/api/user/*` (`authSession.ts`) |
 | `Logs` | backend stdout, streaming logs, API log relay |
@@ -565,7 +565,7 @@ Structure, config, logging, DB, server (token auth, CORS), AuthService, YouTubeS
 *Verify*: server starts on 127.0.0.1; search works unauthenticated; browser-cookie import signs in; liked songs load.
 
 **Phase 2 — DASH streaming core**
-Segment table (originally an MPD parser; now the fMP4 `sidx`, improvement-plan Phase 2), DownloadManager, atomic verified downloads, LRU cache + reconciliation, Range-capable audio endpoint, buffer-ahead, epoch seek.
+Segment table (originally an MPD parser; now the fMP4 `sidx`, refactoring Phase 2 (AGENTS.md Revision 10)), DownloadManager, atomic verified downloads, LRU cache + reconciliation, Range-capable audio endpoint, buffer-ahead, epoch seek.
 *Verify*: with one pinned song — first audio < 300 ms; `curl -r 0-1023` returns 206 with correct bytes; seek works; second launch serves from cache instantly.
 
 **Phase 3 — Tauri shell + player**
@@ -578,7 +578,7 @@ Logs page, MSE upgrade (optional, §8.4), error surfacing (expired session, unpl
 **Phase 5 — Packaging + tests**
 PyInstaller sidecar, `tauri build`, full test suite green, README.
 
-**Status**: Phases 1–5 are implemented. The full suite is green, and the PyInstaller sidecar and `tauri build` work (the latter since Revision 8). Exact segment tables (improvement-plan Phase 2), the G1 latency target and packaged-sidecar runtime are not met yet; the [improvement plan](improvement-plan/README.md) (refactoring phases 0–6) tracks the remaining work; Phases 0–2 are done.
+**Status**: Phases 1–5 are implemented, and refactoring phases 0–6 are done (AGENTS.md Revisions 7–14): exact segment tables from the sidx (Revision 10), G1 met for cached songs (Revision 12), the packaged sidecar starts, plays and stops with the app (Revision 14). Open items are listed under "Known Issues / TODO" in AGENTS.md.
 
 ---
 

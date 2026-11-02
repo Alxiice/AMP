@@ -1,0 +1,92 @@
+site_name: AMP v2
+site_description: Another Music Player — a desktop player for the YouTube Music library
+repo_url: https://github.com/Alxiice/AMP
+repo_name: Alxiice/AMP
+edit_uri: edit/master/docs/
+
+theme:
+  name: material
+  logo: assets/logo-square.svg
+  favicon: assets/logo-square.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: deep purple
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: deep purple
+      accent: green
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - search.highlight
+    - content.code.copy
+    - content.tabs.link
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.inlinehilite
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Usage:
+      - usage/index.md
+      - Install & launch: usage/install.md
+      - Using the app: usage/using-the-app.md
+      - Signing in: usage/sign-in.md
+      - Configuration: usage/configuration.md
+      - Troubleshooting: usage/troubleshooting.md
+      - Debug launcher & manual runs: usage/debugging.md
+  - Code:
+      - code/index.md
+      - Repository layout: code/layout.md
+      - Backend:
+          - code/backend/index.md
+          - HTTP API: code/backend/api.md
+          - Stream extraction: code/backend/extraction.md
+          - Segment table: code/backend/segment-table.md
+          - Download pipeline: code/backend/pipeline.md
+          - Cache & database: code/backend/cache.md
+          - Serving & playback: code/backend/serving.md
+          - Authentication: code/backend/auth.md
+          - Process lifecycle: code/backend/lifecycle.md
+      - Frontend:
+          - code/frontend/index.md
+          - Player: code/frontend/player.md
+          - Tauri shell: code/frontend/tauri.md
+      - Development:
+          - Testing: code/development/testing.md
+          - CI & packaging: code/development/ci-packaging.md
+          - Pitfalls: code/development/pitfalls.md
