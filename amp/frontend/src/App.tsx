@@ -111,7 +111,10 @@ export default function App() {
     <div className="app">
       <div className="app-layout">
         <nav className="sidebar">
-          <div className="sidebar-header">AMP</div>
+          <div className="sidebar-header">
+            <img className="sidebar-logo" src="/favicon.svg" alt="" />
+            AMP
+          </div>
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.path}
