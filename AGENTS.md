@@ -26,8 +26,26 @@
 | Refactor Phase 5 | Auth simplification & local API hardening | **DONE** — see Revision 13 |
 | Refactor Phase 6 | Lifecycle & packaging | **DONE** — see Revision 14 |
 | Revision 15 | MkDocs documentation, simpler READMEs, plan files removed | **DONE** — see Revision 15 |
+| Revision 16 | Covers, playlist view, play queue + saved queues, likes, UI redesign | **DONE** — see Revision 16 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 16 — Covers, queue, likes, redesign (2026-11-06)
+
+| Area | Change |
+|---|---|
+| **Covers** | Root cause: art moved to `yt3.googleusercontent.com`, CSP only allowed `lh3`. CSP now `*.googleusercontent.com`, `*.ytimg.com`, `*.ggpht.com` (`index.html`, `tauri.conf.json`). `Cover.tsx`: URL resized to display size → `i.ytimg.com/vi/<id>/mqdefault.jpg` → placeholder. `_parse_song` reads `get_song`'s `videoDetails` shape |
+| **Playlists** | `GET /api/playlist/{id}` normalized (`songs`); new page `/playlists/:id` |
+| **Queue** | Pure model `player/queue.ts` (uids allow duplicates; insert next, append, remove, move, clear, shuffle with restore, repeat off/all/one). `state.ts` applies it; `playToken` tells PlayerBar to (re)load. `QueuePanel.tsx`; persisted `repeat` added to `amp.queue.v1` |
+| **Saved queues** | Table `saved_queues`, `/api/queues` CRUD, pages `/queues`, `/queues/:id`; `savedQueues.ts` |
+| **Likes** | `YouTubeService.rate_song`, `POST`/`DELETE /api/user/likes/{id}`; `likes.ts` store (optimistic, rollback), liked list limit 100 → 2000 |
+| **UI** | New shell + `styles.css` (tokens at the top), SVG `Icon`, `SongMenu`, `CollectionHeader`, toasts/dialogs (`ui.ts`, `UiLayer`). Cache use moved to the sidebar. Search offers songs/videos only: the albums/artists/playlists options returned non-song dicts that failed `SongResponse`. `dragDropEnabled: false` so HTML5 drag works in WebView2 |
+
+**Verification:** real frontend (Vite, Chromium pane) against a scratch backend with real YouTube search, playlists and streaming, and a **stubbed** signed-in session and `rate_song`: covers, play, like, menu, drag and arrows, remove, shuffle/restore, repeat cycle, auto-advance at song end, clear stops playback, save, restore after reload, saved queue page, public playlist page.
+
+**Not verified:** liking on a real account, the user's own playlists list, anything in the Tauri/WebView2 window (including drag with `dragDropEnabled: false`). `loading="lazy"` covers stayed pending in the idle pane until a frame was forced (looks specific to the pane; player/header/card covers are now eager).
+
+**Test results:** 388 unit tests pass, 27 vitest, ruff clean, `npm run build` OK.
 
 ### Revision 15 — Documentation (2026-10-31)
 
@@ -37,7 +55,7 @@
 - Found while writing the docs: the Playlists page lists playlists as cards only; clicking a card does nothing (no track view). The Phase 3 note "user playlists + tracks" was inaccurate. Added to Known Issues.
 - No code changes; tests not rerun.
 
-**Test results**: 379 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 87% (floor 60%). 12 frontend unit tests pass (`npm test`, vitest). 1 Rust test (`cargo test`). Integration 11/11 (`BAgTQhR8MLo`). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
+**Test results**: 388 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 87% at Revision 14 (floor 60%). 27 frontend unit tests pass (`npm test`, vitest). 1 Rust test (`cargo test`). Integration 11/11 (`BAgTQhR8MLo`). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
 
 **Auth model**: Open by default — no token required, but cross-site requests are refused (Revision 13). Search, browse, and play work immediately. YouTube sign-in (optional, Tauri webview; paste / Firefox import as fallbacks) unlocks liked songs and user playlists. Only youtube.com cookies are stored, with their domains.
 
@@ -705,7 +723,9 @@ amp/frontend/
 - [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
 - [ ] Phase 5 webview sign-in (Google login in the Tauri window → liked songs) not run manually; `youtube_login.rs` user agent still Chrome 125
 - [ ] Phase 5.6 (automatic per-launch token) — unblocked: `backend_info` already returns `token` (always `null`); needs a random token from Rust passed as `--token`, `setAuthToken` in the frontend, and `?t=<token>` accepted on `/audio` (`<audio>` can't send headers; compare with `hmac.compare_digest`). Manual runs (curl, `app.py`, browser dev) keep open mode
-- [ ] Playlists page: clicking a playlist does nothing — no track view (`GET /api/playlist/{id}` exists)
+- [x] ~~Playlists page: clicking a playlist does nothing~~ — Revision 16
+- [ ] Liked state of songs beyond the first 2000 likes is unknown (hearts show empty)
+- [ ] Search has no albums/artists/playlists results (needs result views)
 
 ## Environment Notes
 

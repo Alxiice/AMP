@@ -20,11 +20,15 @@ layer: if you change a response shape, change `api.ts` too.
     |---|---|---|
     | GET | `/` | `{app, version, status}` |
     | GET | `/api/health` | `{status, app: "AMP v2", pid, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}` |
-    | GET | `/api/search?q=&type=songs&limit=20` | list of songs (`limit` 1–50; `type` = songs, videos, albums, artists, playlists) |
+    | GET | `/api/search?q=&type=songs&limit=20` | list of songs (`limit` 1–50; `type` = songs, videos) |
     | GET | `/api/song/{id}` | song metadata |
-    | GET | `/api/artist/{id}`, `/api/album/{id}`, `/api/playlist/{id}` | metadata dicts |
+    | GET | `/api/artist/{id}`, `/api/album/{id}` | metadata dicts |
+    | GET | `/api/playlist/{id}?limit=1000` | `{id, name, owner, thumbnail_url, song_count, songs}`; unavailable tracks left out |
     | GET | `/api/user/likes` | liked songs (**401** when signed out) |
+    | POST / DELETE | `/api/user/likes/{id}` | like (optional song body fills the local cache) / clear the rating on the account (**401** when signed out) |
     | GET | `/api/user/playlists` | the user's playlists (**401** when signed out) |
+    | GET / POST | `/api/queues` | saved queues, newest first, without songs / create from `{name, songs}` (**201**) |
+    | GET / PUT / DELETE | `/api/queues/{id}` | read / change `{name?, songs?}` / delete a saved queue (table `saved_queues`) |
 
 === "Streaming"
 
