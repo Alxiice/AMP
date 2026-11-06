@@ -21,14 +21,16 @@ initBackend().then(() => {
 URL to `http://127.0.0.1:<port>` **before the first render**, so no component ever calls the
 wrong port. Outside Tauri it keeps the default `http://127.0.0.1:8000`.
 
-`App.tsx` then renders the sidebar (navigation, session badge, backend status), the routes and
-the always-visible `PlayerBar`.
+`App.tsx` then renders the sidebar (navigation, session badge, cache use, backend status), the
+routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked songs once signed in.
 
 | Route | Page | Data |
 |---|---|---|
 | `/` | `Search` | `GET /api/search`, results in `SongList` |
 | `/library` | `Library` | `GET /api/user/likes`; `SignInPrompt` when signed out or on 401 |
 | `/playlists` | `Playlists` | `GET /api/user/playlists` as cards; same sign-in prompt |
+| `/playlists/:id` | `PlaylistDetail` | `GET /api/playlist/{id}` |
+| `/queues`, `/queues/:id` | `SavedQueues`, `SavedQueueDetail` | `/api/queues` |
 | `/auth` | `Auth` | status, webview sign-in, Advanced (paste, Firefox) |
 | `/logs` | `Logs` | backend output (Tauri events), `/api/stream/logs`, `/api/logs` relay |
 
@@ -42,29 +44,27 @@ the always-visible `PlayerBar`.
 | `authSession.ts` | shared sign-in status: 60 s poll, refresh on 401, badge labels |
 | `tauri_auth.ts` | `youtubeLogin()` → Tauri command `youtube_login`; `mightBeTauri()` |
 | `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts` |
-| `components/` | `PlayerBar`, `SongList` (click = play with the list as queue), `SignInPrompt` |
+| `likes.ts`, `savedQueues.ts`, `ui.ts` | liked songs store; saved queue list and actions; toasts and dialogs |
+| `player/queue.ts` | the pure queue model |
+| `components/` | `PlayerBar`, `QueuePanel`, `SongList` (click = play with the list as queue), `SongMenu`, `CollectionHeader`, `Cover`, `Icon`, `LikeButton`, `UiLayer`, `SignInPrompt` |
 
 ## State: `state.ts`
 
-The **queue belongs to the frontend**; the backend has no queue API. `StateStore` is a small
-external store read through `useSyncExternalStore`:
+The **queue belongs to the frontend**; the backend only stores named copies (`/api/queues`).
+`player/queue.ts` is a pure model: items with a `uid` (the same song can be queued twice), the
+current index, shuffle (reorders `items`, `original` remembers the order to restore) and repeat.
+`StateStore` applies it to the audio element and adds playback fields; `useQueueState()` reads it
+and components call `store.playList`, `playNext`, `addToQueue`, `moveItem`, `removeItem`, `jumpTo`,
+`next`, `previous`... directly.
 
-```ts
-interface QueueState {
-  songs: Song[]; currentIndex: number; currentSong: Song | null;
-  isPlaying: boolean; positionMs: number; durationMs: number; volume: number;
-}
-```
+`playToken` goes up whenever the current song must (re)load, and `PlayerBar` watches it. A restored
+queue stays at token 0, so it waits for the play button. Selecting the song already loaded keeps
+its position.
 
-`useQueueState()` reads it; `useQueueActions()` exposes `playSong(song, queue?)`, `playQueue`,
-`next`, `previous`, `setVolume`, etc.
-
-- `playSong(song, list)` replaces the queue with `list`, positioned on `song`. Without a list,
-  the song is appended (or selected if already queued).
 - `previous()` restarts the current song after 3 s of play, else goes back one.
-- The store owns the `<audio>` element's `ended` listener (→ `next()`), and a 2 s timer that
-  reads `audio.currentTime`, reports it to `POST /api/stream/position` and checks whether to
-  prefetch the next song.
+- The store owns the `<audio>` element's `ended` listener (→ `next(false)`), and a 2 s timer that
+  reads `audio.currentTime` and reports it to `POST /api/stream/position`. The next song is
+  prefetched from `timeupdate`.
 
 ## Polling rules
 

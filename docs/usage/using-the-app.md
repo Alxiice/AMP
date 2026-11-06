@@ -1,15 +1,54 @@
 # Using the app
 
-The window has a sidebar on the left (pages, backend status, session badge) and the player bar
-along the bottom.
+The window has a sidebar on the left (pages, session badge, cache use, backend status), the page
+in the middle, the [queue panel](#the-queue) on the right and the player bar along the bottom.
 
 ## Search
 
-Type in the search box and press ++enter++. The drop-down chooses what to search: `songs`
-(default), `videos`, `albums`, `artists` or `playlists`. Only results that can be played are listed.
+Type in the search box and press ++enter++. The chips switch between `Songs` and `Videos`.
 
 **Click a result to play it.** The whole result list becomes the queue, so **Next** continues
-with the next result.
+with the next result. To keep your current queue, use a song's menu instead (below).
+
+## Song actions
+
+Each row has a heart (when signed in) and a **⋮** menu, also on right-click:
+
+| Action | What it does |
+|---|---|
+| Play next | inserts the song right after the current one |
+| Add to queue | adds it at the end of the queue |
+| Add to / Remove from liked songs | changes the like **on your YouTube account** (signed in only) |
+| Add to saved queue | adds it to a saved queue, or a new one |
+
+Pages showing a list (liked songs, a playlist, a saved queue) have the same actions for the whole
+list in their header: **Play**, **Shuffle**, **Play next**, **Add to queue**, **Save as queue**.
+
+## The queue
+
+The queue panel opens and closes with the queue button in the player bar.
+
+- Click a song to jump to it. Songs already played are dimmed.
+- Drag a song, or use its arrows, to reorder. **×** removes it. The same song can be queued twice.
+- **Save** stores the queue under a name. **Clear others** keeps only the current song; **Clear**
+  empties the queue and stops playback.
+- **Shuffle** randomises the upcoming songs; switching it off restores the order.
+- **Repeat** cycles through off, all (back to the start after the last song) and one (the song
+  replays; **Next** still moves on).
+
+The queue, its position, the repeat mode and the volume come back at the next launch, paused.
+Shuffle starts off.
+
+## Saved queues
+
+The **Saved queues** page lists what you saved. Open one to play it, shuffle it, add it to the
+current queue, rename it, replace its content with the current queue, delete it, or remove single
+songs through their menu. Saved queues are stored locally in the app's database, not on YouTube.
+
+## Playlists
+
+With a [signed-in](sign-in.md) account, **Playlists** lists your YouTube playlists. Click one to
+see its songs. Tracks YouTube no longer offers are left out. Up to 1000 tracks are loaded.
 
 ## The player bar
 
@@ -18,6 +57,8 @@ with the next result.
 | ⏮ Previous | restarts the song if more than 3 s have played, else goes to the previous song |
 | ▶ / ⏸ | play / pause. A spinner means the stream is still loading |
 | ⏹ Stop | stops playback |
+| Shuffle, Repeat | see [The queue](#the-queue) |
+| Heart | like the current song (signed in only) |
 | ⏭ Next | next song in the queue. Also happens automatically when a song ends |
 | Volume slider | volume, remembered between launches |
 
@@ -28,12 +69,12 @@ shows what's on disk:
 
 | Colour | Meaning |
 |---|---|
-| :material-square:{ style="color: #1db954" } green | downloaded |
+| :material-square:{ style="color: #4a4a57" } light grey | downloaded |
 | :material-square:{ style="color: #f0a500" } yellow (pulsing) | downloading |
-| :material-square:{ style="color: #333333" } grey | not downloaded yet |
-| :material-square:{ style="color: #e74c3c" } red | download failed |
+| :material-square:{ style="color: #33333d" } dark grey | not downloaded yet |
+| :material-square:{ style="color: #ff5f56" } red | download failed |
 
-The played part is shaded on top. **Click anywhere on the bar to seek.** Seeking into grey cells
+The played part is drawn on top in the accent colour. **Click anywhere on the bar to seek.** Seeking into grey cells
 works too: those segments are fetched first.
 
 AMP downloads about 30 seconds ahead of where you are, so the bar fills a little ahead of the
@@ -42,8 +83,8 @@ the next song in the queue is downloaded so it starts instantly.
 
 ### Cache info
 
-Below the progress bar: how much disk the cache uses, out of its limit (500 MB by default), and
-how many songs and segments it holds. When it's full, the songs you haven't played for the
+At the bottom of the sidebar: how much disk the cache uses, out of its limit (500 MB by default).
+Hover it for the number of songs and segments. When it's full, the songs you haven't played for the
 longest are removed first. The song playing is never removed.
 
 ### When something goes wrong

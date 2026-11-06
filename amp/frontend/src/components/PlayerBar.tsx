@@ -1,6 +1,9 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from "react";
-import { api, type SegmentStatus, type CacheInfo, type Song } from "../api";
-import { store, useQueueState, useQueueActions } from "../state";
+import { api, type SegmentStatus, type Song } from "../api";
+import { store, useQueueState } from "../state";
+import { Cover } from "./Cover";
+import { Icon } from "./Icon";
+import { LikeButton } from "./LikeButton";
 import type { BackendStatus } from "../sidecar";
 import { describeError, describeMediaError } from "../player/errors";
 
@@ -26,13 +29,14 @@ function formatBytes(bytes: number): string {
 
 interface PlayerBarProps {
   backendStatus: BackendStatus;
+  queueOpen: boolean;
+  onToggleQueue: () => void;
 }
 
-export function PlayerBar({ backendStatus }: PlayerBarProps) {
+export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBarProps) {
   const state = useQueueState();
-  const actions = useQueueActions();
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const requestedIdRef = useRef<string>(""); // last song the effect saw
+  const handledTokenRef = useRef(0); // last playToken the load effect acted on
   // Load sequence (F13): a newer load() invalidates older ones
   const loadGen = useRef(0);
   const loadAbort = useRef<AbortController | null>(null);
@@ -42,11 +46,9 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
 
   // Segment visualization state
   const [segments, setSegments] = useState<SegmentStatus[]>([]);
-  const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
   const [audioError, setAudioError] = useState<string | null>(null);
   const [audioLoading, setAudioLoading] = useState(false);
   const segInFlightRef = useRef(false); // P12: in-flight guard
-  const cacheInFlightRef = useRef(false);
 
   // Create the audio element once
   useEffect(() => {
@@ -158,14 +160,30 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
     }
   }, []);
 
-  // Load new song when currentSong changes (a restored song waits for the play button)
+  // Load when the store asks for it (a restored queue stays at token 0 and waits for the play button)
   useEffect(() => {
-    const song = state.currentSong;
-    if (!song || requestedIdRef.current === song.id) return;
-    requestedIdRef.current = song.id;
-    if (store.takeRestored()) return;
-    load(song);
-  }, [state.currentSong, load]);
+    if (state.playToken === handledTokenRef.current) return;
+    handledTokenRef.current = state.playToken;
+    if (state.currentSong) load(state.currentSong);
+  }, [state.playToken, state.currentSong, load]);
+
+  // The queue was emptied: release the audio element
+  const hasSong = !!state.currentSong;
+  useEffect(() => {
+    if (hasSong) return;
+    const audio = audioRef.current;
+    if (!audio || !audio.getAttribute("src")) return;
+    loadGen.current++;
+    loadAbort.current?.abort();
+    loadedIdRef.current = "";
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
+    setSegments([]);
+    setAudioError(null);
+    setAudioLoading(false);
+    api.stop().catch(() => {});
+  }, [hasSong]);
 
   // Poll segment statuses (P12: in-flight guard)
   useEffect(() => {
@@ -189,28 +207,6 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
     const timer = setInterval(fetchSegments, 500);
     return () => clearInterval(timer);
   }, [state.currentSong, backendStatus]);
-
-  // Poll cache info every 5s
-  useEffect(() => {
-    if (backendStatus !== "running") return;
-
-    const fetchCache = async () => {
-      if (cacheInFlightRef.current) return;
-      cacheInFlightRef.current = true;
-      try {
-        const data = await api.getCacheInfo();
-        setCacheInfo(data);
-      } catch {
-        // Silently fail
-      } finally {
-        cacheInFlightRef.current = false;
-      }
-    };
-
-    fetchCache();
-    const timer = setInterval(fetchCache, 5000);
-    return () => clearInterval(timer);
-  }, [backendStatus]);
 
   // Handle play/pause
   const handlePlayPause = useCallback(() => {
@@ -243,8 +239,8 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
     audio.pause();
     audio.currentTime = 0;
     api.stop().catch(() => {});
-    actions.setPlaying(false);
-  }, [actions]);
+    store.setPlaying(false);
+  }, []);
 
   // Handle next/previous
   const handleNext = useCallback(() => {
@@ -264,10 +260,10 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
       const audio = audioRef.current;
       if (!audio || !state.currentSong) return;
       audio.currentTime = positionMs / 1000;
-      actions.setPositionMs(positionMs);
+      store.setPositionMs(positionMs);
       api.seek(positionMs).catch(() => {});
     },
-    [state.currentSong, actions],
+    [state.currentSong],
   );
 
   // Handle seek slider change
@@ -283,9 +279,9 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
   const handleVolume = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const v = parseFloat(e.target.value);
-      actions.setVolume(v);
+      store.setVolume(v);
     },
-    [actions],
+    [],
   );
 
   // Segment bar click — map click position to time
@@ -321,85 +317,52 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
 
   return (
     <div className="player-bar">
-      {/* Song info */}
       <div className="player-info">
-        {state.currentSong?.thumbnail_url ? (
-          <img
-            className="player-thumbnail"
-            src={state.currentSong.thumbnail_url}
-            alt=""
-          />
-        ) : (
-          <div className="player-thumbnail-placeholder">&#9835;</div>
-        )}
+        <Cover url={state.currentSong?.thumbnail_url} songId={state.currentSong?.id} size={56} className="player-cover" />
         <div className="player-meta">
-          <div className="player-title">
-            {state.currentSong?.title || "Nothing playing"}
-          </div>
+          <div className="player-title">{state.currentSong?.title || "Nothing playing"}</div>
           <div className="player-artist">
             {audioLoading ? "Loading audio..." : state.currentSong?.artist || "—"}
           </div>
-          {audioError && (
-            <div className="player-error" style={{
-              color: "var(--error, #e53935)",
-              fontSize: 11,
-              marginTop: 2,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              maxWidth: 200,
-            }}>
-              {audioError}
-            </div>
-          )}
+          {audioError && <div className="player-error" title={audioError}>{audioError}</div>}
         </div>
+        {state.currentSong && <LikeButton song={state.currentSong} />}
       </div>
 
-      {/* Controls + progress */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-        {/* Control buttons row */}
-        <div className="player-controls" style={{ justifyContent: "center" }}>
-          <button className="btn-icon" onClick={handlePrevious} title="Previous">
-            &#9198;
+      <div className="player-center">
+        <div className="player-controls">
+          <button
+            className={`btn-icon toggle${state.shuffle ? " on" : ""}`}
+            onClick={() => store.toggleShuffle()}
+            title={state.shuffle ? "Shuffle: on" : "Shuffle: off"}
+            aria-pressed={state.shuffle}
+          >
+            <Icon name="shuffle" />
           </button>
+          <button className="btn-icon" onClick={handlePrevious} title="Previous"><Icon name="previous" /></button>
           <button
             className="btn-icon play-pause"
             onClick={handlePlayPause}
             disabled={!state.currentSong || audioLoading}
             title={audioLoading ? "Loading..." : state.isPlaying ? "Pause" : "Play"}
           >
-            {audioLoading ? <span className="spinner" /> : state.isPlaying ? "\u23F8" : "\u25B6"}
+            {audioLoading ? <span className="spinner" /> : <Icon name={state.isPlaying ? "pause" : "play"} />}
           </button>
+          <button className="btn-icon" onClick={handleNext} title="Next"><Icon name="next" /></button>
           <button
-            className="btn-icon"
-            onClick={handleStop}
-            disabled={!state.currentSong}
-            title="Stop"
+            className={`btn-icon toggle${state.repeat !== "off" ? " on" : ""}`}
+            onClick={() => store.cycleRepeat()}
+            title={`Repeat: ${state.repeat}`}
           >
-            &#9632;
-          </button>
-          <button className="btn-icon" onClick={handleNext} title="Next">
-            &#9197;
+            <Icon name={state.repeat === "one" ? "repeat-one" : "repeat"} />
           </button>
         </div>
 
-        {/* Segment-based progress bar */}
         <div className="player-progress-row">
           <span className="time-label">{formatTime(state.positionMs)}</span>
-
           {segments.length > 0 && state.currentSong ? (
-            /* Segment visualization bar */
-            <div
-              className="segment-progress-bar"
-              onClick={handleSegmentClick}
-              title="Click to seek"
-            >
-              {/* Played overlay */}
-              <div
-                className="segment-progress-played"
-                style={{ width: `${progressRatio * 100}%` }}
-              />
-              {/* Segment cells */}
+            <div className="segment-progress-bar" onClick={handleSegmentClick} title="Click to seek">
+              <div className="segment-progress-played" style={{ width: `${progressRatio * 100}%` }} />
               {segLayout.map(({ seg, left, width }) => (
                 <div
                   key={seg.index}
@@ -410,7 +373,6 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
               ))}
             </div>
           ) : (
-            /* Fallback: plain seek slider when no segment data */
             <input
               type="range"
               className="seek-slider"
@@ -422,44 +384,27 @@ export function PlayerBar({ backendStatus }: PlayerBarProps) {
               disabled={!state.currentSong}
             />
           )}
-
           <span className="time-label">{formatTime(state.durationMs)}</span>
         </div>
-
-        {/* Cache info row */}
-        {cacheInfo && (
-          <div className="cache-info-row">
-            <span className="cache-info-text">
-              Cache: {cacheInfo.total_mb} MB / {cacheInfo.max_mb} MB
-              ({cacheInfo.usage_pct}%)
-            </span>
-            <div className="cache-info-bar">
-              <div
-                className="cache-info-fill"
-                style={{
-                  width: `${Math.min(cacheInfo.usage_pct, 100)}%`,
-                  background:
-                    cacheInfo.usage_pct > 90
-                      ? "var(--error)"
-                      : cacheInfo.usage_pct > 70
-                        ? "var(--warning)"
-                        : "var(--success)",
-                }}
-              />
-            </div>
-            <span className="cache-info-detail">
-              {cacheInfo.song_count} songs · {cacheInfo.file_count} segments
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* Volume */}
-      <div className="player-volume">
-        <span style={{ fontSize: 16 }}>&#128266;</span>
+      <div className="player-right">
+        <button className="btn-icon" onClick={handleStop} disabled={!state.currentSong} title="Stop">
+          <Icon name="stop" />
+        </button>
+        <button
+          className={`btn-icon toggle${queueOpen ? " on" : ""}`}
+          onClick={onToggleQueue}
+          title="Queue"
+          aria-pressed={queueOpen}
+        >
+          <Icon name="queue" />
+        </button>
+        <Icon name="volume" />
         <input
           type="range"
           className="volume-slider"
+          aria-label="Volume"
           min={0}
           max={1}
           step={0.01}

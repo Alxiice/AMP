@@ -70,6 +70,18 @@ class LikedSong(Base):
     song: Mapped["Song"] = relationship("Song")
 
 
+class SavedQueue(Base):
+    """A named copy of a play queue. Songs are a JSON list of SongResponse dicts, in order."""
+
+    __tablename__ = "saved_queues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120))
+    songs_json: Mapped[str] = mapped_column(Text, default="[]")
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
 class Segment(Base):
     """Segment cache metadata. PK = (song_id, index). index -1 == init segment."""
 

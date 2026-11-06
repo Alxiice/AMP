@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError, type PlaylistInfo } from "../api";
 import { useAuthStatus } from "../authSession";
+import { Cover } from "../components/Cover";
 import { SignInPrompt } from "../components/SignInPrompt";
 
 export function Playlists() {
@@ -38,17 +40,13 @@ export function Playlists() {
     return (
       <div className="card-grid">
         {playlists.map((pl) => (
-          <div key={pl.id} className="card">
-            {pl.thumbnail_url ? (
-              <img className="card-thumb" src={pl.thumbnail_url} alt="" loading="lazy" />
-            ) : (
-              <div className="card-thumb" />
-            )}
+          <Link key={pl.id} className="card" to={`/playlists/${encodeURIComponent(pl.id)}`}>
+            <Cover url={pl.thumbnail_url} size={160} className="card-thumb" />
             <div className="card-title">{pl.name}</div>
             <div className="card-subtitle">
-              {pl.song_count} songs{pl.owner ? ` · ${pl.owner}` : ""}
+              {pl.song_count ? `${pl.song_count} songs` : "Playlist"}{pl.owner ? ` · ${pl.owner}` : ""}
             </div>
-          </div>
+          </Link>
         ))}
       </div>
     );

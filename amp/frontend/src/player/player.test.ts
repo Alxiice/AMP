@@ -34,7 +34,7 @@ describe("describeError", () => {
 
 describe("queue persistence", () => {
   it("round-trips", () => {
-    const q = { songs: [song("dQw4w9WgXcQ"), song("BAgTQhR8MLo")], currentIndex: 1, volume: 0.4 };
+    const q = { songs: [song("dQw4w9WgXcQ"), song("BAgTQhR8MLo")], currentIndex: 1, volume: 0.4, repeat: "all" as const };
     expect(parseQueue(serializeQueue(q))).toEqual(q);
   });
 
@@ -57,7 +57,7 @@ describe("queue persistence", () => {
 
   it("empty queue has no current song", () => {
     expect(parseQueue(JSON.stringify({ songs: [], currentIndex: 0, volume: 0.5 }))).toEqual(
-      { songs: [], currentIndex: -1, volume: 0.5 });
+      { songs: [], currentIndex: -1, volume: 0.5, repeat: "off" });
   });
 });
 

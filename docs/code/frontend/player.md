@@ -45,17 +45,17 @@ audio.currentTime = t;                   // browser issues a Range request
 api.seek(t * 1000);                      // backend bumps the epoch, buffers from there
 ```
 
-Below it, `/api/stream/cache-info` (every 5 s) feeds the cache usage line.
+`App.tsx` polls `/api/stream/cache-info` (every 5 s) for the cache usage in the sidebar.
 
 ## Persistence
 
-`state.ts` saves `{songs, currentIndex, volume}` to `localStorage` under `amp.queue.v1`,
+`state.ts` saves `{songs, currentIndex, volume, repeat}` to `localStorage` under `amp.queue.v1`,
 debounced 500 ms, inside try/catch (storage can be unavailable). On startup,
 `player/persistence.ts` validates what it reads: song IDs must be 11-character YouTube IDs, the
 index and volume are clamped, and anything malformed is dropped.
 
-The restored song is shown **paused** and isn't loaded: `store.takeRestored()` tells the load
-effect to skip it. The play button sees that the loaded ID doesn't match and calls `load()`.
+The restored song is shown **paused** and isn't loaded: `playToken` stays at 0, so the load
+effect does nothing. The play button sees that the loaded ID doesn't match and calls `load()`.
 
 ## Next-song prefetch
 
