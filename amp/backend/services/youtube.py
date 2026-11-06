@@ -10,6 +10,8 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from ytmusicapi.models.content.enums import LikeStatus
+
 from backend.services.auth import get_auth_service
 from backend.utils.logger import get_logger
 
@@ -66,13 +68,22 @@ class PlaylistData:
 # ---------------------------------------------------------------------------
 
 
+def _best_thumbnail(thumbnails: List[Dict[str, Any]]) -> str:
+    """URL of the largest thumbnail ('' if none)."""
+    if not thumbnails:
+        return ""
+    return max(thumbnails, key=lambda t: t.get("width", 0) * t.get("height", 0)).get("url", "")
+
+
 def _parse_song(item: Dict[str, Any]) -> SongData:
     """Parse a ytmusicapi song/album-track dict into SongData."""
     video_id = item.get("videoId", "")
     title = item.get("title", "")
 
-    artists = item.get("artists", [])
+    artists = item.get("artists") or []
     artist_names = ", ".join(a.get("name", "") for a in artists if isinstance(a, dict))
+    if not artist_names:
+        artist_names = item.get("author", "") or ""  # get_song's videoDetails
 
     album_info = item.get("album")
     album_name = album_info.get("name", "") if isinstance(album_info, dict) else ""
@@ -90,11 +101,13 @@ def _parse_song(item: Dict[str, Any]) -> SongData:
             pass
     elif item.get("duration_seconds"):
         duration_ms = int(item["duration_seconds"]) * 1000
+    elif str(item.get("lengthSeconds", "")).isdigit():  # get_song's videoDetails
+        duration_ms = int(item["lengthSeconds"]) * 1000
 
-    thumbnails = item.get("thumbnails", [])
-    thumb = ""
-    if thumbnails:
-        thumb = max(thumbnails, key=lambda t: t.get("width", 0) * t.get("height", 0)).get("url", "")
+    # get_song's videoDetails nests them under thumbnail.thumbnails
+    nested = item.get("thumbnail")
+    thumbnails = item.get("thumbnails") or (nested.get("thumbnails") if isinstance(nested, dict) else None) or []
+    thumb = _best_thumbnail(thumbnails)
 
     return SongData(
         id=video_id,
@@ -166,16 +179,26 @@ class YouTubeService:
             logger.error("get_album failed for %s: %s", album_id, e)
             raise
 
-    def get_playlist(self, playlist_id: str, limit: int = 100) -> Dict[str, Any]:
+    def get_playlist(self, playlist_id: str, limit: int = 1000) -> Dict[str, Any]:
         try:
-            return self._client.get_playlist(playlist_id, limit=limit)
+            raw = self._client.get_playlist(playlist_id, limit=limit)
+            author = raw.get("author")
+            return {
+                "id": raw.get("id") or playlist_id,
+                "name": raw.get("title", "") or "",
+                "owner": (author.get("name", "") if isinstance(author, dict) else author) or "",
+                "thumbnail_url": _best_thumbnail(raw.get("thumbnails") or []),
+                "song_count": raw.get("trackCount") or 0,
+                # Unavailable tracks have no videoId and can't be played
+                "songs": [_parse_song(t).to_dict() for t in raw.get("tracks") or [] if t.get("videoId")],
+            }
         except Exception as e:
             logger.error("get_playlist failed for %s: %s", playlist_id, e)
             raise
 
     # --- Authenticated ---
 
-    def get_liked_songs(self, limit: int = 100) -> List[Dict[str, Any]]:
+    def get_liked_songs(self, limit: int = 2000) -> List[Dict[str, Any]]:
         if not self._auth.is_authenticated:
             raise PermissionError("Not authenticated")
         try:
@@ -183,6 +206,18 @@ class YouTubeService:
             return [_parse_song(r).to_dict() for r in results.get("tracks", []) if r.get("videoId")]
         except Exception as e:
             logger.error("get_liked_songs failed: %s", e)
+            if "401" in str(e) or "403" in str(e):
+                self._auth.mark_expired()
+            raise
+
+    def rate_song(self, song_id: str, liked: bool) -> None:
+        """Like a song, or clear its rating, on the YouTube account."""
+        if not self._auth.is_authenticated:
+            raise PermissionError("Not authenticated")
+        try:
+            self._client.rate_song(song_id, LikeStatus.LIKE if liked else LikeStatus.INDIFFERENT)
+        except Exception as e:
+            logger.error("rate_song failed for %s: %s", song_id, e)
             if "401" in str(e) or "403" in str(e):
                 self._auth.mark_expired()
             raise
@@ -197,7 +232,7 @@ class YouTubeService:
                     id=p.get("playlistId", ""),
                     name=p.get("title", ""),
                     owner=p.get("author", {}).get("name", "") if isinstance(p.get("author"), dict) else "",
-                    thumbnail_url=p.get("thumbnails", [{}])[-1].get("url", "") if p.get("thumbnails") else "",
+                    thumbnail_url=_best_thumbnail(p.get("thumbnails") or []),
                     song_count=p.get("count", 0),
                 ).to_dict()
                 for p in results
