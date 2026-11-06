@@ -1,25 +1,46 @@
 import { useEffect, useState, useCallback } from "react";
 import { Routes, Route, NavLink, useNavigate } from "react-router-dom";
+import { api, type CacheInfo } from "./api";
 import { sidecar, type BackendStatus } from "./sidecar";
 import { sessionLabel, startAuthPolling, stopAuthPolling, useAuthStatus } from "./authSession";
+import { clearLikes, loadLikes } from "./likes";
+import { Icon } from "./components/Icon";
 import { PlayerBar } from "./components/PlayerBar";
+import { QueuePanel } from "./components/QueuePanel";
+import { UiLayer } from "./components/UiLayer";
 import { Search } from "./pages/Search";
 import { Library } from "./pages/Library";
 import { Playlists } from "./pages/Playlists";
+import { PlaylistDetail } from "./pages/PlaylistDetail";
+import { SavedQueues } from "./pages/SavedQueues";
+import { SavedQueueDetail } from "./pages/SavedQueueDetail";
 import { Auth } from "./pages/Auth";
 import { Logs } from "./pages/Logs";
 
+const QUEUE_OPEN_KEY = "amp.queuePanel";
+
 const NAV_ITEMS = [
-  { path: "/", label: "Search", exact: true },
-  { path: "/library", label: "Library" },
-  { path: "/playlists", label: "Playlists" },
-  { path: "/auth", label: "Auth" },
-  { path: "/logs", label: "Logs" },
+  { path: "/", label: "Search", icon: "search", exact: true },
+  { path: "/library", label: "Liked songs", icon: "heart" },
+  { path: "/playlists", label: "Playlists", icon: "playlist" },
+  { path: "/queues", label: "Saved queues", icon: "saved" },
+  { path: "/auth", label: "Account", icon: "account" },
+  { path: "/logs", label: "Logs", icon: "logs" },
 ];
+
+function readQueueOpen(): boolean {
+  try {
+    return localStorage.getItem(QUEUE_OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
 
 export default function App() {
   const [backendStatus, setBackendStatus] = useState<BackendStatus>("stopped");
   const [backendLogs, setBackendLogs] = useState<string[]>([]);
+  const [cacheInfo, setCacheInfo] = useState<CacheInfo | null>(null);
+  const [queueOpen, setQueueOpen] = useState(readQueueOpen);
   const authStatus = useAuthStatus();
   const navigate = useNavigate();
 
@@ -47,6 +68,22 @@ export default function App() {
     return stopAuthPolling;
   }, [backendStatus]);
 
+  // Hearts need the liked set from the moment the session is known
+  const signedIn = authStatus?.is_authenticated ?? false;
+  useEffect(() => {
+    if (signedIn) loadLikes();
+    else clearLikes();
+  }, [signedIn]);
+
+  // Cache usage in the sidebar, every 5 s
+  useEffect(() => {
+    if (backendStatus !== "running") return;
+    const fetchCache = () => api.getCacheInfo().then(setCacheInfo).catch(() => {});
+    fetchCache();
+    const timer = setInterval(fetchCache, 5000);
+    return () => clearInterval(timer);
+  }, [backendStatus]);
+
   const handleRestart = useCallback(() => {
     sidecar.restart({
       onStatusChange: setBackendStatus,
@@ -59,20 +96,30 @@ export default function App() {
     });
   }, []);
 
+  const toggleQueue = useCallback(() => {
+    setQueueOpen((open) => {
+      try {
+        localStorage.setItem(QUEUE_OPEN_KEY, open ? "0" : "1");
+      } catch {
+        // a convenience only
+      }
+      return !open;
+    });
+  }, []);
+
   return (
-    <>
+    <div className="app">
       <div className="app-layout">
         <nav className="sidebar">
-          <div className="sidebar-header">AMP v2</div>
+          <div className="sidebar-header">AMP</div>
           {NAV_ITEMS.map((item) => (
             <NavLink
               key={item.path}
               to={item.path}
               end={item.exact}
-              className={({ isActive }) =>
-                `nav-item${isActive ? " active" : ""}`
-              }
+              className={({ isActive }) => `nav-item${isActive ? " active" : ""}`}
             >
+              <Icon name={item.icon} size={18} />
               {item.label}
             </NavLink>
           ))}
@@ -81,22 +128,29 @@ export default function App() {
               <button
                 className={`auth-status-badge session-badge ${authStatus.state}`}
                 onClick={() => navigate("/auth")}
-                title="YouTube session: open the Auth page"
+                title="YouTube session: open the Account page"
               >
                 {sessionLabel(authStatus)}
               </button>
             )}
-            <span className={`status-dot ${backendStatus}`} />
-            Backend: {backendStatus}
-            {backendStatus !== "running" && (
-              <button
-                className="btn btn-secondary"
-                style={{ marginLeft: 8, padding: "4px 10px", fontSize: 11 }}
-                onClick={handleRestart}
+            {cacheInfo && (
+              <div
+                className="cache-info"
+                title={`${cacheInfo.song_count} songs · ${cacheInfo.file_count} segments`}
               >
-                Restart
-              </button>
+                <div className="cache-info-text">Cache {cacheInfo.total_mb} / {cacheInfo.max_mb} MB</div>
+                <div className="cache-info-bar">
+                  <div className="cache-info-fill" style={{ width: `${Math.min(cacheInfo.usage_pct, 100)}%` }} />
+                </div>
+              </div>
             )}
+            <div>
+              <span className={`status-dot ${backendStatus}`} />
+              Backend: {backendStatus}
+              {backendStatus !== "running" && (
+                <button className="btn btn-secondary btn-small restart" onClick={handleRestart}>Restart</button>
+              )}
+            </div>
           </div>
         </nav>
 
@@ -105,16 +159,19 @@ export default function App() {
             <Route path="/" element={<Search />} />
             <Route path="/library" element={<Library />} />
             <Route path="/playlists" element={<Playlists />} />
+            <Route path="/playlists/:id" element={<PlaylistDetail />} />
+            <Route path="/queues" element={<SavedQueues />} />
+            <Route path="/queues/:id" element={<SavedQueueDetail />} />
             <Route path="/auth" element={<Auth />} />
-            <Route
-              path="/logs"
-              element={<Logs backendLogs={backendLogs} />}
-            />
+            <Route path="/logs" element={<Logs backendLogs={backendLogs} />} />
           </Routes>
         </main>
+
+        {queueOpen && <QueuePanel onClose={toggleQueue} />}
       </div>
 
-      <PlayerBar backendStatus={backendStatus} />
-    </>
+      <PlayerBar backendStatus={backendStatus} queueOpen={queueOpen} onToggleQueue={toggleQueue} />
+      <UiLayer />
+    </div>
   );
 }

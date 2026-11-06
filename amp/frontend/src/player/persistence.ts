@@ -6,6 +6,7 @@
  */
 
 import type { Song } from "../api";
+import type { RepeatMode } from "./queue";
 
 export const QUEUE_STORAGE_KEY = "amp.queue.v1";
 
@@ -13,10 +14,11 @@ export interface PersistedQueue {
   songs: Song[];
   currentIndex: number;
   volume: number;
+  repeat: RepeatMode;
 }
 
 export function serializeQueue(q: PersistedQueue): string {
-  return JSON.stringify({ songs: q.songs, currentIndex: q.currentIndex, volume: q.volume });
+  return JSON.stringify({ songs: q.songs, currentIndex: q.currentIndex, volume: q.volume, repeat: q.repeat });
 }
 
 function isSong(x: unknown): x is Song {
@@ -51,7 +53,8 @@ export function parseQueue(raw: string | null): PersistedQueue | null {
   const idx = typeof d.currentIndex === "number" && Number.isInteger(d.currentIndex) ? d.currentIndex : -1;
   const currentIndex = idx >= 0 && idx < songs.length ? idx : songs.length > 0 ? 0 : -1;
   const v = typeof d.volume === "number" && Number.isFinite(d.volume) ? d.volume : 1;
-  return { songs, currentIndex, volume: Math.min(1, Math.max(0, v)) };
+  const repeat = d.repeat === "all" || d.repeat === "one" ? d.repeat : "off";
+  return { songs, currentIndex, volume: Math.min(1, Math.max(0, v)), repeat };
 }
 
 export function loadQueue(): PersistedQueue | null {
