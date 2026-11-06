@@ -6,15 +6,16 @@ P21: Blocking handlers are plain `def`.
 
 from __future__ import annotations
 
+import json
 import threading
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from backend.database.models import LikedSong, Song
+from backend.database.models import LikedSong, SavedQueue, Song
 from backend.database.session import get_db
 from backend.services.streaming import get_streaming_service, validate_song_id
 from backend.services.youtube import get_youtube_service
@@ -104,11 +105,11 @@ def get_album(album_id: str):
 
 
 @router.get("/playlist/{playlist_id}")
-def get_playlist(playlist_id: str):
-    """GET /api/playlist/{id}"""
+def get_playlist(playlist_id: str, limit: int = Query(1000, ge=1, le=5000)):
+    """GET /api/playlist/{id} → {id, name, owner, thumbnail_url, song_count, songs}"""
     yt = get_youtube_service()
     try:
-        return yt.get_playlist(playlist_id)
+        return yt.get_playlist(playlist_id, limit=limit)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch playlist: {e}")
 
@@ -155,6 +156,126 @@ def get_user_likes(db: Session = Depends(get_db)):
                 for row in liked
             ]
         raise HTTPException(status_code=502, detail=f"Failed to fetch likes: {e}")
+
+
+@router.post("/user/likes/{song_id}")
+def like_song(song_id: str, song: Optional[SongResponse] = None, db: Session = Depends(get_db)):
+    """POST /api/user/likes/{id} (auth required). The optional body fills the local cache."""
+    validate_song_id(song_id)
+    _rate(song_id, liked=True)
+    if song and song.id == song_id:
+        db.merge(Song(
+            id=song.id, title=song.title, artist=song.artist, album=song.album,
+            duration_ms=song.duration_ms, thumbnail_url=song.thumbnail_url,
+        ))
+        db.merge(LikedSong(song_id=song_id))
+        db.commit()
+    return {"song_id": song_id, "liked": True}
+
+
+@router.delete("/user/likes/{song_id}")
+def unlike_song(song_id: str, db: Session = Depends(get_db)):
+    """DELETE /api/user/likes/{id} (auth required)."""
+    validate_song_id(song_id)
+    _rate(song_id, liked=False)
+    row = db.get(LikedSong, song_id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"song_id": song_id, "liked": False}
+
+
+def _rate(song_id: str, liked: bool) -> None:
+    try:
+        get_youtube_service().rate_song(song_id, liked)
+    except PermissionError:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to update like: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Saved queues
+# ---------------------------------------------------------------------------
+
+
+class SavedQueueBody(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    songs: List[SongResponse] = Field(default_factory=list, max_length=5000)
+
+
+class SavedQueueUpdate(BaseModel):
+    """Only the fields that are set change."""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    songs: Optional[List[SongResponse]] = Field(default=None, max_length=5000)
+
+
+def _saved_queue_dict(row: SavedQueue, with_songs: bool = True) -> dict:
+    songs = json.loads(row.songs_json)
+    out = {
+        "id": row.id,
+        "name": row.name,
+        "song_count": len(songs),
+        "thumbnail_url": next((s["thumbnail_url"] for s in songs if s.get("thumbnail_url")), ""),
+        "updated_at": row.updated_at.isoformat() + "Z",
+    }
+    if with_songs:
+        out["songs"] = songs
+    return out
+
+
+def _dump_songs(songs: List[SongResponse]) -> str:
+    for s in songs:
+        validate_song_id(s.id)
+    return json.dumps([s.model_dump() for s in songs])
+
+
+def _get_saved_queue(db: Session, queue_id: int) -> SavedQueue:
+    row = db.get(SavedQueue, queue_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Saved queue not found")
+    return row
+
+
+@router.get("/queues")
+def list_saved_queues(db: Session = Depends(get_db)):
+    """GET /api/queues — newest first, without the songs."""
+    rows = db.query(SavedQueue).order_by(SavedQueue.updated_at.desc(), SavedQueue.id.desc()).all()
+    return [_saved_queue_dict(r, with_songs=False) for r in rows]
+
+
+@router.post("/queues", status_code=201)
+def create_saved_queue(body: SavedQueueBody, db: Session = Depends(get_db)):
+    """POST /api/queues {name, songs}"""
+    row = SavedQueue(name=body.name.strip() or "Untitled queue", songs_json=_dump_songs(body.songs))
+    db.add(row)
+    db.commit()
+    return _saved_queue_dict(row)
+
+
+@router.get("/queues/{queue_id}")
+def get_saved_queue(queue_id: int, db: Session = Depends(get_db)):
+    return _saved_queue_dict(_get_saved_queue(db, queue_id))
+
+
+@router.put("/queues/{queue_id}")
+def update_saved_queue(queue_id: int, body: SavedQueueUpdate, db: Session = Depends(get_db)):
+    """PUT /api/queues/{id} {name?, songs?} — rename and/or replace the songs."""
+    row = _get_saved_queue(db, queue_id)
+    if body.name is not None:
+        row.name = body.name.strip() or row.name
+    if body.songs is not None:
+        row.songs_json = _dump_songs(body.songs)
+    db.commit()
+    return _saved_queue_dict(row)
+
+
+@router.delete("/queues/{queue_id}")
+def delete_saved_queue(queue_id: int, db: Session = Depends(get_db)):
+    db.delete(_get_saved_queue(db, queue_id))
+    db.commit()
+    return {"message": "deleted"}
 
 
 # ---------------------------------------------------------------------------

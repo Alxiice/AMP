@@ -129,6 +129,22 @@ export interface PlaylistInfo {
   song_count: number;
 }
 
+export interface PlaylistDetail extends PlaylistInfo {
+  songs: Song[];
+}
+
+export interface SavedQueueInfo {
+  id: number;
+  name: string;
+  song_count: number;
+  thumbnail_url: string;
+  updated_at: string;
+}
+
+export interface SavedQueueDetail extends SavedQueueInfo {
+  songs: Song[];
+}
+
 // ---------------------------------------------------------------------------
 // Fetch wrapper
 // ---------------------------------------------------------------------------
@@ -218,9 +234,23 @@ export const api = {
   getSong: (id: string) => fetchApi<Song>(`/api/song/${id}`),
   getArtist: (id: string) => fetchApi<Record<string, unknown>>(`/api/artist/${id}`),
   getAlbum: (id: string) => fetchApi<Record<string, unknown>>(`/api/album/${id}`),
-  getPlaylist: (id: string) => fetchApi<Record<string, unknown>>(`/api/playlist/${id}`),
+  getPlaylist: (id: string) => fetchApi<PlaylistDetail>(`/api/playlist/${encodeURIComponent(id)}`),
   getUserPlaylists: () => fetchApi<PlaylistInfo[]>("/api/user/playlists"),
   getUserLikes: () => fetchApi<Song[]>("/api/user/likes"),
+  likeSong: (song: Song) =>
+    fetchApi<{ liked: boolean }>(`/api/user/likes/${song.id}`, { method: "POST", body: JSON.stringify(song) }),
+  unlikeSong: (id: string) =>
+    fetchApi<{ liked: boolean }>(`/api/user/likes/${id}`, { method: "DELETE" }),
+
+  // --- Saved queues ---
+  listSavedQueues: () => fetchApi<SavedQueueInfo[]>("/api/queues"),
+  getSavedQueue: (id: number) => fetchApi<SavedQueueDetail>(`/api/queues/${id}`),
+  createSavedQueue: (name: string, songs: Song[]) =>
+    fetchApi<SavedQueueDetail>("/api/queues", { method: "POST", body: JSON.stringify({ name, songs }) }),
+  updateSavedQueue: (id: number, patch: { name?: string; songs?: Song[] }) =>
+    fetchApi<SavedQueueDetail>(`/api/queues/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
+  deleteSavedQueue: (id: number) =>
+    fetchApi<{ message: string }>(`/api/queues/${id}`, { method: "DELETE" }),
 
   // --- Streaming ---
   getStreamInfo: (id: string) => fetchApi<StreamInfoSummary>(`/api/stream/info/${id}`),

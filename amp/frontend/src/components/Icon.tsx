@@ -1,0 +1,33 @@
+const PATHS: Record<string, string> = {
+  search: "M10.5 3a7.5 7.5 0 0 1 5.9 12.1l4.8 4.8-1.4 1.4-4.8-4.8A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z",
+  heart: "M12 20.5 4.6 13a4.9 4.9 0 0 1 0-7 4.9 4.9 0 0 1 7 0l.4.4.4-.4a4.9 4.9 0 0 1 7 7L12 20.5Zm-4-14a3 3 0 0 0-2 5.1l6 6 6-6a3 3 0 0 0-4.200-4.200L12 8.200l-1.800-1.800A3 3 0 0 0 8 6.500Z",
+  "heart-filled": "M12 20.500 4.600 13a4.900 4.900 0 0 1 7-7l.4.400.4-.400a4.900 4.900 0 0 1 7 7L12 20.500Z",
+  playlist: "M3 6h13v2H3V6Zm0 5h13v2H3v-2Zm0 5h8v2H3v-2Zm11 0v-3l7 4-7 4v-5Z",
+  queue: "M3 5h18v2H3V5Zm0 5h18v2H3v-2Zm0 5h9v2H3v-2Zm12 0 6 3.500-6 3.500v-7Z",
+  saved: "M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1Zm1 2v12.500l5-2.900 5 2.900V5H7Z",
+  account: "M12 12a4.500 4.500 0 1 1 0-9 4.500 4.500 0 0 1 0 9Zm0-2a2.500 2.500 0 1 0 0-5 2.500 2.500 0 0 0 0 5Zm-8 11c0-4 3.600-7 8-7s8 3 8 7h-2c0-2.800-2.600-5-6-5s-6 2.200-6 5H4Z",
+  logs: "M4 4h16v16H4V4Zm2 2v12h12V6H6Zm2 2h8v2H8V8Zm0 4h8v2H8v-2Z",
+  play: "M7 4v16l14-8L7 4Z",
+  pause: "M6 4h4v16H6V4Zm8 0h4v16h-4V4Z",
+  stop: "M6 6h12v12H6V6Z",
+  next: "M5 4v16l11-8L5 4Zm12 0h2.500v16H17V4Z",
+  previous: "M19 4v16L8 12l11-8ZM7 4H4.500v16H7V4Z",
+  shuffle: "M3 6h4l10 12h2v-2.500l3.500 3.500-3.500 3.500V20h-3L6 8H3V6Zm16 0V3.500L22.500 7 19 10.500V8h-2l-3 3.600-1.300-1.600L16 6h3ZM3 16h3l2.500-3 1.300 1.600L7 18H3v-2Z",
+  repeat: "M7 7h10V4l4 4-4 4V9H7v3H5V9a2 2 0 0 1 2-2Zm10 10H7v3l-4-4 4-4v3h10v-3h2v3a2 2 0 0 1-2 2Z",
+  "repeat-one": "M7 7h10V4l4 4-4 4V9H7v3H5V9a2 2 0 0 1 2-2Zm10 10H7v3l-4-4 4-4v3h10v-3h2v3a2 2 0 0 1-2 2Zm-6-7h2v5h-2v-3h-1v-1l1-1Z",
+  volume: "M4 9h4l5-4v14l-5-4H4V9Zm11-.500a4.500 4.500 0 0 1 0 7v-7Z",
+  more: "M12 5a2 2 0 1 1 0 4 2 2 0 0 1 0-4Zm0 5.500a2 2 0 1 1 0 4 2 2 0 0 1 0-4ZM12 16a2 2 0 1 1 0 4 2 2 0 0 1 0-4Z",
+  close: "m6.400 5 5.600 5.600L17.600 5 19 6.400 13.400 12l5.600 5.600-1.400 1.400-5.600-5.600L6.400 19 5 17.600l5.600-5.600L5 6.400 6.400 5Z",
+  up: "m12 7 7 8-1.500 1.300L12 10l-5.500 6.300L5 15l7-8Z",
+  down: "m12 17-7-8 1.500-1.300L12 14l5.500-6.300L19 9l-7 8Z",
+  add: "M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6V5Z",
+  music: "M9 4h11v12.500a3.500 3.500 0 1 1-2-3.200V8h-7v10.500a3.500 3.500 0 1 1-2-3.200V4Z",
+};
+
+export function Icon({ name, size = 20 }: { name: string; size?: number }) {
+  return (
+    <svg className="icon" width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d={PATHS[name]} fillRule="evenodd" />
+    </svg>
+  );
+}
