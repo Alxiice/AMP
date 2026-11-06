@@ -1,61 +1,79 @@
+import { useState } from "react";
 import type { Song } from "../api";
-import { useQueueState, useQueueActions } from "../state";
+import { formatDuration } from "../format";
+import { store, useQueueState } from "../state";
+import { Cover } from "./Cover";
+import { Icon } from "./Icon";
+import { LikeButton } from "./LikeButton";
+import { SongMenu } from "./SongMenu";
 
 interface SongListProps {
   songs: Song[];
   loading?: boolean;
   emptyMessage?: string;
+  /** Lists whose rows can be removed (saved queue page). */
+  onRemove?: (index: number) => void;
 }
 
-function formatDuration(ms: number): string {
-  if (!ms) return "--:--";
-  const totalSec = Math.floor(ms / 1000);
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
-}
+export function SongList({ songs, loading, emptyMessage, onRemove }: SongListProps) {
+  const { currentSong, isPlaying } = useQueueState();
+  const [menu, setMenu] = useState<{ index: number; x: number; y: number } | null>(null);
 
-export function SongList({ songs, loading, emptyMessage }: SongListProps) {
-  const state = useQueueState();
-  const actions = useQueueActions();
-
-  if (loading) {
-    return <div className="loading">Loading...</div>;
-  }
-
-  if (songs.length === 0) {
-    return (
-      <div className="empty-state">
-        {emptyMessage || "No songs found"}
-      </div>
-    );
-  }
+  if (loading) return <div className="loading">Loading...</div>;
+  if (songs.length === 0) return <div className="empty-state">{emptyMessage || "No songs found"}</div>;
 
   return (
     <div className="song-list">
-      {songs.map((song) => {
-        const isPlaying = state.currentSong?.id === song.id && state.isPlaying;
+      {songs.map((song, index) => {
+        const isCurrent = currentSong?.id === song.id;
         return (
           <div
-            key={song.id}
-            className={`song-row${state.currentSong?.id === song.id ? " playing" : ""}`}
-            onClick={() => actions.playSong(song, songs)}
+            key={`${song.id}-${index}`}
+            className={`song-row${isCurrent ? " playing" : ""}`}
+            onClick={() => store.playList(songs, index)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setMenu({ index, x: e.clientX, y: e.clientY });
+            }}
           >
-            {song.thumbnail_url ? (
-              <img className="song-thumb" src={song.thumbnail_url} alt="" loading="lazy" />
-            ) : (
-              <div className="song-thumb-placeholder" />
-            )}
+            <div className="song-cover">
+              <Cover url={song.thumbnail_url} songId={song.id} size={44} lazy />
+              <span className="song-cover-overlay">
+                <Icon name={isCurrent && isPlaying ? "pause" : "play"} size={18} />
+              </span>
+            </div>
             <div className="song-info">
               <div className="song-title">
-                {isPlaying ? "\u25B6 " : ""}{song.title}
+                {song.title}
+                {song.is_explicit && <span className="explicit" title="Explicit">E</span>}
               </div>
               <div className="song-artist">{song.artist}</div>
             </div>
+            <div className="song-album">{song.album}</div>
+            <LikeButton song={song} />
             <span className="song-duration">{formatDuration(song.duration_ms)}</span>
+            <button
+              className="btn-icon song-more"
+              title="More"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenu({ index, x: e.clientX, y: e.clientY });
+              }}
+            >
+              <Icon name="more" size={18} />
+            </button>
           </div>
         );
       })}
+      {menu && songs[menu.index] && (
+        <SongMenu
+          song={songs[menu.index]}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onRemove={onRemove && (() => onRemove(menu.index))}
+        />
+      )}
     </div>
   );
 }

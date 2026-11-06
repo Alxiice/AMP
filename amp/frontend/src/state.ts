@@ -1,27 +1,30 @@
 /**
  * Frontend-owned queue + playback state.
  *
- * The backend has no queue API — the queue lives here.
- * Playback position is reported to the backend every 2s (drives buffer-ahead).
- * Queue, current index and volume persist in localStorage (amp.queue.v1) and
- * are restored paused; the next song is prefetched near the end of this one.
+ * The queue itself is the pure model in player/queue.ts; this store applies it
+ * to the audio element. `playToken` goes up whenever the current song must
+ * (re)load, which PlayerBar watches; a restored queue stays at 0, so it waits
+ * for the play button. Playback position is reported to the backend every 2s
+ * (drives buffer-ahead). Queue, current index, volume and repeat persist in
+ * localStorage (amp.queue.v1); the next song is prefetched near the end of this one.
  */
 
-import { useSyncExternalStore, useCallback } from "react";
+import { useSyncExternalStore } from "react";
 import { api, type Song } from "./api";
 import { loadQueue, saveQueue } from "./player/persistence";
 import { shouldPrefetch } from "./player/prefetch";
+import * as Q from "./player/queue";
 
 const PERSIST_DEBOUNCE_MS = 500;
+const RESTART_THRESHOLD_MS = 3000;
 
 // ---------------------------------------------------------------------------
 // Queue state
 // ---------------------------------------------------------------------------
 
-interface QueueState {
-  songs: Song[];
-  currentIndex: number;
+export interface QueueState extends Q.QueueModel {
   currentSong: Song | null;
+  playToken: number;
   isPlaying: boolean;
   positionMs: number;
   durationMs: number;
@@ -32,9 +35,9 @@ type Listener = () => void;
 
 class StateStore {
   private state: QueueState = {
-    songs: [],
-    currentIndex: -1,
+    ...Q.emptyQueue,
     currentSong: null,
+    playToken: 0,
     isPlaying: false,
     positionMs: 0,
     durationMs: 0,
@@ -45,32 +48,22 @@ class StateStore {
   private audio: HTMLAudioElement | null = null;
   private positionTimer: ReturnType<typeof setInterval> | null = null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
-  private restored = false;                   // currentSong came from storage: don't autoplay it
   private prefetchedFor: string | null = null; // current song id whose successor was prefetched
 
   constructor() {
     const saved = loadQueue();
-    if (saved && saved.currentIndex >= 0) {
-      const song = saved.songs[saved.currentIndex];
+    if (saved) {
+      const song = saved.currentIndex >= 0 ? saved.songs[saved.currentIndex] : null;
       this.state = {
         ...this.state,
-        songs: saved.songs,
+        items: Q.makeItems(saved.songs),
         currentIndex: saved.currentIndex,
         currentSong: song,
-        durationMs: song.duration_ms,
+        durationMs: song?.duration_ms ?? 0,
         volume: saved.volume,
+        repeat: saved.repeat,
       };
-      this.restored = true;
-    } else if (saved) {
-      this.state = { ...this.state, volume: saved.volume };
     }
-  }
-
-  /** True once if the current song was restored from storage (show it paused). */
-  takeRestored(): boolean {
-    const r = this.restored;
-    this.restored = false;
-    return r;
   }
 
   // --- Subscription (useSyncExternalStore) ---
@@ -89,8 +82,8 @@ class StateStore {
   private setState(partial: Partial<QueueState>): void {
     const prev = this.state;
     this.state = { ...prev, ...partial };
-    if (this.state.songs !== prev.songs || this.state.currentIndex !== prev.currentIndex
-        || this.state.volume !== prev.volume) {
+    if (this.state.items !== prev.items || this.state.currentIndex !== prev.currentIndex
+        || this.state.volume !== prev.volume || this.state.repeat !== prev.repeat) {
       this.schedulePersist();
     }
     this.emit();
@@ -100,8 +93,8 @@ class StateStore {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      const { songs, currentIndex, volume } = this.state;
-      saveQueue({ songs, currentIndex, volume });
+      const { items, currentIndex, volume, repeat } = this.state;
+      saveQueue({ songs: items.map((i) => i.song), currentIndex, volume, repeat });
     }, PERSIST_DEBOUNCE_MS);
   }
 
@@ -141,68 +134,108 @@ class StateStore {
 
   // --- Queue operations ---
 
-  playSong(song: Song, queue?: Song[]): void {
-    if (queue && queue.length > 0) {
-      const idx = queue.findIndex((s) => s.id === song.id);
-      this.setState({
-        songs: queue,
-        currentIndex: idx >= 0 ? idx : 0,
-        currentSong: song,
-      });
-    } else {
-      // Add to queue if not present
-      const existing = this.state.songs.findIndex((s) => s.id === song.id);
-      let songs: Song[];
-      let index: number;
-      if (existing >= 0) {
-        songs = this.state.songs;
-        index = existing;
-      } else {
-        songs = [...this.state.songs, song];
-        index = songs.length - 1;
-      }
-      this.setState({ songs, currentIndex: index, currentSong: song });
-    }
-  }
-
-  playQueue(songs: Song[], startIndex = 0): void {
-    if (songs.length === 0) return;
+  /** Apply a model change. If the current item changed, it loads when `autoplay`. */
+  private apply(q: Q.QueueModel, autoplay: boolean): void {
+    const prevUid = this.state.items[this.state.currentIndex]?.uid;
+    const song = q.items[q.currentIndex]?.song ?? null;
+    const changed = q.items[q.currentIndex]?.uid !== prevUid;
     this.setState({
-      songs,
-      currentIndex: startIndex,
-      currentSong: songs[startIndex],
+      ...q,
+      currentSong: song,
+      ...(changed ? { positionMs: 0, durationMs: song?.duration_ms ?? 0 } : {}),
+      ...(changed && autoplay && song ? { playToken: this.state.playToken + 1 } : {}),
     });
   }
 
-  next(): Song | null {
-    if (this.state.currentIndex < this.state.songs.length - 1) {
-      const newIndex = this.state.currentIndex + 1;
-      this.setState({
-        currentIndex: newIndex,
-        currentSong: this.state.songs[newIndex],
-        positionMs: 0,
-      });
-      return this.state.songs[newIndex];
+  private model(): Q.QueueModel {
+    return this.state;
+  }
+
+  /** Replace the queue with a list and play from `startIndex`. */
+  playList(songs: Song[], startIndex = 0): void {
+    if (songs.length === 0) return;
+    const sameSong = this.state.currentSong?.id === songs[startIndex].id;
+    const q = Q.loadList(this.model(), songs, startIndex);
+    if (sameSong && this.audio?.getAttribute("src")) {
+      // Already loaded: keep the position instead of restarting the song
+      this.setState({ ...q, currentSong: songs[startIndex] });
+      this.audio.play().catch(() => {});
+      return;
     }
-    return null;
+    this.setState({ ...q, currentSong: songs[startIndex], positionMs: 0,
+      durationMs: songs[startIndex].duration_ms, playToken: this.state.playToken + 1 });
+  }
+
+  /** Replace the queue with a list in random order. */
+  shuffleList(songs: Song[]): void {
+    if (songs.length === 0) return;
+    this.state = { ...this.state, shuffle: true };
+    this.playList(songs, Math.floor(Math.random() * songs.length));
+  }
+
+  playNext(songs: Song[]): void {
+    const wasEmpty = this.state.items.length === 0;
+    this.apply(Q.insertNext(this.model(), songs), wasEmpty);
+  }
+
+  addToQueue(songs: Song[]): void {
+    const wasEmpty = this.state.items.length === 0;
+    this.apply(Q.append(this.model(), songs), wasEmpty);
+  }
+
+  removeItem(uid: number): void {
+    this.apply(Q.remove(this.model(), uid), this.state.isPlaying);
+  }
+
+  moveItem(from: number, to: number): void {
+    this.apply(Q.move(this.model(), from, to), false);
+  }
+
+  clearQueue(keepCurrent = false): void {
+    this.apply(Q.clear(this.model(), keepCurrent), false);
+  }
+
+  jumpTo(uid: number): void {
+    const index = this.state.items.findIndex((i) => i.uid === uid);
+    if (index >= 0) this.goTo(index);
+  }
+
+  toggleShuffle(): void {
+    this.apply(Q.setShuffle(this.model(), !this.state.shuffle), false);
+  }
+
+  cycleRepeat(): void {
+    this.setState({ repeat: Q.cycleRepeat(this.state.repeat) });
+  }
+
+  private goTo(index: number): void {
+    const song = this.state.items[index].song;
+    this.setState({
+      currentIndex: index,
+      currentSong: song,
+      positionMs: 0,
+      durationMs: song.duration_ms,
+      playToken: this.state.playToken + 1,
+    });
+  }
+
+  next(manual = true): Song | null {
+    const index = Q.nextIndex(this.model(), manual);
+    if (index === null) return null;
+    this.goTo(index);
+    return this.state.currentSong;
   }
 
   previous(): Song | null {
     // If more than 3s into the song, restart it
-    if (this.state.positionMs > 3000) {
+    if (this.state.positionMs > RESTART_THRESHOLD_MS) {
       this.setAudioTime(0);
       return this.state.currentSong;
     }
-    if (this.state.currentIndex > 0) {
-      const newIndex = this.state.currentIndex - 1;
-      this.setState({
-        currentIndex: newIndex,
-        currentSong: this.state.songs[newIndex],
-        positionMs: 0,
-      });
-      return this.state.songs[newIndex];
-    }
-    return null;
+    const index = Q.previousIndex(this.model());
+    if (index === null) return null;
+    this.goTo(index);
+    return this.state.currentSong;
   }
 
   // --- Playback controls ---
@@ -269,9 +302,9 @@ class StateStore {
 
   /** Once per current song: resolve the next song and queue its first segments (LOW). */
   private maybePrefetchNext(positionMs: number): void {
-    const { currentSong, songs, currentIndex, durationMs } = this.state;
+    const { currentSong, items, currentIndex, durationMs } = this.state;
     if (!currentSong || this.prefetchedFor === currentSong.id) return;
-    const next = songs[currentIndex + 1];
+    const next = items[currentIndex + 1]?.song;
     if (!next || !shouldPrefetch(positionMs, durationMs)) return;
     this.prefetchedFor = currentSong.id;
     api.bufferAhead(next.id, "prefetch").catch((e) => {
@@ -281,11 +314,8 @@ class StateStore {
 
   private _onEnded = (): void => {
     this.setState({ isPlaying: false });
-    const nextSong = this.next();
-    if (nextSong) {
-      // The audio src change will be handled by the PlayerBar component
-      this.emit();
-    }
+    // The audio src change is handled by the PlayerBar component (playToken)
+    this.next(false);
   };
 
   private _onPlay = (): void => {
@@ -327,20 +357,4 @@ export const store = new StateStore();
 // React hook
 export function useQueueState(): QueueState {
   return useSyncExternalStore(store.subscribe, store.getSnapshot);
-}
-
-export function useQueueActions() {
-  return {
-    playSong: useCallback((song: Song, queue?: Song[]) => store.playSong(song, queue), []),
-    playQueue: useCallback((songs: Song[], startIndex?: number) => store.playQueue(songs, startIndex), []),
-    next: useCallback(() => store.next(), []),
-    previous: useCallback(() => store.previous(), []),
-    setPlaying: useCallback((playing: boolean) => store.setPlaying(playing), []),
-    setPositionMs: useCallback((ms: number) => store.setPositionMs(ms), []),
-    setVolume: useCallback((v: number) => store.setVolume(v), []),
-    setAudioTime: useCallback((s: number) => store.setAudioTime(s), []),
-    setAudioElement: useCallback((a: HTMLAudioElement | null) => store.setAudioElement(a), []),
-    startPositionReporting: useCallback((fn: (ms: number) => void) => store.startPositionReporting(fn), []),
-    stopPositionReporting: useCallback(() => store.stopPositionReporting(), []),
-  };
 }

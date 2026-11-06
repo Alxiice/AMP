@@ -77,11 +77,11 @@ export function Auth() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">Authentication</h1>
+        <h1 className="page-title">Account</h1>
       </div>
 
       <p style={{ color: "var(--text-secondary)", marginBottom: 24, maxWidth: 500 }}>
-        Search and playback work without signing in. Sign in to see your liked songs and playlists.
+        Search and playback work without signing in. Sign in to see your playlists and to like songs.
       </p>
 
       {/* 1. Status */}
