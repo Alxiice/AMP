@@ -82,6 +82,23 @@ class SavedQueue(Base):
     updated_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
+class ListeningHistory(Base):
+    """One play of a song: how long it was actually listened to (seeks excluded) and how it ended."""
+
+    __tablename__ = "listening_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    song_id: Mapped[str] = mapped_column(String(32), index=True)
+    title: Mapped[str] = mapped_column(String(500), default="")
+    artist: Mapped[str] = mapped_column(String(500), default="")
+    album: Mapped[str] = mapped_column(String(500), default="")
+    thumbnail_url: Mapped[str] = mapped_column(Text, default="")
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0)
+    listened_ms: Mapped[int] = mapped_column(Integer, default=0)
+    started_at: Mapped[dt.datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    end_reason: Mapped[str] = mapped_column(String(16), default="skipped")  # finished | skipped | stopped | closed
+
+
 class Segment(Base):
     """Segment cache metadata. PK = (song_id, index). index -1 == init segment."""
 

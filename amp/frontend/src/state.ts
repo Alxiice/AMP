@@ -13,6 +13,7 @@ import { useSyncExternalStore } from "react";
 import { api, type Song } from "./api";
 import { loadQueue, saveQueue } from "./player/persistence";
 import { fadeGain } from "./player/fade";
+import { HistoryTracker, parsePending, PENDING_KEY, type EndReason, type HistoryEntryBody } from "./player/history";
 import { shouldPrefetch } from "./player/prefetch";
 import * as Q from "./player/queue";
 
@@ -35,6 +36,25 @@ export interface QueueState extends Q.QueueModel {
 
 type Listener = () => void;
 
+function savePendingPlay(play: HistoryEntryBody | null): void {
+  try {
+    if (play) localStorage.setItem(PENDING_KEY, JSON.stringify(play));
+    else localStorage.removeItem(PENDING_KEY);
+  } catch {
+    // history is best effort
+  }
+}
+
+/** Fired on window after a play is saved: the History page reloads. */
+export const HISTORY_EVENT = "amp:history";
+
+function sendHistory(entry: HistoryEntryBody): void {
+  api.addHistory(entry).then(
+    () => window.dispatchEvent(new Event(HISTORY_EVENT)),
+    (e) => console.warn("History entry not saved:", e),
+  );
+}
+
 class StateStore {
   private state: QueueState = {
     ...Q.emptyQueue,
@@ -53,6 +73,7 @@ class StateStore {
   private prefetchedFor: string | null = null; // current song id whose successor was prefetched
   private fadeSec = 0; // settings: fade between songs
   private fadeTimer: ReturnType<typeof setInterval> | null = null;
+  private history = new HistoryTracker(sendHistory, savePendingPlay);
 
   constructor() {
     const saved = loadQueue();
@@ -85,6 +106,8 @@ class StateStore {
 
   private setState(partial: Partial<QueueState>): void {
     const prev = this.state;
+    // A (re)load ends the play in progress; after "ended" it is already over (no-op)
+    if (partial.playToken !== undefined && partial.playToken !== prev.playToken) this.history.end("skipped");
     this.state = { ...prev, ...partial };
     if (this.state.items !== prev.items || this.state.currentIndex !== prev.currentIndex
         || this.state.volume !== prev.volume || this.state.repeat !== prev.repeat) {
@@ -296,6 +319,25 @@ class StateStore {
     return this.audio?.currentTime ?? 0;
   }
 
+  // --- Listening history ---
+
+  /** Stop / queue cleared: record the play in progress. */
+  endListening(reason: EndReason): void {
+    this.history.end(reason);
+  }
+
+  /** Once the backend is up: record a play left unfinished when the app was closed. */
+  flushPendingHistory(): void {
+    let pending: HistoryEntryBody | null = null;
+    try {
+      pending = parsePending(localStorage.getItem(PENDING_KEY));
+      localStorage.removeItem(PENDING_KEY);
+    } catch {
+      return;
+    }
+    if (pending) sendHistory(pending);
+  }
+
   // --- Position reporting timer (every 2s to backend) ---
 
   startPositionReporting(reportFn: (positionMs: number) => void): void {
@@ -323,6 +365,7 @@ class StateStore {
   private _onTimeUpdate = (): void => {
     if (!this.audio) return;
     const positionMs = Math.floor(this.audio.currentTime * 1000);
+    this.history.tick(this.state.currentSong, this.audio.currentTime, !this.audio.paused, this.state.durationMs);
     this.setState({ positionMs });
     this.maybePrefetchNext(positionMs);
   };
@@ -340,6 +383,7 @@ class StateStore {
   }
 
   private _onEnded = (): void => {
+    this.history.end("finished");
     this.setState({ isPlaying: false });
     // The audio src change is handled by the PlayerBar component (playToken)
     this.next(false);

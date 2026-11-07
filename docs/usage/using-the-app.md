@@ -45,6 +45,24 @@ The **Saved queues** page lists what you saved. Open one to play it, shuffle it,
 current queue, rename it, replace its content with the current queue, delete it, or remove single
 songs through their menu. Saved queues are stored locally in the app's database, not on YouTube.
 
+## History
+
+**History** lists what you listened to, grouped by day, with the share of each song you actually
+heard (jumps in the song don't count) and how it ended: *Finished*, *Skipped*, *Stopped* or *App
+closed*. Pick 7 days, 30 days or all time; the summary shows the number of plays and the total
+listening time. Click a song to play it, ✕ removes one entry, **Clear history** removes everything.
+Plays shorter than 5 seconds aren't recorded. The history is stored locally, not on YouTube.
+
+## Settings
+
+| Setting | What it does |
+|---|---|
+| **Theme** | Dark, Light, or System (follows Windows) |
+| **Accent colour** | 8 presets or any colour (**+**). Text on it switches to dark when white would be hard to read |
+| **Fade between songs** | 0–10 s (Off by default): the end of each song fades out and the next one fades in |
+
+Settings are kept on this computer and apply immediately.
+
 ## Playlists
 
 With a [signed-in](sign-in.md) account, **Playlists** lists your YouTube playlists. Click one to
@@ -55,7 +73,7 @@ see its songs. Tracks YouTube no longer offers are left out. Up to 1000 tracks a
 | Control | What it does |
 |---|---|
 | ⏮ Previous | restarts the song if more than 3 s have played, else goes to the previous song |
-| ▶ / ⏸ | play / pause. A spinner means the stream is still loading |
+| ▶ / ⏸ | play / pause, also with the **space bar** anywhere except in text fields. A spinner means the stream is still loading |
 | ⏹ Stop | stops playback |
 | Shuffle, Repeat | see [The queue](#the-queue) |
 | Heart | like the current song (signed in only) |
@@ -135,3 +153,11 @@ Three tabs, useful when something doesn't work:
 Log files are also written to disk, in the `logs/` folder of the
 [data directory](configuration.md#where-amp-keeps-its-data) (`app.log`, `streaming.log`,
 rotated at 5 MB, 3 old files kept).
+
+## Developer
+
+The **Developer** page gathers what the [debug launcher](debugging.md) shows, inside the app:
+the backend (URL, process id, uptime, yt-dlp / Node.js / EJS, YouTube session, **Restart
+backend**), the [OBS widget](obs-widget.md) (port, what it shows, **Copy widget URL**), cache use,
+the segments of the current song (the playing one outlined), and an API tester with quick buttons
+for common routes. Everything refreshes every 2 seconds.
