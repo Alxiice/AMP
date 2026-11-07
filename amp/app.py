@@ -4,22 +4,24 @@
 The normal entry point is the Tauri app, which starts and stops its own backend.
 This launcher is a developer tool. Standard library only. Provides:
 
-  Top bar:
-    - Backend:  Start / Stop / Restart / Force Kill (port 8000, or AMP_PORT)
-        Data in amp/.amp/ + amp/userdb.sqlite. Force Kill uses amp/.amp/backend.pid
-        first and port scanning only as a fallback.
-    - Frontend: Web app / Desktop app mode + Start / Stop / Restart / Force Kill (port 1420)
-        Web app:     Vite dev server, opened in the selected browser once it is up;
-                     also starts the backend (a browser can't spawn it)
-        Desktop app: `npm run tauri dev` (Vite + Tauri window). The app spawns its own
-                     backend on a free port with its data in the per-user app data dir
-                     (%APPDATA%/com.amp.v2 on Windows), separate from the one above
-    - Browser selector dropdown + Open in Browser
+  Sidebar: Overview / Logs / API tester / Chunks, browser picker + "Open web app".
 
-  Tab zone (ttk.Notebook):
-    Tab 1 — Logs:     Live backend log viewer with search + syntax highlighting
-    Tab 2 — API:      HTTP request tester against the backend (any method/path/body)
-    Tab 3 — Chunks:   Auto-refreshing segment (chunk) database viewer from SQLite
+  Overview:
+    - Backend card:  Start/Stop, Restart (↻), Force kill (✕) — port 8000, or AMP_PORT.
+        Data in amp/.amp/ + amp/userdb.sqlite. Force kill uses amp/.amp/backend.pid
+        first and port scanning only as a fallback.
+    - Frontend card: Web / Desktop mode + Start/Stop, Restart, Force kill (port 1420)
+        Web:     Vite dev server, opened in the selected browser once it is up;
+                 also starts the backend (a browser can't spawn it)
+        Desktop: `npm run tauri dev` (Vite + Tauri window). The app spawns its own
+                 backend on a free port with its data in the per-user app data dir
+                 (%APPDATA%/com.amp.v2 on Windows), separate from the one above
+    - OBS widget card: what the widget on WIDGET_PORT (8001) shows, copy/open its URL
+    - Segment strip of the launcher backend's current song, and the last log lines
+
+  Logs:        live backend output + app.log, search, All / Warn+ / Errors filter
+  API tester:  any method/path/body against the backend, quick buttons
+  Chunks:      auto-refreshing segments table from SQLite, filterable by song
 
 Usage:
     python app.py
@@ -70,6 +72,8 @@ BACKEND_PORT = int(os.environ.get("AMP_PORT") or 8000)
 FRONTEND_PORT = 1420
 API_BASE = f"http://127.0.0.1:{BACKEND_PORT}"
 FRONTEND_URL = f"http://127.0.0.1:{FRONTEND_PORT}"
+WIDGET_PORT = int(os.environ.get("WIDGET_PORT") or 8001)  # OBS now-playing widget (backend/widget.py)
+WIDGET_URL = f"http://127.0.0.1:{WIDGET_PORT}/?w=320&h=72"
 
 DB_PATH = AMP_DIR / "userdb.sqlite"
 APP_LOG_PATH = AMP_DIR / ".amp" / "logs" / "app.log"
@@ -81,7 +85,9 @@ FRONTEND_READY_TIMEOUT_S = 60  # web mode: wait this long for Vite before openin
 
 MAX_LOG_LINES = 2000       # lines kept in memory / shown in the log widget
 MAX_CHUNK_ROWS = 5000       # rows shown in the chunk table
-LOG_RELOAD_BYTES = 256 * 1024  # how much of app.log "Reload All" re-reads
+LOG_RELOAD_BYTES = 256 * 1024  # how much of app.log "Reload file" re-reads
+MINI_LOG_LINES = 200        # lines kept in the Overview's live log
+LEVEL_FILTERS = {"warning": {"warning", "error", "critical"}, "error": {"error", "critical"}}  # Logs page
 
 # Hide console windows for helper processes on Windows
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -90,32 +96,42 @@ _SUBPROC_FLAGS = _NO_WINDOW if os.name == "nt" else 0
 ANSI_RE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
 
 # ---------------------------------------------------------------------------
-# Colour palette (dark theme)
+# Colour palette (dark theme, same tokens as frontend/src/styles.css)
 # ---------------------------------------------------------------------------
 
-BG = "#0f0f0f"
-BG_ELEV = "#1a1a1a"
-BG_INPUT = "#252525"
-FG = "#f1f1f1"
-FG_DIM = "#aaaaaa"
-ACCENT = "#ff0033"
-SUCCESS = "#1db954"
-WARNING = "#f0a500"
-ERROR_CLR = "#e74c3c"
-INFO_CLR = "#4a9eff"
-DEBUG_CLR = "#888888"
-CRITICAL_CLR = "#ff2222"
+FONT = "Segoe UI"
+MONO = "Consolas"
 
-# Log-level tag colours for the Text widget
+BG = "#08080b"
+SURFACE = "#121217"
+SURFACE_2 = "#1b1b22"
+SURFACE_3 = "#26262f"
+BORDER = "#2a2a33"
+FG = "#f4f4f6"
+FG_DIM = "#a8a8b3"
+FG_MUTED = "#6e6e7a"
+ACCENT = "#ff4d67"
+ACCENT_HOVER = "#ff6b81"
+SUCCESS = "#2ecc71"
+WARNING = "#f0a500"
+ERROR_CLR = "#ff5f56"
+INFO_CLR = "#5aa9ff"
+DEBUG_CLR = FG_MUTED
+CRITICAL_CLR = "#ff2a4a"
+
+# Log-level tag colours for the Text widgets
 LOG_TAGS = {
     "error": ERROR_CLR,
     "warning": WARNING,
     "info": INFO_CLR,
     "debug": DEBUG_CLR,
     "critical": CRITICAL_CLR,
-    "timestamp": "#666666",
+    "timestamp": FG_MUTED,
     "search_hit": "#ffdd00",
 }
+
+# Segment strip colours (same as the app's seek bar)
+SEG_COLORS = {"downloaded": "#4a4a57", "downloading": WARNING, "pending": "#33333d", "error": ERROR_CLR}
 
 
 # ---------------------------------------------------------------------------
@@ -629,41 +645,179 @@ _LEVEL_TAG = {
 
 
 # ---------------------------------------------------------------------------
+# Widgets (flat buttons, rounded cards)
+# ---------------------------------------------------------------------------
+
+class FlatButton(tk.Button):
+    """Flat button with a hover colour. kind picks the colours (see KINDS)."""
+
+    KINDS = {  # kind: (background, hover background, text, border)
+        "primary": (ACCENT, ACCENT_HOVER, "#ffffff", ACCENT),
+        "secondary": (SURFACE_2, SURFACE_3, FG, BORDER),
+        "danger": (SURFACE_2, SURFACE_3, ERROR_CLR, BORDER),
+        "chip": (SURFACE, SURFACE_2, FG_DIM, BORDER),
+        "chip_on": (SURFACE_3, SURFACE_3, FG, SURFACE_3),
+        "nav": (SURFACE, SURFACE_2, FG_DIM, SURFACE),
+        "nav_on": (SURFACE_2, SURFACE_2, FG, SURFACE_2),
+    }
+
+    def __init__(self, parent: tk.Misc, text: str, command: Callable, kind: str = "secondary",
+                 small: bool = False, **kw) -> None:
+        kw.setdefault("padx", 8 if small else 12)
+        kw.setdefault("pady", 2 if small else 5)
+        super().__init__(parent, text=text, command=command, relief=tk.FLAT, bd=0,
+                         highlightthickness=1, cursor="hand2",
+                         font=(FONT, 9 if small else 10), **kw)
+        self.set_kind(kind)
+        self.bind("<Enter>", lambda _e: self.config(bg=self._hover) if str(self["state"]) != "disabled" else None)
+        self.bind("<Leave>", lambda _e: self.config(bg=self._bg))
+
+    def set_kind(self, kind: str) -> None:
+        bg, hover, fg, border = self.KINDS[kind]
+        self._bg, self._hover = bg, hover
+        self.config(bg=bg, fg=fg, activebackground=hover, activeforeground=fg,
+                    disabledforeground=FG_MUTED, highlightbackground=border, highlightcolor=border)
+
+
+class Card(tk.Canvas):
+    """Rounded panel: the canvas draws the rounded rectangle, children go in .body.
+
+    auto_height: the card is as tall as its content (otherwise it fills what it is given).
+    """
+
+    def __init__(self, parent: tk.Misc, pad: int = 14, radius: int = 12, auto_height: bool = True) -> None:
+        super().__init__(parent, bg=parent["bg"], highlightthickness=0, bd=0, height=1)
+        self._pad, self._radius, self._auto = pad, radius, auto_height
+        self.body = tk.Frame(self, bg=SURFACE)
+        self._win = self.create_window(pad, pad, window=self.body, anchor="nw")
+        self.bind("<Configure>", self._layout)
+        if auto_height:
+            # reqheight, not the actual size: the body only gets a size once the canvas shows it
+            self.body.bind("<Configure>", lambda _e: self._fit())
+            self.after_idle(self._fit)
+
+    def _fit(self) -> None:
+        h = self.body.winfo_reqheight() + 2 * self._pad
+        if int(self["height"]) != h:
+            self.config(height=h)
+
+    def _layout(self, event: tk.Event) -> None:
+        if self._auto:
+            self.after_idle(self._fit)  # width changes can rewrap the content
+        p = self._pad
+        self.itemconfig(self._win, width=max(1, event.width - 2 * p))
+        if not self._auto:
+            self.itemconfig(self._win, height=max(1, event.height - 2 * p))
+        self.delete("bg")
+        x2, y2, r = event.width - 1, event.height - 1, self._radius
+        pts = [r, 0, x2 - r, 0, x2, 0, x2, r, x2, y2 - r, x2, y2, x2 - r, y2, r, y2, 0, y2, 0, y2 - r, 0, r, 0, 0]
+        self.create_polygon(pts, smooth=True, fill=SURFACE, outline=BORDER, tags="bg")
+        self.tag_lower("bg")
+
+
+def _label(parent: tk.Misc, text: str = "", size: int = 10, color: str = FG, bold: bool = False,
+           mono: bool = False, **kw) -> tk.Label:
+    font = (MONO if mono else FONT, size, "bold") if bold else (MONO if mono else FONT, size)
+    return tk.Label(parent, text=text, bg=parent["bg"], fg=color, font=font, **kw)
+
+
+def _entry(parent: tk.Misc, var: tk.StringVar, width: int = 20, mono: bool = True) -> tk.Entry:
+    return tk.Entry(parent, textvariable=var, width=width, bg=SURFACE_2, fg=FG, insertbackground=FG,
+                    font=(MONO if mono else FONT, 10), relief=tk.FLAT, highlightthickness=1,
+                    highlightbackground=BORDER, highlightcolor=ACCENT)
+
+
+def _check(parent: tk.Misc, text: str, var: tk.BooleanVar) -> tk.Checkbutton:
+    return tk.Checkbutton(parent, text=text, variable=var, bg=parent["bg"], fg=FG_DIM,
+                          selectcolor=SURFACE_2, activebackground=parent["bg"], activeforeground=FG,
+                          font=(FONT, 9), bd=0, highlightthickness=0, cursor="hand2")
+
+
+def _text(parent: tk.Misc, **kw) -> tk.Text:
+    kw.setdefault("state", tk.DISABLED)
+    kw.setdefault("fg", FG_DIM)
+    return tk.Text(parent, bg=BG, font=(MONO, 9), insertbackground=FG,
+                   selectbackground=ACCENT, selectforeground="#ffffff", wrap=tk.NONE,
+                   relief=tk.FLAT, bd=0, highlightthickness=0, padx=10, pady=8, **kw)
+
+
+def _scrolled(parent: tk.Misc, widget_factory: Callable[[tk.Misc], tk.Widget]) -> tk.Widget:
+    """Put a Text/Treeview with both scrollbars in *parent* (grid) and return it."""
+    w = widget_factory(parent)
+    sy = ttk.Scrollbar(parent, command=w.yview)
+    sx = ttk.Scrollbar(parent, command=w.xview, orient=tk.HORIZONTAL)
+    w.configure(yscrollcommand=sy.set, xscrollcommand=sx.set)
+    w.grid(row=0, column=0, sticky="nsew")
+    sy.grid(row=0, column=1, sticky="ns")
+    sx.grid(row=1, column=0, sticky="ew")
+    parent.grid_rowconfigure(0, weight=1)
+    parent.grid_columnconfigure(0, weight=1)
+    return w
+
+
+def _configure_log_tags(text: tk.Text) -> None:
+    for tag in ("error", "warning", "info", "debug", "critical", "timestamp"):
+        text.tag_configure(tag, foreground=LOG_TAGS[tag])
+    text.tag_configure("system", foreground=FG_MUTED)
+    # Configured last => highest priority, so highlights win over level colours
+    text.tag_configure("search_hit", foreground=LOG_TAGS["search_hit"], background="#4a3a00")
+
+
+def _get_json(url: str, timeout: float = 0.6) -> Optional[dict]:
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 (local backend)
+            data = json.loads(resp.read().decode("utf-8"))
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _dark_title_bar(win: tk.Tk) -> None:
+    """Windows 10/11: dark window title bar (DWMWA_USE_IMMERSIVE_DARK_MODE). No-op elsewhere."""
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+        win.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+        on = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, 20, ctypes.byref(on), ctypes.sizeof(on))
+    except Exception:
+        pass
+
+
+def _format_uptime(started_at: object) -> str:
+    if not isinstance(started_at, (int, float)):
+        return ""
+    s = max(0, int(time.time() - started_at))
+    return f"{s}s" if s < 60 else f"{s // 60} min" if s < 3600 else f"{s // 3600} h {s % 3600 // 60:02d}"
+
+
+PILLS = {  # state: (text prefix, background, foreground)
+    "running": ("●", "#12301f", SUCCESS),
+    "starting": ("●", "#33280a", WARNING),
+    "external": ("●", "#33280a", WARNING),
+    "stopped": ("○", SURFACE_3, FG_DIM),
+}
+
+
+# ---------------------------------------------------------------------------
 # Main application
 # ---------------------------------------------------------------------------
 
 class AppLauncher(tk.Tk):
-    """AMP v2 launcher window."""
+    """AMP v2 launcher window: sidebar + pages (Overview, Logs, API tester, Chunks)."""
+
+    PAGES = (("overview", "◉   Overview"), ("logs", "☰   Logs"),
+             ("api", "⇄   API tester"), ("chunks", "▦   Chunks"))
 
     def __init__(self) -> None:
         super().__init__()
-        self.title("AMP v2 — App Launcher")
-        self.geometry("960x720")
-        self.minsize(800, 600)
+        self.title("AMP launcher")
+        self.geometry("1060x740")
+        self.minsize(880, 620)
         self.configure(bg=BG)
-
-        # ttk style
-        self._style = ttk.Style(self)
-        try:
-            self._style.theme_use("clam")
-        except tk.TclError:
-            pass
-        self._style.configure("TNotebook", background=BG, borderwidth=0)
-        self._style.configure("TNotebook.Tab", background=BG_ELEV, foreground=FG_DIM,
-                              padding=[16, 8], font=("Segoe UI", 10, "bold"))
-        self._style.map("TNotebook.Tab", background=[("selected", ACCENT)],
-                        foreground=[("selected", "#ffffff")])
-        self._style.configure("TFrame", background=BG)
-        self._style.configure("TLabelframe", background=BG, foreground=FG)
-        self._style.configure("TLabelframe.Label", background=BG, foreground=FG,
-                              font=("Segoe UI", 10, "bold"))
-        self._style.configure("Treeview", background=BG_ELEV, foreground=FG,
-                              fieldbackground=BG_ELEV, rowheight=22,
-                              font=("Consolas", 9))
-        self._style.configure("Treeview.Heading", background=BG_INPUT, foreground=FG,
-                              font=("Segoe UI", 9, "bold"))
-        self._style.map("Treeview", background=[("selected", ACCENT)],
-                        foreground=[("selected", "#ffffff")])
+        self._setup_style()
 
         # Thread -> UI plumbing. Tk is not thread-safe, so worker threads never
         # touch widgets or call self.after(); they put things on these queues and
@@ -674,6 +828,7 @@ class AppLauncher(tk.Tk):
         # State
         self._log_lines: deque[str] = deque(maxlen=MAX_LOG_LINES)
         self._search_var = tk.StringVar()
+        self._log_level = "all"  # all | warning | error
         self._auto_scroll = tk.BooleanVar(value=True)
         self._browsers: dict[str, str] = {}
         self._browser_var = tk.StringVar()
@@ -685,8 +840,11 @@ class AppLauncher(tk.Tk):
         self._chunk_error = ""
         self._chunk_busy = False
         self._status_busy = False
+        self._page = "overview"
+        self._segments: list[dict] = []
+        self._current_segment = -1
 
-        # Process managers (log callback feeds the log tab)
+        # Process managers (log callback feeds the log views)
         self.backend = ProcessManager("backend", self._append_log)
         self.frontend = ProcessManager("frontend", self._append_log)
 
@@ -695,6 +853,7 @@ class AppLauncher(tk.Tk):
 
         self._build_ui()
         self._detect_and_set_browsers()
+        _dark_title_bar(self)
 
         if not VENV_FOUND:
             self._append_log(
@@ -705,11 +864,36 @@ class AppLauncher(tk.Tk):
         self.log_tailer.start()
         self._pump()
         self._schedule_status()
-        self._refresh_chunks()
         self._chunk_tick()
 
         # Handle window close
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _setup_style(self) -> None:
+        style = ttk.Style(self)
+        try:
+            style.theme_use("clam")
+        except tk.TclError:
+            pass
+        style.configure("TCombobox", fieldbackground=SURFACE_2, background=SURFACE_2, foreground=FG,
+                        arrowcolor=FG_DIM, bordercolor=BORDER, lightcolor=SURFACE_2, darkcolor=SURFACE_2,
+                        selectbackground=SURFACE_2, selectforeground=FG, padding=4)
+        style.map("TCombobox", fieldbackground=[("readonly", SURFACE_2)], foreground=[("readonly", FG)],
+                  selectbackground=[("readonly", SURFACE_2)], selectforeground=[("readonly", FG)])
+        self.option_add("*TCombobox*Listbox.background", SURFACE_2)
+        self.option_add("*TCombobox*Listbox.foreground", FG)
+        self.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.option_add("*TCombobox*Listbox.selectForeground", "#ffffff")
+        for orient in ("Vertical", "Horizontal"):
+            style.configure(f"{orient}.TScrollbar", background=SURFACE_3, troughcolor=BG, bordercolor=BG,
+                            arrowcolor=FG_MUTED, lightcolor=SURFACE_3, darkcolor=SURFACE_3, gripcount=0)
+            style.map(f"{orient}.TScrollbar", background=[("active", BORDER)])
+        style.configure("Treeview", background=BG, foreground=FG, fieldbackground=BG, rowheight=24,
+                        font=(MONO, 9), borderwidth=0, bordercolor=BG, lightcolor=BG, darkcolor=BG)
+        style.configure("Treeview.Heading", background=SURFACE_2, foreground=FG_DIM, relief=tk.FLAT,
+                        font=(FONT, 9, "bold"), borderwidth=0)
+        style.map("Treeview.Heading", background=[("active", SURFACE_3)])
+        style.map("Treeview", background=[("selected", SURFACE_3)], foreground=[("selected", FG)])
 
     # ------------------------------------------------------------------
     # Thread-safe UI helpers
@@ -737,351 +921,301 @@ class AppLauncher(tk.Tk):
             self.after(100, self._pump)
 
     # ------------------------------------------------------------------
-    # UI construction
+    # UI construction: sidebar + pages
     # ------------------------------------------------------------------
 
     def _build_ui(self) -> None:
-        # ===== Top control bar =====
-        top = tk.Frame(self, bg=BG_ELEV, padx=16, pady=12)
-        top.pack(fill=tk.X, padx=12, pady=(12, 0))
+        side = tk.Frame(self, bg=SURFACE, width=190)
+        side.pack(side=tk.LEFT, fill=tk.Y)
+        side.pack_propagate(False)
+        tk.Frame(self, bg=BORDER, width=1).pack(side=tk.LEFT, fill=tk.Y)
 
-        # --- Title ---
-        title = tk.Label(top, text="AMP v2", font=("Segoe UI", 20, "bold"),
-                         bg=BG_ELEV, fg=ACCENT)
-        title.grid(row=0, column=0, rowspan=2, padx=(0, 20), sticky=tk.W)
+        brand = tk.Frame(side, bg=SURFACE)
+        brand.pack(fill=tk.X, padx=18, pady=(18, 16))
+        _label(brand, "AMP", 16, bold=True).pack(side=tk.LEFT)
+        _label(brand, " v2", 16, ACCENT, bold=True).pack(side=tk.LEFT)
 
-        # --- Backend section ---
-        be_frame = tk.LabelFrame(top, text=f"  Backend (FastAPI :{BACKEND_PORT})  ",
-                                 bg=BG_ELEV, fg=FG, font=("Segoe UI", 10, "bold"),
-                                 padx=10, pady=8)
-        be_frame.grid(row=0, column=1, padx=4, pady=2, sticky=tk.W)
+        self._nav: dict[str, FlatButton] = {}
+        for key, text in self.PAGES:
+            b = FlatButton(side, text, lambda k=key: self._show_page(k), kind="nav", anchor="w", padx=14, pady=7)
+            b.pack(fill=tk.X, padx=8, pady=1)
+            self._nav[key] = b
 
-        self.be_status = tk.Label(be_frame, text="● Stopped", font=("Segoe UI", 10, "bold"),
-                                  bg=BG_ELEV, fg=FG_DIM)
-        self.be_status.pack(side=tk.LEFT, padx=(0, 10))
+        browser = tk.Frame(side, bg=SURFACE)
+        browser.pack(side=tk.BOTTOM, fill=tk.X, padx=14, pady=16)
+        _label(browser, "Browser", 9, FG_MUTED).pack(anchor=tk.W)
+        self.browser_combo = ttk.Combobox(browser, textvariable=self._browser_var, state="readonly",
+                                          font=(FONT, 9))
+        self.browser_combo.pack(fill=tk.X, pady=(4, 6))
+        FlatButton(browser, "Open web app", self._open_browser, small=True).pack(fill=tk.X)
 
-        self._cbtn(be_frame, "Start", self._start_backend, SUCCESS)
-        self._cbtn(be_frame, "Stop", self._stop_backend, ERROR_CLR)
-        self._cbtn(be_frame, "Restart", self._restart_backend, WARNING)
-        self._cbtn(be_frame, "Force Kill", self._kill_backend, ERROR_CLR)
+        content = tk.Frame(self, bg=BG)
+        content.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        content.grid_rowconfigure(0, weight=1)
+        content.grid_columnconfigure(0, weight=1)
+        self._pages: dict[str, tk.Frame] = {}
+        for key, _text_ in self.PAGES:
+            page = tk.Frame(content, bg=BG, padx=18, pady=16)
+            page.grid(row=0, column=0, sticky="nsew")
+            self._pages[key] = page
 
-        # --- Frontend section ---
-        fe_frame = tk.LabelFrame(top, text="  Frontend (:1420)  ",
-                                 bg=BG_ELEV, fg=FG, font=("Segoe UI", 10, "bold"),
-                                 padx=10, pady=8)
-        fe_frame.grid(row=1, column=1, padx=4, pady=2, sticky=tk.W)
+        self._build_overview(self._pages["overview"])
+        self._build_logs(self._pages["logs"])
+        self._build_api(self._pages["api"])
+        self._build_chunks(self._pages["chunks"])
+        self._show_page("overview")
 
-        # Mode: locked while the frontend runs (Restart keeps the running mode)
-        self.fe_mode_buttons = [
-            tk.Radiobutton(fe_frame, text=label, value=key, variable=self._frontend_mode,
-                           bg=BG_ELEV, fg=FG, selectcolor=BG_INPUT,
-                           activebackground=BG_ELEV, activeforeground=FG,
-                           font=("Segoe UI", 9))
-            for key, label in FRONTEND_MODES.items()
-        ]
-        for rb in self.fe_mode_buttons:
-            rb.pack(side=tk.LEFT)
+    def _show_page(self, key: str) -> None:
+        self._page = key
+        self._pages[key].tkraise()
+        for k, b in self._nav.items():
+            b.set_kind("nav_on" if k == key else "nav")
+        if key == "chunks":
+            self._refresh_chunks()  # fresh data as soon as the page opens
+        elif key == "logs" and self._auto_scroll.get():
+            self.log_text.see(tk.END)
 
-        self.fe_status = tk.Label(fe_frame, text="● Stopped", font=("Segoe UI", 10, "bold"),
-                                  bg=BG_ELEV, fg=FG_DIM)
-        self.fe_status.pack(side=tk.LEFT, padx=(0, 10))
+    @staticmethod
+    def _page_title(page: tk.Frame, title: str, subtitle: str = "") -> tk.Frame:
+        head = tk.Frame(page, bg=BG)
+        head.pack(fill=tk.X, pady=(0, 12))
+        _label(head, title, 15, bold=True).pack(side=tk.LEFT)
+        if subtitle:
+            _label(head, subtitle, 9, FG_MUTED).pack(side=tk.LEFT, padx=(10, 0), pady=(5, 0))
+        return head
 
-        self._cbtn(fe_frame, "Start", self._start_frontend, SUCCESS)
-        self._cbtn(fe_frame, "Stop", self._stop_frontend, ERROR_CLR)
-        self._cbtn(fe_frame, "Restart", self._restart_frontend, WARNING)
-        self._cbtn(fe_frame, "Force Kill", self._kill_frontend_port, ERROR_CLR)
+    # --- Overview -------------------------------------------------------
 
-        # --- Browser section ---
-        br_frame = tk.LabelFrame(top, text="  Browser  ",
-                                 bg=BG_ELEV, fg=FG, font=("Segoe UI", 10, "bold"),
-                                 padx=10, pady=8)
-        br_frame.grid(row=0, column=2, rowspan=2, padx=4, pady=2, sticky=tk.N)
+    def _service_card(self, parent: tk.Frame, col: int, title: str) -> tuple[tk.Frame, tk.Label]:
+        card = Card(parent)
+        card.grid(row=0, column=col, sticky="nsew", padx=(0 if col == 0 else 6, 0 if col == 2 else 6))
+        head = tk.Frame(card.body, bg=SURFACE)
+        head.pack(fill=tk.X)
+        _label(head, title, 11, bold=True).pack(side=tk.LEFT)
+        pill = _label(head, "○ stopped", 8, FG_DIM, padx=8, pady=1)
+        pill.pack(side=tk.RIGHT)
+        return card.body, pill
 
-        self.browser_combo = ttk.Combobox(br_frame, textvariable=self._browser_var,
-                                          state="readonly", width=18,
-                                          font=("Segoe UI", 9))
-        self.browser_combo.pack(pady=(0, 6))
+    @staticmethod
+    def _set_pill(pill: tk.Label, state: str, text: str) -> None:
+        mark, bg, fg = PILLS[state]
+        pill.config(text=f"{mark} {text}", bg=bg, fg=fg)
 
-        self._cbtn(br_frame, "Open in Browser", self._open_browser, ACCENT)
+    def _build_overview(self, page: tk.Frame) -> None:
+        self._page_title(page, "Overview", f"backend :{BACKEND_PORT} · frontend :{FRONTEND_PORT} "
+                                           f"· widget :{WIDGET_PORT}")
+        cards = tk.Frame(page, bg=BG)
+        cards.pack(fill=tk.X)
+        for c in range(3):
+            cards.grid_columnconfigure(c, weight=1, uniform="cards")
 
-        # ===== Tab zone =====
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=12, pady=(8, 12))
+        # Backend
+        body, self.be_pill = self._service_card(cards, 0, "Backend")
+        _label(body, "port · pid · uptime", 8, FG_MUTED).pack(anchor=tk.W, pady=(12, 0))
+        self.be_detail = _label(body, f"{BACKEND_PORT}", 10, FG_DIM)
+        self.be_detail.pack(anchor=tk.W, pady=(0, 12))
+        row = tk.Frame(body, bg=SURFACE)
+        row.pack(fill=tk.X)
+        self.be_main = FlatButton(row, "Start", self._toggle_backend, kind="primary")
+        self.be_main.pack(side=tk.LEFT)
+        FlatButton(row, "↻", self._restart_backend).pack(side=tk.LEFT, padx=(6, 0))
+        FlatButton(row, "✕", self._kill_backend, kind="danger").pack(side=tk.LEFT, padx=(6, 0))
 
-        self._build_log_tab()
-        self._build_api_tab()
-        self._build_chunks_tab()
+        # Frontend
+        body, self.fe_pill = self._service_card(cards, 1, "Frontend")
+        seg = tk.Frame(body, bg=SURFACE_2, padx=2, pady=2)
+        seg.pack(fill=tk.X, pady=(12, 12))
+        self.fe_mode_buttons: dict[str, FlatButton] = {}
+        for key, label in FRONTEND_MODES.items():
+            b = FlatButton(seg, label.replace(" app", ""), lambda k=key: self._set_frontend_mode(k),
+                           kind="chip", small=True)
+            b.config(highlightthickness=0)
+            b.pack(side=tk.LEFT, fill=tk.X, expand=True)
+            self.fe_mode_buttons[key] = b
+        self._set_frontend_mode("web")
+        row = tk.Frame(body, bg=SURFACE)
+        row.pack(fill=tk.X)
+        self.fe_main = FlatButton(row, "Start", self._toggle_frontend, kind="primary")
+        self.fe_main.pack(side=tk.LEFT)
+        FlatButton(row, "↻", self._restart_frontend).pack(side=tk.LEFT, padx=(6, 0))
+        FlatButton(row, "✕", self._kill_frontend_port, kind="danger").pack(side=tk.LEFT, padx=(6, 0))
 
-        # Refresh the chunk table immediately when its tab is opened
-        self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
+        # OBS widget
+        body, self.wg_pill = self._service_card(cards, 2, "OBS widget")
+        _label(body, "now playing", 8, FG_MUTED).pack(anchor=tk.W, pady=(12, 0))
+        self.wg_detail = _label(body, "—", 10, FG_DIM, anchor="w")
+        self.wg_detail.pack(fill=tk.X, pady=(0, 12))
+        row = tk.Frame(body, bg=SURFACE)
+        row.pack(fill=tk.X)
+        self.wg_copy = FlatButton(row, "Copy URL", self._copy_widget_url)
+        self.wg_copy.pack(side=tk.LEFT)
+        FlatButton(row, "Open", lambda: webbrowser.open(WIDGET_URL)).pack(side=tk.LEFT, padx=(6, 0))
 
-    def _cbtn(self, parent: tk.Frame, text: str, command: Callable,
-              color: str) -> tk.Button:
-        """Create a coloured flat button."""
-        fg = "#000000" if color == WARNING else "#ffffff"
-        btn = tk.Button(
-            parent, text=text, command=command,
-            bg=color, fg=fg, font=("Segoe UI", 9, "bold"),
-            relief=tk.FLAT, padx=10, pady=4, cursor="hand2",
-            activebackground=color, activeforeground=fg,
-        )
-        btn.pack(side=tk.LEFT, padx=2)
-        return btn
+        # Segment strip of the backend's current song
+        strip = Card(page, pad=12)
+        strip.pack(fill=tk.X, pady=(12, 0))
+        head = tk.Frame(strip.body, bg=SURFACE)
+        head.pack(fill=tk.X)
+        self.seg_title = _label(head, "Segments", 9, FG_MUTED)
+        self.seg_title.pack(side=tk.LEFT)
+        self.seg_count = _label(head, "no song playing", 9, FG_MUTED)
+        self.seg_count.pack(side=tk.RIGHT)
+        self.seg_canvas = tk.Canvas(strip.body, bg=SURFACE, height=16, highlightthickness=0, bd=0)
+        self.seg_canvas.pack(fill=tk.X, pady=(8, 0))
+        self.seg_canvas.bind("<Configure>", lambda _e: self._draw_segments())
 
-    # ------------------------------------------------------------------
-    # Tab 1 — Logs
-    # ------------------------------------------------------------------
+        # Live log (last lines, unfiltered)
+        logcard = Card(page, pad=12, auto_height=False)
+        logcard.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        head = tk.Frame(logcard.body, bg=SURFACE)
+        head.pack(fill=tk.X, pady=(0, 8))
+        _label(head, "Live log", 10, bold=True).pack(side=tk.LEFT)
+        FlatButton(head, "Open logs  →", lambda: self._show_page("logs"), kind="chip", small=True).pack(side=tk.RIGHT)
+        box = tk.Frame(logcard.body, bg=BG)
+        box.pack(fill=tk.BOTH, expand=True)
+        self.mini_log = _scrolled(box, _text)
+        _configure_log_tags(self.mini_log)
 
-    def _build_log_tab(self) -> None:
-        tab = tk.Frame(self.notebook, bg=BG)
-        self.notebook.add(tab, text="  Logs  ")
+    def _set_frontend_mode(self, key: str) -> None:
+        if self.frontend.is_running():
+            return  # locked while running (Restart keeps the running mode)
+        self._frontend_mode.set(key)
+        for k, b in self.fe_mode_buttons.items():
+            b.set_kind("chip_on" if k == key else "chip")
+            b.config(highlightthickness=0)
 
-        # --- Toolbar ---
-        toolbar = tk.Frame(tab, bg=BG_ELEV, padx=10, pady=6)
-        toolbar.pack(fill=tk.X, padx=8, pady=(8, 0))
+    def _copy_widget_url(self) -> None:
+        self.clipboard_clear()
+        self.clipboard_append(WIDGET_URL)
+        self.wg_copy.config(text="Copied")
+        self.after(1500, lambda: self.wg_copy.config(text="Copy URL"))
 
-        tk.Label(toolbar, text="Search:", bg=BG_ELEV, fg=FG_DIM,
-                 font=("Segoe UI", 9)).pack(side=tk.LEFT, padx=(0, 4))
-        search_entry = tk.Entry(toolbar, textvariable=self._search_var,
-                                bg=BG_INPUT, fg=FG, insertbackground=FG,
-                                font=("Consolas", 9), width=30,
-                                relief=tk.FLAT, highlightthickness=1,
-                                highlightbackground=FG_DIM, highlightcolor=ACCENT)
-        search_entry.pack(side=tk.LEFT, padx=2)
-        search_entry.bind("<KeyRelease>", lambda _e: self._refresh_log_display())
+    def _draw_segments(self) -> None:
+        c = self.seg_canvas
+        c.delete("all")
+        segs = [s for s in self._segments if s.get("index", -1) >= 0]
+        if not segs:
+            return
+        w, h, gap = c.winfo_width(), 16, 2
+        cell = (w - gap * (len(segs) - 1)) / len(segs)
+        for i, s in enumerate(segs):
+            x = i * (cell + gap)
+            current = s["index"] == self._current_segment
+            c.create_rectangle(x, 1, x + cell, h - 1, width=2 if current else 0,
+                               outline=ACCENT if current else "",
+                               fill=SEG_COLORS.get(s.get("status"), SEG_COLORS["pending"]))
 
-        tk.Button(toolbar, text="Clear Search", command=self._clear_search,
-                  bg=BG_INPUT, fg=FG_DIM, font=("Segoe UI", 8),
-                  relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
-                  ).pack(side=tk.LEFT, padx=4)
+    # --- Logs -----------------------------------------------------------
 
-        tk.Checkbutton(toolbar, text="Auto-scroll", variable=self._auto_scroll,
-                       bg=BG_ELEV, fg=FG_DIM, selectcolor=BG_INPUT,
-                       activebackground=BG_ELEV, activeforeground=FG,
-                       font=("Segoe UI", 9)
-                       ).pack(side=tk.LEFT, padx=(12, 0))
+    def _build_logs(self, page: tk.Frame) -> None:
+        self._page_title(page, "Logs", f"backend output + {APP_LOG_PATH.name}")
+        bar = Card(page, pad=10)
+        bar.pack(fill=tk.X)
+        tb = bar.body
+        search = _entry(tb, self._search_var, width=30)
+        search.pack(side=tk.LEFT, ipady=3)
+        search.bind("<KeyRelease>", lambda _e: self._refresh_log_display())
+        FlatButton(tb, "✕", self._clear_search, kind="chip", small=True).pack(side=tk.LEFT, padx=(4, 12))
+        self._level_buttons: dict[str, FlatButton] = {}
+        for key, text in (("all", "All"), ("warning", "Warn+"), ("error", "Errors")):
+            b = FlatButton(tb, text, lambda k=key: self._set_log_level(k), kind="chip", small=True)
+            b.pack(side=tk.LEFT, padx=2)
+            self._level_buttons[key] = b
+        self._set_log_level("all")
+        _check(tb, "Auto-scroll", self._auto_scroll).pack(side=tk.LEFT, padx=(12, 0))
+        FlatButton(tb, "Clear", self._clear_log, kind="chip", small=True).pack(side=tk.RIGHT)
+        FlatButton(tb, "Reload file", self._reload_log_file, kind="chip", small=True).pack(side=tk.RIGHT, padx=4)
+        self.log_count_label = _label(tb, "0 lines", 9, FG_MUTED)
+        self.log_count_label.pack(side=tk.RIGHT, padx=8)
 
-        self.log_count_label = tk.Label(toolbar, text="0 lines", bg=BG_ELEV, fg=FG_DIM,
-                                        font=("Segoe UI", 9))
-        self.log_count_label.pack(side=tk.RIGHT)
+        card = Card(page, pad=2, auto_height=False)
+        card.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        box = tk.Frame(card.body, bg=BG)
+        box.pack(fill=tk.BOTH, expand=True)
+        self.log_text = _scrolled(box, _text)
+        _configure_log_tags(self.log_text)
 
-        tk.Button(toolbar, text="Clear Log", command=self._clear_log,
-                  bg=BG_INPUT, fg=FG_DIM, font=("Segoe UI", 8),
-                  relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
-                  ).pack(side=tk.RIGHT, padx=4)
+    def _set_log_level(self, key: str) -> None:
+        self._log_level = key
+        for k, b in self._level_buttons.items():
+            b.set_kind("chip_on" if k == key else "chip")
+        if hasattr(self, "log_text"):
+            self._refresh_log_display()
 
-        tk.Button(toolbar, text="Reload All", command=self._reload_log_file,
-                  bg=BG_INPUT, fg=FG_DIM, font=("Segoe UI", 8),
-                  relief=tk.FLAT, padx=8, pady=2, cursor="hand2"
-                  ).pack(side=tk.RIGHT, padx=4)
+    # --- API tester -----------------------------------------------------
 
-        # --- Log text area ---
-        text_frame = tk.Frame(tab, bg=BG)
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
-
-        self.log_text = tk.Text(
-            text_frame, bg=BG_ELEV, fg=FG_DIM,
-            font=("Consolas", 9), insertbackground=FG,
-            selectbackground=ACCENT, selectforeground="#ffffff",
-            wrap=tk.NONE, state=tk.DISABLED,
-            padx=6, pady=4,
-        )
-        log_scroll_y = ttk.Scrollbar(text_frame, command=self.log_text.yview)
-        log_scroll_x = ttk.Scrollbar(text_frame, command=self.log_text.xview, orient=tk.HORIZONTAL)
-        self.log_text.configure(yscrollcommand=log_scroll_y.set, xscrollcommand=log_scroll_x.set)
-
-        self.log_text.grid(row=0, column=0, sticky="nsew")
-        log_scroll_y.grid(row=0, column=1, sticky="ns")
-        log_scroll_x.grid(row=1, column=0, sticky="ew")
-        text_frame.grid_rowconfigure(0, weight=1)
-        text_frame.grid_columnconfigure(0, weight=1)
-
-        # --- Configure syntax-highlight tags ---
-        self.log_text.tag_configure("error", foreground=LOG_TAGS["error"])
-        self.log_text.tag_configure("warning", foreground=LOG_TAGS["warning"])
-        self.log_text.tag_configure("info", foreground=LOG_TAGS["info"])
-        self.log_text.tag_configure("debug", foreground=LOG_TAGS["debug"])
-        self.log_text.tag_configure("critical", foreground=LOG_TAGS["critical"])
-        self.log_text.tag_configure("timestamp", foreground=LOG_TAGS["timestamp"])
-        self.log_text.tag_configure("system", foreground=FG_DIM)
-        # Configured last => highest priority, so highlights win over level colours
-        self.log_text.tag_configure("search_hit", foreground=LOG_TAGS["search_hit"],
-                                    background="#4a4400")
-
-    # ------------------------------------------------------------------
-    # Tab 2 — API Tester
-    # ------------------------------------------------------------------
-
-    def _build_api_tab(self) -> None:
-        tab = tk.Frame(self.notebook, bg=BG)
-        self.notebook.add(tab, text="  API Request  ")
-
-        # --- Quick-access buttons ---
-        quick = tk.Frame(tab, bg=BG_ELEV, padx=10, pady=6)
-        quick.pack(fill=tk.X, padx=8, pady=(8, 0))
-        tk.Label(quick, text="Quick:", bg=BG_ELEV, fg=FG_DIM,
-                 font=("Segoe UI", 9, "bold")).pack(side=tk.LEFT, padx=(0, 8))
+    def _build_api(self, page: tk.Frame) -> None:
+        self._page_title(page, "API tester", API_BASE)
+        quick = tk.Frame(page, bg=BG)
+        quick.pack(fill=tk.X, pady=(0, 10))
         for label, method, path in [
             ("Health", "GET", "/api/health"),
-            ("Playback State", "GET", "/api/stream/playback-state"),
-            ("Cache Info", "GET", "/api/stream/cache-info"),
-            ("Stream Logs", "GET", "/api/stream/logs?n=50"),
+            ("Playback state", "GET", "/api/stream/playback-state"),
+            ("Cache info", "GET", "/api/stream/cache-info"),
+            ("Stream logs", "GET", "/api/stream/logs?n=50"),
             ("Search", "GET", "/api/search?q=test&limit=3"),
-            ("Auth Status", "GET", "/api/auth/status"),
+            ("Auth status", "GET", "/api/auth/status"),
         ]:
-            tk.Button(quick, text=label,
-                      command=lambda m=method, p=path: self._api_quick_fill(m, p),
-                      bg=BG_INPUT, fg=FG, font=("Segoe UI", 8),
-                      relief=tk.FLAT, padx=8, pady=3, cursor="hand2"
-                      ).pack(side=tk.LEFT, padx=2)
+            FlatButton(quick, label, lambda m=method, p=path: self._api_quick_fill(m, p),
+                       kind="chip", small=True).pack(side=tk.LEFT, padx=(0, 6))
 
-        # --- Request builder ---
-        req_frame = tk.LabelFrame(tab, text="  Request  ", bg=BG, fg=FG,
-                                  font=("Segoe UI", 10, "bold"), padx=10, pady=8)
-        req_frame.pack(fill=tk.X, padx=8, pady=(4, 0))
-
-        # Method + Path row
-        row1 = tk.Frame(req_frame, bg=BG)
-        row1.pack(fill=tk.X, pady=2)
-        tk.Label(row1, text="Method:", bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
-                 ).pack(side=tk.LEFT, padx=(0, 4))
+        req = Card(page, pad=12)
+        req.pack(fill=tk.X)
+        row = tk.Frame(req.body, bg=SURFACE)
+        row.pack(fill=tk.X)
         self.api_method = tk.StringVar(value="GET")
-        method_combo = ttk.Combobox(row1, textvariable=self.api_method,
-                                    values=["GET", "POST", "PUT", "DELETE", "PATCH"],
-                                    state="readonly", width=8, font=("Segoe UI", 9))
-        method_combo.pack(side=tk.LEFT, padx=2)
-
-        tk.Label(row1, text="Path:", bg=BG, fg=FG_DIM, font=("Segoe UI", 9)
-                 ).pack(side=tk.LEFT, padx=(12, 4))
+        ttk.Combobox(row, textvariable=self.api_method, values=["GET", "POST", "PUT", "DELETE", "PATCH"],
+                     state="readonly", width=8, font=(FONT, 10)).pack(side=tk.LEFT)
         self.api_path = tk.StringVar(value="/api/health")
-        path_entry = tk.Entry(row1, textvariable=self.api_path,
-                              bg=BG_INPUT, fg=FG, insertbackground=FG,
-                              font=("Consolas", 10), relief=tk.FLAT,
-                              highlightthickness=1, highlightbackground=FG_DIM,
-                              highlightcolor=ACCENT)
-        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=2)
+        path_entry = _entry(row, self.api_path)
+        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=8, ipady=4)
         path_entry.bind("<Return>", lambda _e: self._api_send())
+        FlatButton(row, "Send", self._api_send, kind="primary", padx=18).pack(side=tk.LEFT)
+        _label(req.body, "Body (JSON, optional)", 9, FG_MUTED).pack(anchor=tk.W, pady=(10, 4))
+        self.api_body = tk.Text(req.body, height=4, bg=SURFACE_2, fg=FG, font=(MONO, 9), insertbackground=FG,
+                                relief=tk.FLAT, highlightthickness=1, highlightbackground=BORDER,
+                                highlightcolor=ACCENT, wrap=tk.NONE, padx=8, pady=6)
+        self.api_body.pack(fill=tk.X)
 
-        send_btn = tk.Button(row1, text="Send", command=self._api_send,
-                             bg=ACCENT, fg="#ffffff", font=("Segoe UI", 10, "bold"),
-                             relief=tk.FLAT, padx=16, pady=4, cursor="hand2")
-        send_btn.pack(side=tk.LEFT, padx=(8, 0))
+        resp = Card(page, pad=12, auto_height=False)
+        resp.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        self.api_status_label = _label(resp.body, "—", 10, FG_DIM, bold=True)
+        self.api_status_label.pack(anchor=tk.W, pady=(0, 8))
+        box = tk.Frame(resp.body, bg=BG)
+        box.pack(fill=tk.BOTH, expand=True)
+        self.api_response = _scrolled(box, lambda p: _text(p, fg=FG))
 
-        # Body row
-        row2 = tk.Frame(req_frame, bg=BG)
-        row2.pack(fill=tk.X, pady=2)
-        tk.Label(row2, text="Body (JSON, optional):", bg=BG, fg=FG_DIM,
-                 font=("Segoe UI", 9)).pack(anchor=tk.W)
-        self.api_body = tk.Text(row2, height=4, bg=BG_INPUT, fg=FG,
-                                font=("Consolas", 9), insertbackground=FG,
-                                relief=tk.FLAT, highlightthickness=1,
-                                highlightbackground=FG_DIM, highlightcolor=ACCENT,
-                                wrap=tk.NONE)
-        self.api_body.pack(fill=tk.X, pady=(2, 0))
+    # --- Chunks ---------------------------------------------------------
 
-        # --- Response ---
-        resp_frame = tk.LabelFrame(tab, text="  Response  ", bg=BG, fg=FG,
-                                   font=("Segoe UI", 10, "bold"), padx=10, pady=8)
-        resp_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
-
-        self.api_status_label = tk.Label(resp_frame, text="—", bg=BG, fg=FG_DIM,
-                                         font=("Segoe UI", 10, "bold"))
-        self.api_status_label.pack(anchor=tk.W)
-
-        # Scrollbars are packed BEFORE the expanding Text so they are not
-        # squeezed out of view when the window is small.
-        resp_scroll_x = ttk.Scrollbar(resp_frame, orient=tk.HORIZONTAL)
-        resp_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
-        resp_scroll_y = ttk.Scrollbar(resp_frame)
-        resp_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-
-        self.api_response = tk.Text(resp_frame, bg=BG_ELEV, fg=FG,
-                                    font=("Consolas", 9), insertbackground=FG,
-                                    selectbackground=ACCENT, selectforeground="#ffffff",
-                                    wrap=tk.NONE, state=tk.DISABLED,
-                                    padx=6, pady=4)
-        resp_scroll_y.configure(command=self.api_response.yview)
-        resp_scroll_x.configure(command=self.api_response.xview)
-        self.api_response.configure(yscrollcommand=resp_scroll_y.set,
-                                    xscrollcommand=resp_scroll_x.set)
-        self.api_response.pack(fill=tk.BOTH, expand=True, pady=(4, 0))
-
-    # ------------------------------------------------------------------
-    # Tab 3 — Chunk Database
-    # ------------------------------------------------------------------
-
-    def _build_chunks_tab(self) -> None:
-        tab = tk.Frame(self.notebook, bg=BG)
-        self._chunks_tab = tab
-        self.notebook.add(tab, text="  Chunk Database  ")
-
-        # --- Summary bar ---
-        summary = tk.Frame(tab, bg=BG_ELEV, padx=10, pady=6)
-        summary.pack(fill=tk.X, padx=8, pady=(8, 0))
-
-        self.chunk_summary = tk.Label(summary, text="Loading…", bg=BG_ELEV, fg=FG_DIM,
-                                      font=("Segoe UI", 9))
+    def _build_chunks(self, page: tk.Frame) -> None:
+        self._page_title(page, "Chunks", f"segments table in {DB_PATH.name}")
+        bar = Card(page, pad=10)
+        bar.pack(fill=tk.X)
+        tb = bar.body
+        self.chunk_summary = _label(tb, "Loading…", 9, FG_DIM)
         self.chunk_summary.pack(side=tk.LEFT)
-
-        tk.Button(summary, text="Refresh Now", command=self._refresh_chunks,
-                  bg=BG_INPUT, fg=FG, font=("Segoe UI", 8),
-                  relief=tk.FLAT, padx=10, pady=2, cursor="hand2"
-                  ).pack(side=tk.RIGHT, padx=2)
-
-        tk.Checkbutton(summary, text="Auto-refresh (2s)", variable=self._chunks_auto_refresh,
-                       bg=BG_ELEV, fg=FG_DIM, selectcolor=BG_INPUT,
-                       activebackground=BG_ELEV, activeforeground=FG,
-                       font=("Segoe UI", 9)
-                       ).pack(side=tk.RIGHT, padx=(16, 8))
-
-        # Filter
-        filter_entry = tk.Entry(summary, textvariable=self._chunks_filter_var,
-                                bg=BG_INPUT, fg=FG, insertbackground=FG,
-                                font=("Consolas", 9), width=18,
-                                relief=tk.FLAT, highlightthickness=1,
-                                highlightbackground=FG_DIM, highlightcolor=ACCENT)
-        filter_entry.pack(side=tk.RIGHT, padx=2)
+        FlatButton(tb, "Refresh", self._refresh_chunks, kind="chip", small=True).pack(side=tk.RIGHT)
+        _check(tb, "Auto (2 s)", self._chunks_auto_refresh).pack(side=tk.RIGHT, padx=10)
+        filter_entry = _entry(tb, self._chunks_filter_var, width=16)
+        filter_entry.pack(side=tk.RIGHT, ipady=2)
         # Filtering only re-renders the rows we already have; no DB query needed
         filter_entry.bind("<KeyRelease>", lambda _e: self._render_chunk_tree())
-        tk.Label(summary, text="Filter song:", bg=BG_ELEV, fg=FG_DIM,
-                 font=("Segoe UI", 9)).pack(side=tk.RIGHT, padx=(20, 4))
+        _label(tb, "Song", 9, FG_MUTED).pack(side=tk.RIGHT, padx=(16, 6))
 
-        # --- Treeview ---
-        tree_frame = tk.Frame(tab, bg=BG)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=8, pady=(4, 8))
-
+        card = Card(page, pad=2, auto_height=False)
+        card.pack(fill=tk.BOTH, expand=True, pady=(12, 0))
+        box = tk.Frame(card.body, bg=BG)
+        box.pack(fill=tk.BOTH, expand=True)
         columns = ("song_id", "index", "status", "size", "duration", "file_path", "last_accessed")
-        self.chunk_tree = ttk.Treeview(tree_frame, columns=columns, show="headings")
-
-        self.chunk_tree.heading("song_id", text="Song ID")
-        self.chunk_tree.heading("index", text="Idx")
-        self.chunk_tree.heading("status", text="Status")
-        self.chunk_tree.heading("size", text="Size")
-        self.chunk_tree.heading("duration", text="Duration")
-        self.chunk_tree.heading("file_path", text="File Path")
-        self.chunk_tree.heading("last_accessed", text="Last Accessed")
-
-        self.chunk_tree.column("song_id", width=110, minwidth=80)
-        self.chunk_tree.column("index", width=40, minwidth=30, anchor=tk.CENTER)
-        self.chunk_tree.column("status", width=90, minwidth=70, anchor=tk.CENTER)
-        self.chunk_tree.column("size", width=80, minwidth=60, anchor=tk.E)
-        self.chunk_tree.column("duration", width=70, minwidth=50, anchor=tk.E)
-        self.chunk_tree.column("file_path", width=280, minwidth=150)
-        self.chunk_tree.column("last_accessed", width=140, minwidth=100)
-
-        tree_scroll_y = ttk.Scrollbar(tree_frame, command=self.chunk_tree.yview)
-        tree_scroll_x = ttk.Scrollbar(tree_frame, command=self.chunk_tree.xview,
-                                      orient=tk.HORIZONTAL)
-        self.chunk_tree.configure(yscrollcommand=tree_scroll_y.set,
-                                  xscrollcommand=tree_scroll_x.set)
-
-        self.chunk_tree.grid(row=0, column=0, sticky="nsew")
-        tree_scroll_y.grid(row=0, column=1, sticky="ns")
-        tree_scroll_x.grid(row=1, column=0, sticky="ew")
-        tree_frame.grid_rowconfigure(0, weight=1)
-        tree_frame.grid_columnconfigure(0, weight=1)
-
-        # Status colour tags
+        self.chunk_tree = _scrolled(box, lambda p: ttk.Treeview(p, columns=columns, show="headings"))
+        for col, title, width, anchor in (
+            ("song_id", "Song ID", 110, tk.W), ("index", "Idx", 44, tk.CENTER),
+            ("status", "Status", 96, tk.CENTER), ("size", "Size", 80, tk.E),
+            ("duration", "Duration", 72, tk.E), ("file_path", "File path", 280, tk.W),
+            ("last_accessed", "Last accessed", 150, tk.W),
+        ):
+            self.chunk_tree.heading(col, text=title)
+            self.chunk_tree.column(col, width=width, minwidth=min(width, 60), anchor=anchor)
         self.chunk_tree.tag_configure("downloaded", foreground=SUCCESS)
         self.chunk_tree.tag_configure("downloading", foreground=WARNING)
         self.chunk_tree.tag_configure("pending", foreground=FG_DIM)
@@ -1147,7 +1281,7 @@ class AppLauncher(tk.Tk):
             if not pm.is_running() and is_port_open(port):
                 self._append_log(
                     f"[system] Port {port} is already in use by another process — "
-                    f"use 'Force Kill' first")
+                    f"use ✕ (force kill) first")
                 return
             pm.start(cmd, cwd)
             self._when_listening(pm, port, on_ready)
@@ -1159,7 +1293,7 @@ class AppLauncher(tk.Tk):
             pm.stop(quiet=True)
             if not wait_port_free(port):
                 self._append_log(
-                    f"[system] Port {port} is still in use — use 'Force Kill', then Start")
+                    f"[system] Port {port} is still in use — use ✕ (force kill), then Start")
                 return
             pm.start(cmd, cwd)
             self._when_listening(pm, port, on_ready)
@@ -1178,7 +1312,19 @@ class AppLauncher(tk.Tk):
             time.sleep(0.5)
         if pm.is_running():
             self._append_log(f"[system] Port {port} not up after {FRONTEND_READY_TIMEOUT_S}s — "
-                             f"open it with 'Open in Browser' once it is")
+                             f"open it with 'Open web app' once it is")
+
+    def _toggle_backend(self) -> None:
+        if self.backend.is_running():
+            self._stop_backend()
+        else:
+            self._start_backend()
+
+    def _toggle_frontend(self) -> None:
+        if self.frontend.is_running():
+            self._stop_frontend()
+        else:
+            self._start_frontend()
 
     def _start_backend(self) -> None:
         self._launch(self.backend, self._backend_cmd(), str(AMP_DIR), BACKEND_PORT)
@@ -1256,25 +1402,66 @@ class AppLauncher(tk.Tk):
         try:
             be = (self.backend.is_running(), self.backend.pid(), is_port_open(BACKEND_PORT))
             fe = (self.frontend.is_running(), self.frontend.pid(), is_port_open(FRONTEND_PORT))
-            self._post(lambda: self._apply_status(be, fe))
+            pid_info = read_pid_file() if be[2] else None
+            # The widget port may belong to another backend (the desktop app's): show what it plays
+            now = _get_json(f"http://127.0.0.1:{WIDGET_PORT}/now.json") if is_port_open(WIDGET_PORT) else None
+            playback = _get_json(API_BASE + "/api/stream/playback-state") if be[2] else None
+            song = (playback or {}).get("song_id") or ""
+            chunks = _get_json(f"{API_BASE}/api/stream/{song}/chunks") if song else None
+            self._post(lambda: self._apply_status(be, fe, pid_info, now, playback, chunks))
         finally:
             self._status_busy = False
 
-    def _apply_status(self, be: tuple, fe: tuple) -> None:
-        fe_mode = f"{FRONTEND_MODES[self._frontend_started_mode]}, "
-        for label, (running, pid, port_open), mode in ((self.be_status, be, ""),
-                                                       (self.fe_status, fe, fe_mode)):
+    def _apply_status(self, be: tuple, fe: tuple, pid_info: Optional[dict], now: Optional[dict],
+                      playback: Optional[dict], chunks: Optional[dict]) -> None:
+        for pill, button, (running, _pid, port_open) in ((self.be_pill, self.be_main, be),
+                                                         (self.fe_pill, self.fe_main, fe)):
             if running and port_open:
-                label.config(text=f"● Running ({mode}PID {pid})", fg=SUCCESS)
+                self._set_pill(pill, "running", "running")
             elif running:
-                label.config(text=f"● Starting… ({mode}PID {pid})", fg=WARNING)
+                self._set_pill(pill, "starting", "starting")
             elif port_open:
-                label.config(text="● Port in use (external)", fg=WARNING)
+                self._set_pill(pill, "external", "port in use")
             else:
-                label.config(text="● Stopped", fg=FG_DIM)
-        mode_state = tk.DISABLED if fe[0] else tk.NORMAL
-        for rb in self.fe_mode_buttons:
-            rb.config(state=mode_state)
+                self._set_pill(pill, "stopped", "stopped")
+            button.config(text="Stop" if running else "Start")
+            button.set_kind("secondary" if running else "primary")
+
+        pid = be[1] if be[0] else (pid_info or {}).get("pid")
+        parts = [str(BACKEND_PORT)] + ([str(pid)] if pid else [])
+        if be[2] and pid_info and pid_info.get("port") == BACKEND_PORT:
+            parts.append(_format_uptime(pid_info.get("started_at")))
+        self.be_detail.config(text=" · ".join(p for p in parts if p))
+
+        if fe[0]:
+            self.fe_pill.config(text=self.fe_pill["text"] + f" · {self._frontend_started_mode}")
+        for b in self.fe_mode_buttons.values():
+            b.config(state=tk.DISABLED if fe[0] else tk.NORMAL)
+
+        if now is None:
+            self._set_pill(self.wg_pill, "stopped", "off")
+            self.wg_detail.config(text="backend not running", fg=FG_DIM)
+        else:
+            self._set_pill(self.wg_pill, "running", f":{WIDGET_PORT}")
+            if now.get("song_id"):
+                title = now.get("title") or now["song_id"]
+                text = f"{title} · {now['artist']}" if now.get("artist") else title
+                self.wg_detail.config(text=("❚❚ " if not now.get("is_playing") else "") + text, fg=FG)
+            else:
+                self.wg_detail.config(text="nothing playing", fg=FG_DIM)
+
+        song = (playback or {}).get("song_id") or ""
+        self._segments = (chunks or {}).get("segments") or []
+        self._current_segment = (playback or {}).get("current_segment_index", -1) if song else -1
+        if song and self._segments:
+            real = [x for x in self._segments if x.get("index", -1) >= 0]
+            done = sum(1 for x in real if x.get("status") == "downloaded")
+            self.seg_title.config(text=f"Segments · {song}")
+            self.seg_count.config(text=f"{done} / {len(real)} cached")
+        else:
+            self.seg_title.config(text="Segments")
+            self.seg_count.config(text="no song playing in this backend")
+        self._draw_segments()
 
     # ------------------------------------------------------------------
     # Log handling
@@ -1296,7 +1483,8 @@ class AppLauncher(tk.Tk):
 
         self._log_lines.extend(new)
 
-        if self._search_var.get().strip():
+        self._append_mini_log(new)
+        if self._search_var.get().strip() or self._log_level != "all":
             self._refresh_log_display()          # filtering -> full re-render
         else:
             self.log_text.config(state=tk.NORMAL)
@@ -1308,18 +1496,32 @@ class AppLauncher(tk.Tk):
             if self._auto_scroll.get():
                 self.log_text.see(tk.END)
 
-    def _text_line_count(self) -> int:
+    def _append_mini_log(self, lines: list[str]) -> None:
+        """Overview's live log: the last MINI_LOG_LINES lines, no filter."""
+        box = self.mini_log
+        box.config(state=tk.NORMAL)
+        for line in lines:
+            tag = self._classify_log_line(line)
+            box.insert(tk.END, line + "\n", (tag,) if tag else ())
+        n = self._text_line_count(box)
+        if n > MINI_LOG_LINES:
+            box.delete("1.0", f"{n - MINI_LOG_LINES + 1}.0")
+        box.config(state=tk.DISABLED)
+        box.see(tk.END)
+
+    def _text_line_count(self, text: Optional[tk.Text] = None) -> int:
         # The widget always ends with an implicit newline, hence the -1.
-        return int(self.log_text.index("end-1c").split(".")[0]) - 1
+        return int((text or self.log_text).index("end-1c").split(".")[0]) - 1
 
     def _trim_log_widget(self) -> None:
         n = self._text_line_count()
         if n > MAX_LOG_LINES:
             self.log_text.delete("1.0", f"{n - MAX_LOG_LINES + 1}.0")
 
-    def _insert_log_line(self, line: str, pattern: Optional["re.Pattern[str]"]) -> None:
+    def _insert_log_line(self, line: str, pattern: Optional["re.Pattern[str]"],
+                         tag: Optional[str] = None) -> None:
         """Append one line (widget must be in NORMAL state), colour it, mark search hits."""
-        tag = self._classify_log_line(line)
+        tag = tag or self._classify_log_line(line)
         self.log_text.insert(tk.END, line + "\n", (tag,) if tag else ())
         if pattern is not None:
             ln = self._text_line_count()  # the line we just inserted is the last one
@@ -1330,13 +1532,19 @@ class AppLauncher(tk.Tk):
         """Re-render the whole log Text widget with the current search filter."""
         search = self._search_var.get().strip()
         pattern = re.compile(re.escape(search), re.IGNORECASE) if search else None
-        lines = list(self._log_lines)
-        display = [l for l in lines if pattern.search(l)] if pattern else lines
+        levels = LEVEL_FILTERS.get(self._log_level)
+        display = []
+        for line in self._log_lines:
+            if pattern and not pattern.search(line):
+                continue
+            tag = self._classify_log_line(line)
+            if levels is None or tag in levels:
+                display.append((line, tag))
 
         self.log_text.config(state=tk.NORMAL)
         self.log_text.delete("1.0", tk.END)
-        for line in display:
-            self._insert_log_line(line, pattern)
+        for line, tag in display:
+            self._insert_log_line(line, pattern, tag)
         self.log_text.config(state=tk.DISABLED)
 
         self._update_log_count(len(display))
@@ -1475,21 +1683,11 @@ class AppLauncher(tk.Tk):
         'FROM segments ORDER BY last_accessed DESC'
     )
 
-    def _chunks_tab_visible(self) -> bool:
-        try:
-            return self.notebook.select() == str(self._chunks_tab)
-        except tk.TclError:
-            return False
-
-    def _on_tab_changed(self, _event=None) -> None:
-        if self._chunks_tab_visible():
-            self._refresh_chunks()
-
     def _chunk_tick(self) -> None:
         # Always reschedule (the old version stopped forever once auto-refresh
         # was unticked, so re-ticking it did nothing). Skip the DB read when the
-        # tab isn't visible.
-        if self._chunks_auto_refresh.get() and self._chunks_tab_visible():
+        # page isn't visible.
+        if self._chunks_auto_refresh.get() and self._page == "chunks":
             self._refresh_chunks()
         self.after(2000, self._chunk_tick)
 
