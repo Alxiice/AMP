@@ -1,0 +1,148 @@
+{% extends "main.html" %}
+
+{#- Landing page: index.md sets `template: home.html`. The full-width sections go after the
+    navigation tabs (block tabs); index.md's own Markdown is rendered below them as usual.
+    Screenshots: docs/assets/screenshots. -#}
+
+{% set shots = "assets/screenshots/" | url %}
+
+{% block tabs %}
+{{ super() }}
+<section class="amp-hero">
+  <div class="amp-hero__glow" aria-hidden="true"></div>
+  <div class="amp-hero__inner">
+    <div class="amp-hero__text">
+      <span class="amp-pill"><span class="amp-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Version 1.0 · desktop app</span>
+      <h1>Your YouTube Music library, <span class="amp-gradient">as a fast desktop player.</span></h1>
+      <p class="amp-lead">
+        AMP streams each song in small segments and keeps them on disk: playback starts right away,
+        you can seek anywhere, and songs you've played before start instantly.
+        No account needed to search and play.
+      </p>
+      <div class="amp-actions">
+        <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">Get started</a>
+        <a class="amp-btn" href="#features">See the features</a>
+        <a class="amp-btn amp-btn--ghost" href="{{ config.repo_url }}">GitHub</a>
+      </div>
+    </div>
+    <div class="amp-hero__visual">
+      <div class="amp-window amp-float">
+        <div class="amp-window__bar" aria-hidden="true"><span></span><span></span><span></span><em>AMP</em></div>
+        <img src="{{ shots }}search.webp" width="1440" height="900"
+             alt="AMP playing a song: search results, the queue panel and the player bar">
+      </div>
+      <img class="amp-widget-float" src="{{ shots }}widget.png" width="420" height="96"
+           alt="The OBS now-playing widget">
+    </div>
+  </div>
+</section>
+
+<section class="amp-section" id="features">
+  <div class="amp-section__head amp-reveal">
+    <h2>Everything a music player needs. <span class="amp-muted">Nothing it doesn't.</span></h2>
+    <p>A native window, a local backend, and your music: no browser tab, no ads.</p>
+  </div>
+  <div class="amp-features">
+    {% set features = [
+      ("lightning-bolt", "Starts in milliseconds", "Songs arrive in ~10 s segments. Playback starts with the first one; cached songs start in about 24 ms."),
+      ("skip-forward", "Seek anywhere, instantly", "An exact segment map from the song's own index: jumping ahead fetches just the piece you need."),
+      ("playlist-music", "A queue that sticks", "Play next, drag to reorder, shuffle and restore, repeat one or all. Restored when you reopen the app."),
+      ("heart", "Your library, optionally", "Search and play without an account. Sign in with YouTube to add your liked songs and playlists."),
+      ("history", "Listening history", "Every play, grouped by day, with how much of the song you actually heard and how it ended."),
+      ("broadcast", "Made for streamers", "A now-playing widget for OBS: cover, title, artist and a moving progress bar, on its own local port."),
+      ("palette", "Your colours", "Dark, light or follow Windows, any accent colour, and a fade between songs from 0 to 10 seconds."),
+      ("code-braces", "Built-in dev tools", "A Developer page in the app and a small launcher: backend status, live logs, an API tester."),
+    ] %}
+    {% for icon, title, text in features %}
+    <article class="amp-card amp-reveal" style="--i: {{ loop.index0 }}">
+      <div class="amp-card__icon">{% include ".icons/material/" ~ icon ~ ".svg" %}</div>
+      <h3>{{ title }}</h3>
+      <p>{{ text }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="amp-section amp-showcase-wrap" id="tour">
+  <div class="amp-section__head amp-reveal">
+    <h2>Take the tour</h2>
+    <p>Real screenshots of AMP 1.0.</p>
+  </div>
+  <div class="amp-showcase amp-reveal" data-interval="5000">
+    <div class="amp-showcase__tabs" role="tablist" aria-label="Screens">
+      {% set screens = [
+        ("search", "Search & queue", "Search results, the queue panel and the player bar with its segment map."),
+        ("history", "History", "Plays grouped by day, with the share of each song you listened to."),
+        ("settings", "Settings", "Theme, accent colour and fade between songs."),
+        ("history-light", "Light theme", "The same app in the light theme with a violet accent."),
+        ("developer", "Developer", "Backend status, cache, the current song's segments and an API tester."),
+      ] %}
+      {% for file, label, caption in screens %}
+      <button role="tab" class="amp-showcase__tab{% if loop.first %} is-active{% endif %}" aria-selected="{{ 'true' if loop.first else 'false' }}"
+              data-index="{{ loop.index0 }}" data-caption="{{ caption }}">
+        {{ label }}<span class="amp-showcase__progress" aria-hidden="true"></span>
+      </button>
+      {% endfor %}
+    </div>
+    <div class="amp-window amp-showcase__stage">
+      <div class="amp-window__bar" aria-hidden="true"><span></span><span></span><span></span><em>AMP</em></div>
+      <div class="amp-showcase__frames">
+        {% for file, label, caption in screens %}
+        <img class="amp-showcase__frame{% if loop.first %} is-active{% endif %}" src="{{ shots }}{{ file }}.webp"
+             width="1440" height="900" alt="{{ caption }}" loading="{{ 'eager' if loop.first else 'lazy' }}">
+        {% endfor %}
+      </div>
+    </div>
+    <p class="amp-showcase__caption" aria-live="polite">{{ screens[0][2] }}</p>
+  </div>
+</section>
+
+<section class="amp-stats amp-reveal" aria-label="Numbers">
+  <div><strong data-count="24">24</strong><span class="amp-unit">ms</span><p>to first audio for a cached song</p></div>
+  <div><strong data-count="1.4" data-decimals="1">1.4</strong><span class="amp-unit">s</span><p>for a song you've never played</p></div>
+  <div><strong data-count="0">0</strong><p>accounts needed to search and play</p></div>
+  <div><strong data-count="10">10</strong><span class="amp-unit">s</span><p>segments, so a seek downloads just one</p></div>
+</section>
+<p class="amp-footnote">Measured on the development machine; first audio for a new song mostly depends on YouTube.</p>
+
+<section class="amp-section" id="how">
+  <div class="amp-section__head amp-reveal">
+    <h2>How it works</h2>
+    <p>The window you see is a Tauri app; a small Python backend runs next to it and stops with it.</p>
+  </div>
+  <div class="amp-flow amp-reveal">
+    <div class="amp-flow__step"><span>1</span><h3>Find</h3><p>Search YouTube Music, or open your liked songs, playlists and saved queues.</p></div>
+    <div class="amp-flow__line" aria-hidden="true"><i></i></div>
+    <div class="amp-flow__step"><span>2</span><h3>Stream</h3><p>The backend resolves the audio, reads its index and fetches the segments around the playhead first.</p></div>
+    <div class="amp-flow__line" aria-hidden="true"><i></i></div>
+    <div class="amp-flow__step"><span>3</span><h3>Replay</h3><p>Segments stay on disk (500 MB by default, least recently played go first), so replays start at once.</p></div>
+  </div>
+</section>
+
+<section class="amp-section amp-split" id="obs">
+  <div class="amp-split__text amp-reveal">
+    <h2>Show what's playing on stream</h2>
+    <p>
+      Add one Browser source in OBS and AMP keeps it up to date: cover, title, artist and a gently
+      moving wave that freezes when you pause. Size it with <code>?w=</code> and <code>?h=</code>;
+      everything scales.
+    </p>
+    <a class="amp-btn" href="{{ 'usage/obs-widget/' | url }}">Set up the widget</a>
+  </div>
+  <div class="amp-split__visual amp-reveal">
+    <div class="amp-stream">
+      <div class="amp-stream__scene" aria-hidden="true"></div>
+      <img src="{{ shots }}widget.png" width="420" height="96" alt="The now-playing widget over a stream scene">
+    </div>
+  </div>
+</section>
+
+<section class="amp-cta amp-reveal">
+  <h2>Ready to listen?</h2>
+  <p>Install the prerequisites, build once, and AMP opens with its own backend.</p>
+  <div class="amp-actions">
+    <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">Install AMP</a>
+    <a class="amp-btn" href="{{ 'usage/using-the-app/' | url }}">Read the guide</a>
+  </div>
+</section>
+{% endblock %}
