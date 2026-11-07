@@ -28,8 +28,15 @@
 | Revision 15 | MkDocs documentation, simpler READMEs, plan files removed | **DONE** — see Revision 15 |
 | Revision 16 | Covers, playlist view, play queue + saved queues, likes, UI redesign | **DONE** — see Revision 16 |
 | Revision 17 | OBS now-playing widget on its own port | **DONE** — see Revision 17 |
+| Revision 18 | `app.py` launcher redesign (sidebar, cards, live status) | **DONE** — see Revision 18 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 18 — Launcher redesign (2026-11-07)
+
+`amp/app.py` UI layer rewritten, still tkinter + stdlib only; process control, log tailing, port/PID utilities unchanged. Palette = the app's tokens (`styles.css`). Sidebar pages (Overview, Logs, API tester, Chunks) instead of the notebook. `FlatButton` (hover, kinds) and `Card` (canvas-drawn rounded panel; auto height from the body's *requested* height, since the body only gets a size once the canvas shows it). Overview: Backend / Frontend / OBS widget cards (pill, port · pid · uptime from `backend.pid`, Start↔Stop, ↻, ✕; Web/Desktop toggle locked while running; widget `/now.json` + copy/open URL), segment strip of the launcher backend's current song, last 200 log lines. Logs: All / Warn+ / Errors filter. Dark title bar on Windows (DWM attribute 20).
+
+**Verification:** screenshots of every page (idle), and Overview + Logs with the launcher's backend running on `AMP_PORT=8765` / `WIDGET_PORT=8766` and a song played via HTTP (pills, uptime, widget song, 4/26 segments with the current one outlined); closing the window stopped that backend. **Not verified:** Frontend start (web/desktop) from the new buttons, force kill, the API Send button (quick fill only), Linux/macOS.
 
 ### Revision 17 — OBS now-playing widget (2026-11-07)
 
