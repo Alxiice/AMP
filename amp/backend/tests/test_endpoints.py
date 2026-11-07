@@ -20,6 +20,11 @@ class TestAuthMiddleware:
         data = resp.json()
         assert data["status"] == "ok"
 
+    def test_health_reports_uptime_and_widget_port(self, client):
+        data = client.get("/api/health").json()
+        assert isinstance(data["uptime_s"], int) and data["uptime_s"] >= 0
+        assert isinstance(data["widget_port"], int)
+
     def test_health_reports_extractor_prerequisites(self, client):
         extractor = client.get("/api/health").json()["services"]["extractor"]
         assert set(extractor) == {"node", "ejs", "yt_dlp"}

@@ -95,7 +95,8 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     app = create_app(auth_token=args.token)
     if settings.WIDGET_PORT:
         from backend.widget import start_widget_server
-        start_widget_server(settings.HOST, settings.WIDGET_PORT)
+        if start_widget_server(settings.HOST, settings.WIDGET_PORT) is None:
+            settings.WIDGET_PORT = 0  # /api/health: this backend doesn't serve the widget
     server = uvicorn.Server(uvicorn.Config(
         app,
         host=settings.HOST,

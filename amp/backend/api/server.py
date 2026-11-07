@@ -13,6 +13,7 @@ P21: Blocking handlers are plain `def` (threadpool), never `async def`.
 from __future__ import annotations
 
 import os
+import time
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -144,6 +145,8 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
     def root():
         return {"app": "AMP v2", "version": "2.0.0", "status": "running"}
 
+    started = time.time()
+
     @app.get("/api/health")
     def health():
         from backend.services.auth import get_auth_service
@@ -152,6 +155,8 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
             "status": "ok",
             "app": "AMP v2",  # lifecycle.probe_backend: tells an AMP backend from anything else on the port
             "pid": os.getpid(),
+            "uptime_s": int(time.time() - started),
+            "widget_port": settings.WIDGET_PORT,  # 0 = not served by this backend (off or port taken)
             "services": {
                 "auth": auth.state.value,
                 "streaming": "running",
