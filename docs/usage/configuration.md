@@ -55,6 +55,7 @@ launching it apply too.
 | `AUTH_TOKEN` | *(none)* | require `Authorization: Bearer <token>` on every API call. Same as `--token` |
 | `DEBUG` | `false` | verbose logging and access log. Same as `--debug` |
 | `HOST` / `PORT` | `127.0.0.1` / `8000` | manual runs only. The desktop app chooses the port itself |
+| `WIDGET_PORT` | `8001` | port of the [OBS now-playing widget](obs-widget.md); `0` turns it off. Same as `--widget-port` |
 
 ### Desktop app only
 
@@ -85,6 +86,7 @@ For manual runs (`python -m backend.main` from `amp/`):
 | Option | Default | Effect |
 |---|---|---|
 | `--port N` | `8000` | port to listen on; `0` picks a free one |
+| `--widget-port N` | `8001` | [OBS now-playing widget](obs-widget.md) port; `0` turns it off |
 | `--host H` | `127.0.0.1` | keep the default: the backend must not be reachable from the network |
 | `--data-dir DIR` | `amp/.amp/` | data folder (database included) |
 | `--token T` | *(none)* | require this Bearer token |

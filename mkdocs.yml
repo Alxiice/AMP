@@ -67,6 +67,7 @@ nav:
       - Using the app: usage/using-the-app.md
       - Signing in: usage/sign-in.md
       - Configuration: usage/configuration.md
+      - OBS now-playing widget: usage/obs-widget.md
       - Troubleshooting: usage/troubleshooting.md
       - Debug launcher & manual runs: usage/debugging.md
   - Code:

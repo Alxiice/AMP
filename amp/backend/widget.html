@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<!--
+  AMP now-playing widget (OBS browser source). Served by backend/widget.py.
+  URL: http://127.0.0.1:8001/?w=320&h=72  (card size in px; everything scales with h)
+  Polls /now.json every second; hides when nothing is playing.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AMP now playing</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800&display=swap">
+<style>
+  :root {
+    --w: 320px; --h: 72px;
+    --cream: rgba(255, 241, 244, .9);
+    --line: #f4c0d1;
+    --pink: #d4537e;
+    --ink: #4b1528;
+    --ink-dim: #993556;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { background: transparent; overflow: hidden; }
+  body { font-family: "Nunito", "Segoe UI", system-ui, sans-serif; color: var(--ink); }
+
+  .card {
+    display: flex; align-items: center;
+    gap: calc(var(--h) * .13);
+    width: var(--w); height: var(--h);
+    padding: calc(var(--h) * .07) calc(var(--h) * .18) calc(var(--h) * .07) calc(var(--h) * .07);
+    background: var(--cream);
+    border: max(1.5px, calc(var(--h) * .025)) solid var(--line);
+    border-radius: calc(var(--h) * .24);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .5s ease, transform .5s cubic-bezier(.2,.8,.2,1);
+  }
+  .card.show { opacity: 1; transform: none; }
+
+  .art {
+    flex: none; aspect-ratio: 1; height: 100%;
+    border-radius: calc(var(--h) * .17);
+    background: #ed93b1; object-fit: cover; display: block;
+  }
+  .meta { flex: 1; min-width: 0; }
+  .title  { font-size: calc(var(--h) * .27); font-weight: 800; line-height: 1.15; }
+  .artist { font-size: calc(var(--h) * .2);  font-weight: 700; line-height: 1.2; color: var(--ink-dim); }
+
+  /* single-line text that scrolls only when it overflows */
+  .clip { overflow: hidden; white-space: nowrap; }
+  .clip > span { display: inline-block; }
+  .clip.scroll > span { padding-right: 3em; animation: slide var(--dur, 12s) linear infinite; }
+  @keyframes slide { to { transform: translateX(-50%); } }
+
+  /* progress: a small wave over the played part, a thin line after it */
+  .bar { position: relative; height: calc(var(--h) * .13); margin-top: calc(var(--h) * .05); }
+  .bar::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+    height: max(1.5px, calc(var(--h) * .03)); transform: translateY(-50%);
+    background: var(--line); border-radius: 9px;
+  }
+  .wave {
+    position: absolute; left: 0; top: 0; bottom: 0; width: 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 10'%3E%3Cpath d='M0 5 Q6 3 12 5 T24 5' fill='none' stroke='%23d4537e' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") repeat-x left center;
+    background-size: calc(var(--h) * .13 * 2.4) 100%;
+    animation: flow 2.4s linear infinite;
+  }
+  @keyframes flow { to { background-position-x: calc(var(--h) * .13 * -2.4); } }
+  .knob {
+    position: absolute; top: 50%; left: 0;
+    width: calc(var(--h) * .1); height: calc(var(--h) * .1);
+    margin: calc(var(--h) * -.05) 0 0 calc(var(--h) * -.05);
+    border-radius: 50%; background: var(--pink);
+  }
+  .paused .wave { animation-play-state: paused; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .card { transition: none; }
+    .wave, .clip.scroll > span { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div class="card" id="card">
+  <img class="art" id="art" alt="" referrerpolicy="no-referrer">
+  <div class="meta">
+    <div class="clip" id="titleClip"><span class="title" id="title"></span></div>
+    <div class="clip" id="artistClip"><span class="artist" id="artist"></span></div>
+    <div class="bar"><div class="wave" id="wave"></div><div class="knob" id="knob"></div></div>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const q = new URLSearchParams(location.search);
+const px = (k, d) => { const n = parseInt(q.get(k), 10); return n > 0 && n < 10000 ? n : d; };
+document.documentElement.style.setProperty("--w", px("w", 320) + "px");
+document.documentElement.style.setProperty("--h", px("h", 72) + "px");
+
+const card = $("card");
+let now = null, fetchedAt = 0, songId = null;
+
+// Turn a one-line field into a marquee only if it doesn't fit
+function fit(clipEl, textEl, text) {
+  clipEl.classList.remove("scroll");
+  textEl.textContent = text;
+  if (textEl.scrollWidth > clipEl.clientWidth + 2) {
+    textEl.textContent = text + "     " + text;  // duplicate for a seamless loop
+    clipEl.style.setProperty("--dur", Math.max(8, text.length * 0.35) + "s");
+    clipEl.classList.add("scroll");
+  }
+}
+
+function render(n) {
+  const art = $("art");
+  const fallback = "https://i.ytimg.com/vi/" + n.song_id + "/mqdefault.jpg";
+  art.onerror = () => { if (art.src !== fallback) art.src = fallback; };
+  art.src = n.cover_url || fallback;
+  fit($("titleClip"), $("title"), n.title || n.song_id);
+  $("artistClip").style.display = n.artist ? "" : "none";
+  fit($("artistClip"), $("artist"), n.artist || "");
+}
+
+async function poll() {
+  try {
+    const n = await (await fetch("/now.json", { cache: "no-store" })).json();
+    now = n.song_id ? n : null;
+    fetchedAt = performance.now();
+  } catch (e) { now = null; }  // backend gone: hide
+  if (!now) { card.classList.remove("show"); songId = null; return; }
+  if (now.song_id !== songId) { songId = now.song_id; render(now); }
+  card.classList.add("show");
+  card.classList.toggle("paused", !now.is_playing);
+}
+
+function frame() {
+  if (now && now.duration_ms) {
+    const pos = now.position_ms + (now.is_playing ? performance.now() - fetchedAt : 0);
+    const pct = Math.min(100, Math.max(0, pos / now.duration_ms * 100)) + "%";
+    $("wave").style.width = pct;
+    $("knob").style.left = pct;
+  }
+  requestAnimationFrame(frame);
+}
+
+poll();
+setInterval(poll, 1000);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

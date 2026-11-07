@@ -258,8 +258,13 @@ export const api = {
   getSegmentStatuses: (id: string) =>
     fetchApi<{ segments: SegmentStatus[] }>(`/api/stream/${id}/chunks`),
 
-  playSong: (id: string, signal?: AbortSignal) =>
-    fetchApi<PlayResponse>(`/api/stream/${id}/play`, { method: "POST", signal }),
+  /** `meta` is shown by the OBS now-playing widget. */
+  playSong: (id: string, signal?: AbortSignal, meta?: { title: string; artist: string; cover_url: string }) =>
+    fetchApi<PlayResponse>(`/api/stream/${id}/play`, {
+      method: "POST",
+      signal,
+      body: meta ? JSON.stringify(meta) : undefined,
+    }),
 
   pause: () => fetchApi<{ message: string }>("/api/stream/pause", { method: "POST" }),
   resume: () => fetchApi<{ message: string }>("/api/stream/resume", { method: "POST" }),
