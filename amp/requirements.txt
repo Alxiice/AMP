@@ -1,4 +1,4 @@
-# AMP v2 Backend Dependencies
+# AMP Backend Dependencies
 #
 # Ranges cap the major version so an upstream breaking release can't sneak in.
 # For a reproducible install use requirements.lock (exact versions).

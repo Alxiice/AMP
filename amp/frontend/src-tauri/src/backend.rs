@@ -9,6 +9,7 @@
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -88,6 +89,9 @@ pub fn stop<R: Runtime>(app: &AppHandle<R>) {
 fn spawn<R: Runtime>(app: &AppHandle<R>) -> Result<BackendInfo, String> {
     let port = pick_port()?;
     let data_dir = app.path().app_data_dir().map_err(|e| format!("no app data dir: {e}"))?;
+    if let Some(msg) = migrate_legacy_data_dir(&data_dir) {
+        push_log(app, msg);
+    }
     std::fs::create_dir_all(&data_dir).map_err(|e| format!("cannot create {}: {e}", data_dir.display()))?;
 
     let args: Vec<OsString> = vec![
@@ -231,9 +235,56 @@ pub async fn restart_backend<R: Runtime>(app: AppHandle<R>) -> Result<BackendInf
     .map_err(|e| e.to_string())?
 }
 
+/// Data folder name before 1.0 (identifier `com.amp.v2`), next to the current one.
+const LEGACY_DATA_DIR: &str = "com.amp.v2";
+
+/// Move the pre-1.0 data folder (sign-in, cache, history) to the new one, once:
+/// only when the new folder doesn't exist yet. Returns a log line when something happened.
+fn migrate_legacy_data_dir(data_dir: &Path) -> Option<String> {
+    let legacy = data_dir.parent()?.join(LEGACY_DATA_DIR);
+    if data_dir.exists() || !legacy.is_dir() {
+        return None;
+    }
+    Some(match std::fs::rename(&legacy, data_dir) {
+        Ok(()) => format!("Moved data folder {} to {}", legacy.display(), data_dir.display()),
+        Err(e) => format!("Could not move {} to {}: {e}; starting with an empty data folder", legacy.display(), data_dir.display()),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("amp-migrate-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn legacy_data_dir_is_moved_once() {
+        let root = scratch("move");
+        std::fs::create_dir_all(root.join(LEGACY_DATA_DIR)).unwrap();
+        std::fs::write(root.join(LEGACY_DATA_DIR).join("userdb.sqlite"), b"db").unwrap();
+        let new = root.join("com.amp.player");
+        assert!(migrate_legacy_data_dir(&new).is_some());
+        assert_eq!(std::fs::read(new.join("userdb.sqlite")).unwrap(), b"db");
+        assert!(!root.join(LEGACY_DATA_DIR).exists());
+        assert!(migrate_legacy_data_dir(&new).is_none());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn existing_data_dir_is_kept() {
+        let root = scratch("keep");
+        std::fs::create_dir_all(root.join(LEGACY_DATA_DIR)).unwrap();
+        let new = root.join("com.amp.player");
+        std::fs::create_dir_all(&new).unwrap();
+        assert!(migrate_legacy_data_dir(&new).is_none());
+        assert!(root.join(LEGACY_DATA_DIR).exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn free_port_is_bindable() {

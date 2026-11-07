@@ -8,9 +8,12 @@ AMP works without any configuration. This page lists what you can change.
 
     | OS | Folder |
     |---|---|
-    | Windows | `%APPDATA%\com.amp.v2\` |
-    | macOS | `~/Library/Application Support/com.amp.v2/` |
-    | Linux | `~/.local/share/com.amp.v2/` |
+    | Windows | `%APPDATA%\com.amp.player\` |
+    | macOS | `~/Library/Application Support/com.amp.player/` |
+    | Linux | `~/.local/share/com.amp.player/` |
+
+    Builds from before 1.0 used a `com.amp.v2` folder. On first start, AMP moves it to the new
+    name, so your sign-in, cache and history carry over.
 
 === "Manual runs / app.py"
 

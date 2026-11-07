@@ -19,7 +19,7 @@ layer: if you change a response shape, change `api.ts` too.
     | Method | Path | Returns |
     |---|---|---|
     | GET | `/` | `{app, version, status}` |
-    | GET | `/api/health` | `{status, app: "AMP v2", pid, uptime_s, widget_port, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}`. `widget_port` is 0 when this backend doesn't serve the [OBS widget](../../usage/obs-widget.md) |
+    | GET | `/api/health` | `{status, app: "AMP", pid, uptime_s, widget_port, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}`. `widget_port` is 0 when this backend doesn't serve the [OBS widget](../../usage/obs-widget.md) |
     | GET | `/api/search?q=&type=songs&limit=20` | list of songs (`limit` 1–50; `type` = songs, videos) |
     | GET | `/api/song/{id}` | song metadata |
     | GET | `/api/artist/{id}`, `/api/album/{id}` | metadata dicts |
