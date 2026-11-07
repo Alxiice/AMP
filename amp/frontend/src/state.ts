@@ -12,11 +12,13 @@
 import { useSyncExternalStore } from "react";
 import { api, type Song } from "./api";
 import { loadQueue, saveQueue } from "./player/persistence";
+import { fadeGain } from "./player/fade";
 import { shouldPrefetch } from "./player/prefetch";
 import * as Q from "./player/queue";
 
 const PERSIST_DEBOUNCE_MS = 500;
 const RESTART_THRESHOLD_MS = 3000;
+const FADE_TICK_MS = 50; // volume steps while fading are this short, so the ramp sounds smooth
 
 // ---------------------------------------------------------------------------
 // Queue state
@@ -49,6 +51,8 @@ class StateStore {
   private positionTimer: ReturnType<typeof setInterval> | null = null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private prefetchedFor: string | null = null; // current song id whose successor was prefetched
+  private fadeSec = 0; // settings: fade between songs
+  private fadeTimer: ReturnType<typeof setInterval> | null = null;
 
   constructor() {
     const saved = loadQueue();
@@ -116,7 +120,7 @@ class StateStore {
     this.audio = audio;
 
     if (audio) {
-      audio.volume = this.state.volume;
+      this.applyVolume();
       audio.addEventListener("timeupdate", this._onTimeUpdate);
       audio.addEventListener("ended", this._onEnded);
       audio.addEventListener("play", this._onPlay);
@@ -254,8 +258,31 @@ class StateStore {
 
   setVolume(v: number): void {
     this.setState({ volume: v });
-    if (this.audio) {
-      this.audio.volume = v;
+    this.applyVolume();
+  }
+
+  /** Seconds of fade-out at the end of a song and fade-in at the start of the next (0 = off). */
+  setFadeSec(sec: number): void {
+    this.fadeSec = sec;
+    this.updateFadeTimer();
+    this.applyVolume();
+  }
+
+  /** The element's volume = user volume × fade gain at the current position. */
+  private applyVolume(): void {
+    const a = this.audio;
+    if (!a) return;
+    const durationSec = Number.isFinite(a.duration) ? a.duration : this.state.durationMs / 1000;
+    a.volume = this.state.volume * fadeGain(a.currentTime, durationSec, this.fadeSec);
+  }
+
+  private updateFadeTimer(): void {
+    const needed = this.fadeSec > 0 && !!this.audio && !this.audio.paused;
+    if (needed && !this.fadeTimer) {
+      this.fadeTimer = setInterval(() => this.applyVolume(), FADE_TICK_MS);
+    } else if (!needed && this.fadeTimer) {
+      clearInterval(this.fadeTimer);
+      this.fadeTimer = null;
     }
   }
 
@@ -319,11 +346,14 @@ class StateStore {
   };
 
   private _onPlay = (): void => {
+    this.applyVolume(); // a song starting at 0 starts silent, then fades in
     this.setState({ isPlaying: true });
+    this.updateFadeTimer();
   };
 
   private _onPause = (): void => {
     this.setState({ isPlaying: false });
+    this.updateFadeTimer();
   };
 
   private _onLoadedMetadata = (): void => {
