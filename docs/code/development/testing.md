@@ -76,6 +76,23 @@ vitest, for the pure helpers that don't need a DOM:
   (round trip, junk input, clamping), `shouldPrefetch`.
 - `src/authSession.test.ts`: badge labels, a 401 from `/api/user/*` refreshes the status.
 
+## Documentation screenshots
+
+The images in `docs/assets/screenshots/` come from real runs. To refresh the app's after a UI
+change, start a backend on a **scratch** data folder (the script adds history entries and saved
+queues) and the Vite dev server, then run the script (Node 22+, Edge or Chrome):
+
+```bash
+cd amp
+python -m backend.main --data-dir /tmp/amp-shots     # terminal 1
+cd frontend && npm run dev                           # terminal 2
+node scripts/docs_screenshots.mjs                    # terminal 3, from amp/; --browser <path> for Chrome
+```
+
+It searches, plays a song, then captures Search, History, Saved queues, Settings and Developer in
+the dark theme, History and Settings in the light theme, and the OBS widget (transparent PNG).
+The launcher screenshots (`launcher-*.png`) were taken by hand from `app.py`.
+
 ## Manual checks
 
 The UI itself has no automated tests. When changing playback, check by hand in the app:

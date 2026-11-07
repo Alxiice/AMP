@@ -30,8 +30,23 @@
 | Revision 17 | OBS now-playing widget on its own port | **DONE** — see Revision 17 |
 | Revision 18 | `app.py` launcher redesign (sidebar, cards, live status) | **DONE** — see Revision 18 |
 | Revision 19 | Developer page, space bar, Settings (theme, accent, fade), listening history | **DONE** — see Revision 19 |
+| Revision 20 | 1.0 naming (no "v2"), docs site redesign with screenshots, launcher page | **DONE** — see Revision 20 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 20 — 1.0 naming, docs site redesign (2026-11-07)
+
+| Area | Change |
+|---|---|
+| **Naming** | "v2" dropped: product/window "AMP", version 1.0.0 everywhere, identifier `com.amp.player` (exe `amp`, installers `AMP_1.0.0_*`), health `app: "AMP"`, `DESIGN_DOC_2.md` → `DESIGN_DOC.md`. `backend.rs` `migrate_legacy_data_dir`: moves `com.amp.v2` to the new data folder once if the new one doesn't exist (2 Rust tests). The sidecar must be rebuilt (it answers the health `app` name) |
+| **Docs theme** | Material with the app's palette (`docs/stylesheets/amp.css`), dark first, Inter / JetBrains Mono, glass header, glightbox (click to zoom; `mkdocs-glightbox` added to `docs/requirements.txt`) |
+| **Home** | `overrides/home.html` (`template: home.html` in `index.md`): hero with floating screenshot + widget, 8 feature cards, auto-rotating screenshot tour, animated stats (factual: 24 ms / 1.4 s TTFA from Revision 12), how-it-works, OBS section, CTA. `docs/javascripts/home.js`: reveal on scroll, tour (pauses on hover/focus and off-screen), counters; honours reduced motion |
+| **Screenshots** | `docs/assets/screenshots/`: app pages (dark + light) and the widget from `amp/scripts/docs_screenshots.mjs` (headless Edge over CDP, Node built-in WebSocket; needs a backend on a scratch data dir + Vite); launcher pages captured from `app.py`. No chunks screenshot: it would publish the dev cache's song IDs |
+| **Pages** | New `usage/launcher.md`; `debugging.md` → "Manual runs"; screenshots in Using the app, OBS widget; README with screenshot + feature list; "personal prototype, not for distribution" note replaced by an "independent project" ToS note |
+
+**Verification:** `mkdocs build --strict` OK; home captured with headless Edge at 1440 px (after fixing rem widths: Material's root is 20 px on wide screens) and checked at 375 px in the pane (no horizontal overflow); 411 unit tests, 48 vitest, 3 cargo tests; `npx tauri build` → `amp.exe`, `AMP_1.0.0_x64_en-US.msi`, `AMP_1.0.0_x64-setup.exe`.
+
+**Not verified:** the data folder move on a real `com.amp.v2` folder (unit-tested on temp dirs only); the GitHub Pages deploy itself (runs on push).
 
 ### Revision 19 — Developer page, space bar, settings, listening history (2026-11-07)
 
