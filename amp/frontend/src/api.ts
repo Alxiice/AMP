@@ -92,6 +92,17 @@ export interface PlaybackState {
   last_updated: number;
 }
 
+/** What the OBS widget shows. */
+export interface NowPlaying {
+  song_id: string | null;
+  title?: string;
+  artist?: string;
+  cover_url?: string;
+  duration_ms?: number;
+  position_ms?: number;
+  is_playing?: boolean;
+}
+
 export interface AuthStatus {
   state: "signed_out" | "signed_in" | "expired";
   is_authenticated: boolean;
@@ -108,7 +119,34 @@ export interface TauriCookie {
 
 export interface HealthStatus {
   status: string;
-  services: Record<string, string>;
+  pid?: number;
+  uptime_s?: number;
+  /** OBS widget port served by this backend, 0 when off or taken by another backend. */
+  widget_port?: number;
+  services: {
+    auth?: string;
+    extractor?: { node: boolean; ejs: boolean; yt_dlp: string };
+    [key: string]: unknown;
+  };
+}
+
+/** Developer page API tester: any request, raw result, never throws on HTTP errors. */
+export async function rawRequest(method: string, path: string, body?: string): Promise<{
+  status: number; ms: number; text: string;
+}> {
+  const start = performance.now();
+  const headers: Record<string, string> = {};
+  if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
+  if (body) headers["Content-Type"] = "application/json";
+  try {
+    const resp = await fetch(`${BASE_URL}${path.startsWith("/") ? path : `/${path}`}`, {
+      method, headers, body: body || undefined,
+    });
+    const text = await resp.text();
+    return { status: resp.status, ms: performance.now() - start, text };
+  } catch (e) {
+    return { status: 0, ms: performance.now() - start, text: (e as Error).message };
+  }
 }
 
 export interface CacheInfo {
@@ -284,6 +322,7 @@ export const api = {
     fetchApi<{ message: string }>(`/api/stream/buffer/${id}?mode=${mode}`, { method: "POST" }),
 
   getPlaybackState: () => fetchApi<PlaybackState>("/api/stream/playback-state"),
+  getNowPlaying: () => fetchApi<NowPlaying>("/api/stream/now-playing"),
   getStreamLogs: (n = 200) =>
     fetchApi<{ lines: string[] }>(`/api/stream/logs?n=${n}`),
   getCacheInfo: () => fetchApi<CacheInfo>("/api/stream/cache-info"),
