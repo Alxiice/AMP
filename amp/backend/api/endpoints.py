@@ -290,6 +290,12 @@ def get_playback_state():
     return get_streaming_service().get_playback_state()
 
 
+@router.get("/stream/now-playing")
+def get_now_playing():
+    """GET /api/stream/now-playing — what the OBS widget shows ({song_id: null} when idle)."""
+    return get_streaming_service().now_playing() or {"song_id": None}
+
+
 @router.get("/stream/logs")
 def get_stream_logs(n: int = Query(200, ge=1, le=1000)):
     """GET /api/stream/logs — recent streaming log lines from ring buffer."""

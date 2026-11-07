@@ -54,6 +54,12 @@ def test_stop_clears(svc, client_no_auth):  # noqa: F811
     assert svc.now_playing() is None
 
 
+def test_now_playing_endpoint(svc, client_no_auth):  # noqa: F811
+    assert client_no_auth.get("/api/stream/now-playing").json() == {"song_id": None}
+    client_no_auth.post(f"/api/stream/{SONG}/play", json=META)
+    assert client_no_auth.get("/api/stream/now-playing").json()["title"] == META["title"]
+
+
 def test_meta_too_long_rejected(svc, client_no_auth):  # noqa: F811
     resp = client_no_auth.post(f"/api/stream/{SONG}/play", json={"title": "x" * 501})
     assert resp.status_code == 422

@@ -16,6 +16,7 @@ import { SavedQueues } from "./pages/SavedQueues";
 import { SavedQueueDetail } from "./pages/SavedQueueDetail";
 import { Auth } from "./pages/Auth";
 import { Logs } from "./pages/Logs";
+import { Developer } from "./pages/Developer";
 
 const QUEUE_OPEN_KEY = "amp.queuePanel";
 
@@ -26,6 +27,7 @@ const NAV_ITEMS = [
   { path: "/queues", label: "Saved queues", icon: "saved" },
   { path: "/auth", label: "Account", icon: "account" },
   { path: "/logs", label: "Logs", icon: "logs" },
+  { path: "/developer", label: "Developer", icon: "code" },
 ];
 
 function readQueueOpen(): boolean {
@@ -167,6 +169,7 @@ export default function App() {
             <Route path="/queues/:id" element={<SavedQueueDetail />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/logs" element={<Logs backendLogs={backendLogs} />} />
+            <Route path="/developer" element={<Developer backendStatus={backendStatus} onRestart={handleRestart} />} />
           </Routes>
         </main>
 
