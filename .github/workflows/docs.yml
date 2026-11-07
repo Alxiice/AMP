@@ -5,12 +5,14 @@ on:
     branches: ["master"]
     paths:
       - "docs/**"
+      - "overrides/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
   pull_request:
     branches: ["**"]
     paths:
       - "docs/**"
+      - "overrides/**"
       - "mkdocs.yml"
       - ".github/workflows/docs.yml"
 

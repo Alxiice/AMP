@@ -2,6 +2,10 @@
 
 While AMP runs, a small page shows the current song (cover, title, artist, progress) for a stream overlay.
 
+![The widget at 420 × 96](../assets/screenshots/widget.png){ width="420" }
+
+The wave on the progress bar moves while the song plays and freezes on pause.
+
 ## Add it to OBS
 
 1. **Sources → + → Browser**.
