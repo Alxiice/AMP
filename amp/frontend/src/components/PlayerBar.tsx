@@ -179,6 +179,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     if (hasSong) return;
     const audio = audioRef.current;
     if (!audio || !audio.getAttribute("src")) return;
+    store.endListening("stopped");
     loadGen.current++;
     loadAbort.current?.abort();
     loadedIdRef.current = "";
@@ -256,6 +257,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
   const handleStop = useCallback(() => {
     const audio = audioRef.current;
     if (!audio) return;
+    store.endListening("stopped");
     audio.pause();
     audio.currentTime = 0;
     api.stop().catch(() => {});

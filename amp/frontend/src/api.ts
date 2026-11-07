@@ -92,6 +92,23 @@ export interface PlaybackState {
   last_updated: number;
 }
 
+export interface HistoryEntry {
+  id: number;
+  song: Song;
+  started_at: string;
+  listened_ms: number;
+  duration_ms: number;
+  /** listened / duration, capped at 100; null when the duration is unknown. */
+  percent: number | null;
+  end_reason: "finished" | "skipped" | "stopped" | "closed";
+}
+
+export interface HistoryPage {
+  entries: HistoryEntry[];
+  total: number;
+  listened_ms: number;
+}
+
 /** What the OBS widget shows. */
 export interface NowPlaying {
   song_id: string | null;
@@ -289,6 +306,15 @@ export const api = {
     fetchApi<SavedQueueDetail>(`/api/queues/${id}`, { method: "PUT", body: JSON.stringify(patch) }),
   deleteSavedQueue: (id: number) =>
     fetchApi<{ message: string }>(`/api/queues/${id}`, { method: "DELETE" }),
+
+  // --- Listening history ---
+  addHistory: (entry: Omit<HistoryEntry, "id" | "percent">) =>
+    fetchApi<HistoryEntry>("/api/history", { method: "POST", body: JSON.stringify(entry) }),
+  getHistory: (days = 0, limit = 200, offset = 0) =>
+    fetchApi<HistoryPage>(`/api/history?days=${days}&limit=${limit}&offset=${offset}`),
+  deleteHistoryEntry: (id: number) =>
+    fetchApi<{ message: string }>(`/api/history/${id}`, { method: "DELETE" }),
+  clearHistory: () => fetchApi<{ deleted: number }>("/api/history", { method: "DELETE" }),
 
   // --- Streaming ---
   getStreamInfo: (id: string) => fetchApi<StreamInfoSummary>(`/api/stream/info/${id}`),
