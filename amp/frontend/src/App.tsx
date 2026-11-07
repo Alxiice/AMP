@@ -17,6 +17,9 @@ import { SavedQueueDetail } from "./pages/SavedQueueDetail";
 import { Auth } from "./pages/Auth";
 import { Logs } from "./pages/Logs";
 import { Developer } from "./pages/Developer";
+import { Settings } from "./pages/Settings";
+import { useSettings } from "./settings";
+import { store } from "./state";
 
 const QUEUE_OPEN_KEY = "amp.queuePanel";
 
@@ -26,6 +29,7 @@ const NAV_ITEMS = [
   { path: "/playlists", label: "Playlists", icon: "playlist" },
   { path: "/queues", label: "Saved queues", icon: "saved" },
   { path: "/auth", label: "Account", icon: "account" },
+  { path: "/settings", label: "Settings", icon: "settings" },
   { path: "/logs", label: "Logs", icon: "logs" },
   { path: "/developer", label: "Developer", icon: "code" },
 ];
@@ -45,6 +49,9 @@ export default function App() {
   const [queueOpen, setQueueOpen] = useState(readQueueOpen);
   const authStatus = useAuthStatus();
   const navigate = useNavigate();
+  const { fadeSec } = useSettings();
+
+  useEffect(() => store.setFadeSec(fadeSec), [fadeSec]);
 
   useEffect(() => {
     // Follow the backend Tauri started (health, output); it is not spawned from here
@@ -168,6 +175,7 @@ export default function App() {
             <Route path="/queues" element={<SavedQueues />} />
             <Route path="/queues/:id" element={<SavedQueueDetail />} />
             <Route path="/auth" element={<Auth />} />
+            <Route path="/settings" element={<Settings />} />
             <Route path="/logs" element={<Logs backendLogs={backendLogs} />} />
             <Route path="/developer" element={<Developer backendStatus={backendStatus} onRestart={handleRestart} />} />
           </Routes>
