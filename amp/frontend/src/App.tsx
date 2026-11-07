@@ -18,6 +18,7 @@ import { Auth } from "./pages/Auth";
 import { Logs } from "./pages/Logs";
 import { Developer } from "./pages/Developer";
 import { Settings } from "./pages/Settings";
+import { History } from "./pages/History";
 import { useSettings } from "./settings";
 import { store } from "./state";
 
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { path: "/library", label: "Liked songs", icon: "heart" },
   { path: "/playlists", label: "Playlists", icon: "playlist" },
   { path: "/queues", label: "Saved queues", icon: "saved" },
+  { path: "/history", label: "History", icon: "history" },
   { path: "/auth", label: "Account", icon: "account" },
   { path: "/settings", label: "Settings", icon: "settings" },
   { path: "/logs", label: "Logs", icon: "logs" },
@@ -69,6 +71,11 @@ export default function App() {
       sidecar.stop();
     };
   }, []);
+
+  // A play left unfinished when the app closed is recorded once the backend answers
+  useEffect(() => {
+    if (backendStatus === "running") store.flushPendingHistory();
+  }, [backendStatus]);
 
   // Session badge: poll /api/auth/status every 60 s while the backend runs
   useEffect(() => {
@@ -174,6 +181,7 @@ export default function App() {
             <Route path="/playlists/:id" element={<PlaylistDetail />} />
             <Route path="/queues" element={<SavedQueues />} />
             <Route path="/queues/:id" element={<SavedQueueDetail />} />
+            <Route path="/history" element={<History />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/logs" element={<Logs backendLogs={backendLogs} />} />

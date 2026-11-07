@@ -6,6 +6,7 @@ P21: Blocking handlers are plain `def`.
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import threading
 from typing import List, Literal, Optional
@@ -13,9 +14,10 @@ from typing import List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.database.models import LikedSong, SavedQueue, Song
+from backend.database.models import LikedSong, ListeningHistory, SavedQueue, Song
 from backend.database.session import get_db
 from backend.services.streaming import get_streaming_service, validate_song_id
 from backend.services.youtube import get_youtube_service
@@ -274,6 +276,94 @@ def update_saved_queue(queue_id: int, body: SavedQueueUpdate, db: Session = Depe
 @router.delete("/queues/{queue_id}")
 def delete_saved_queue(queue_id: int, db: Session = Depends(get_db)):
     db.delete(_get_saved_queue(db, queue_id))
+    db.commit()
+    return {"message": "deleted"}
+
+
+# ---------------------------------------------------------------------------
+# Listening history
+# ---------------------------------------------------------------------------
+
+
+class HistoryBody(BaseModel):
+    song: SongResponse
+    listened_ms: int = Field(ge=0, le=24 * 3600 * 1000)
+    duration_ms: int = Field(0, ge=0, le=24 * 3600 * 1000)
+    started_at: Optional[dt.datetime] = None  # default: now - listened_ms
+    end_reason: Literal["finished", "skipped", "stopped", "closed"] = "skipped"
+
+
+def _utc_now() -> dt.datetime:
+    return dt.datetime.now(dt.timezone.utc).replace(tzinfo=None)  # stored naive UTC, like the other tables
+
+
+def _naive_utc(value: dt.datetime) -> dt.datetime:
+    if value.tzinfo is not None:
+        value = value.astimezone(dt.timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _history_dict(row: ListeningHistory) -> dict:
+    percent = min(100, round(row.listened_ms * 100 / row.duration_ms)) if row.duration_ms else None
+    return {
+        "id": row.id,
+        "song": {"id": row.song_id, "title": row.title, "artist": row.artist, "album": row.album,
+                 "duration_ms": row.duration_ms, "thumbnail_url": row.thumbnail_url, "is_explicit": False},
+        "started_at": row.started_at.isoformat() + "Z",
+        "listened_ms": row.listened_ms,
+        "duration_ms": row.duration_ms,
+        "percent": percent,
+        "end_reason": row.end_reason,
+    }
+
+
+@router.post("/history", status_code=201)
+def add_history(body: HistoryBody, db: Session = Depends(get_db)):
+    """POST /api/history {song, listened_ms, duration_ms, started_at?, end_reason} — one play."""
+    validate_song_id(body.song.id)
+    now = _utc_now()
+    started = _naive_utc(body.started_at) if body.started_at else now - dt.timedelta(milliseconds=body.listened_ms)
+    row = ListeningHistory(
+        song_id=body.song.id, title=body.song.title, artist=body.song.artist, album=body.song.album,
+        thumbnail_url=body.song.thumbnail_url, duration_ms=body.duration_ms or body.song.duration_ms,
+        listened_ms=body.listened_ms, started_at=min(started, now), end_reason=body.end_reason,
+    )
+    db.add(row)
+    db.commit()
+    return _history_dict(row)
+
+
+@router.get("/history")
+def list_history(
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    days: int = Query(0, ge=0, le=3650, description="0 = all time"),
+    db: Session = Depends(get_db),
+):
+    """GET /api/history — newest first: {entries, total, listened_ms}, totals over the period."""
+    query = db.query(ListeningHistory)
+    if days:
+        query = query.filter(ListeningHistory.started_at >= _utc_now() - dt.timedelta(days=days))
+    total = query.count()
+    listened = query.with_entities(func.coalesce(func.sum(ListeningHistory.listened_ms), 0)).scalar()
+    rows = (query.order_by(ListeningHistory.started_at.desc(), ListeningHistory.id.desc())
+            .offset(offset).limit(limit).all())
+    return {"entries": [_history_dict(r) for r in rows], "total": total, "listened_ms": int(listened)}
+
+
+@router.delete("/history")
+def clear_history(db: Session = Depends(get_db)):
+    deleted = db.query(ListeningHistory).delete()
+    db.commit()
+    return {"message": "cleared", "deleted": deleted}
+
+
+@router.delete("/history/{entry_id}")
+def delete_history_entry(entry_id: int, db: Session = Depends(get_db)):
+    row = db.get(ListeningHistory, entry_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="History entry not found")
+    db.delete(row)
     db.commit()
     return {"message": "deleted"}
 
