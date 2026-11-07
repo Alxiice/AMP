@@ -7,27 +7,27 @@ Items marked **decide** need a choice before implementation.
 
 ### Playback
 
-- [ ] **Space bar toggles play/pause** anywhere in the app, except while typing in a text field
-  (search box, dialogs). Also worth wiring `navigator.mediaSession` at the same time so the keyboard
-  media keys and the Windows media overlay work (see proposal P3).
+- [x] **Space bar toggles play/pause** anywhere in the app, except while typing in a text field
+  (Revision 19). Media keys / Windows media overlay: still open, see proposal P3.
 
 ### Settings page
 
-- [ ] New `/settings` page, values stored locally (`localStorage`, like the queue).
-  - [ ] **Theme**: dark / light (/ follow the system?) and an **accent colour** (presets + custom).
-    `styles.css` already keeps its colours as tokens at the top, so this mostly means a light token
-    set and setting `--accent` at runtime.
-  - [ ] **Crossfade between songs**: slider 0–10 s (0 = off). Needs a second `<audio>` element:
-    start the next song when `remaining <= fade`, ramp the volumes, then swap. The prefetch at 80 %
-    already makes the next song ready in time. **decide**: should the crossfade also apply to manual
-    skips, or only to automatic song changes?
+- [x] New `/settings` page, values stored locally (`localStorage`) (Revision 19).
+  - [x] **Theme**: dark / light / system and an **accent colour** (8 presets + custom).
+  - [x] **Fade between songs**: slider 0–10 s (0 = off). Done as fade-out + fade-in on one audio
+    element: the songs don't overlap. Manual skips are not faded.
+  - [ ] **True crossfade** (the two songs overlapping): needs a second `<audio>` element *and* the
+    backend to stream two songs at once (today the newest `/play` owns the single session, and
+    position reports drive buffer-ahead for that one song). **decide** whether the difference is
+    worth that change.
 
 ### Listening history
 
-- [ ] Record each play: song, start time, **seconds listened, percentage listened**, how it ended
-  (finished / skipped / stopped). New `listening_history` table, written by the backend from the
-  position reports it already receives (or one `POST` from the player at song end).
-- [ ] History page: list by day, with the percentage per play; filters (finished only, last 7/30 days).
+- [x] Record each play: song, start time, **time actually listened (seeks excluded), percentage**,
+  how it ended (finished / skipped / stopped / app closed). Table `listening_history`, one `POST`
+  from the player per play (Revision 19).
+- [x] History page: by day, percentage per play, 7 days / 30 days / all time, remove / clear.
+- [ ] History export (CSV/JSON) and stats (top songs / artists): not started.
 
 ### UI rework
 
@@ -56,16 +56,13 @@ Items marked **decide** need a choice before implementation.
 
 ### Developer tools inside the app
 
-- [ ] Bring the launcher's tools into the native app. **decide** (see the note below).
+- [x] Bring the launcher's tools into the native app: **Developer page** (Revision 19).
   - Embedding the app in the tkinter launcher would need a browser engine; tkinter has none (the
     pure-Python options can't run a React app), and adding pywebview/CEF breaks the "stdlib only"
     launcher.
-  - Suggested: a **Developer page** in the app instead. It already has what most of it needs:
-    the Logs page (backend output, streaming logs), `backend_logs` / `restart_backend` Tauri commands,
-    the segment bar. To add: backend status card (port, pid, uptime), API tester, chunk table
-    (from `/api/stream/{id}/chunks` and `/api/stream/cache-info`), widget status. Hidden behind a
-    setting or a keyboard shortcut.
-  - Keep `app.py` for full-stack work where the app itself can't build or run.
+  - Done as a **Developer page** in the app: backend status + restart, widget, cache, current
+    song's segments, API tester. Always in the sidebar (not hidden behind a setting).
+  - `app.py` stays for full-stack work where the app itself can't build or run.
 
 ## Proposals (to review)
 
