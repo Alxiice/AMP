@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "amp-v2"
-version = "2.0.0"
-description = "AMP v2 — YouTube Music DASH-segment streaming desktop app"
+name = "amp"
+version = "1.0.0"
+description = "AMP — desktop player for the YouTube Music library"
 requires-python = ">=3.10"
 dependencies = [
     "fastapi>=0.109.0,<1",

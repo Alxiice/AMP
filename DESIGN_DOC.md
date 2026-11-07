@@ -1,6 +1,6 @@
-# AMP v2 — Design Document (Tauri web frontend, DASH-segment streaming)
+# AMP — Design Document (Tauri web frontend, DASH-segment streaming)
 
-> **Purpose**: Authoritative spec for AMP v2. An agent reading only this document should be able to build the project. Where v1 was exploratory, this version is prescriptive: decisions are made, alternatives are named only where they remain open.
+> **Purpose**: Authoritative spec for AMP. An agent reading only this document should be able to build the project. Where the first prototype was exploratory, this spec is prescriptive: decisions are made, alternatives are named only where they remain open.
 
 > **Status (2026-10-31)**: Phases 1–5 below are implemented, and so are refactoring phases 0–6 (AGENTS.md Revisions 7–14; the plan files were removed in Revision 15 and remain in git history). Progress: [AGENTS.md](AGENTS.md). Readable usage guide and code reference: [docs/](docs/index.md) (MkDocs).
 
@@ -91,7 +91,7 @@
 ```
 (repo root)
 ├── README.md                   # logo, CI badges, quick start, doc index
-├── DESIGN_DOC_2.md / AGENTS.md # spec / progress tracker
+├── DESIGN_DOC.md / AGENTS.md   # spec / progress tracker
 ├── mkdocs.yml, docs/           # documentation site (usage + code)
 ├── icon/                       # logo-square.svg, logo-round.svg
 ├── .github/workflows/          # python-ci.yml, tauri-build.yml
@@ -156,7 +156,7 @@ amp/
 | `PORT` | `8000` | CLI `--port`; `0` = any free port. The desktop app passes a free one (§8.1) |
 | `AUTH_TOKEN` | `None` (CLI arg `--token`) | Optional. When set, every request needs `Authorization: Bearer <token>`; when unset the API is open (Host check still enforced) |
 | `DEBUG` | `False` | |
-| `CACHE_DIR` / `SEGMENTS_DIR` / `LOGS_DIR` | `<data>/cache`, `<data>/cache/segments`, `<data>/logs` | created on import / `configure_paths`. `<data>` = `--data-dir`, else `amp/.amp` from a checkout, else (PyInstaller binary) the per-user app data dir `…/com.amp.v2` |
+| `CACHE_DIR` / `SEGMENTS_DIR` / `LOGS_DIR` | `<data>/cache`, `<data>/cache/segments`, `<data>/logs` | created on import / `configure_paths`. `<data>` = `--data-dir`, else `amp/.amp` from a checkout, else (PyInstaller binary) the per-user app data dir `…/com.amp.player` |
 | `DB_PATH` | `userdb.sqlite` | single DB (playdb dropped — playback state is in-memory). `<data>/userdb.sqlite` with `--data-dir` |
 | `CACHE_MAX_SIZE_MB` | `500` | evict down to 80% when exceeded |
 | `SEGMENT_BUFFER_AHEAD_SEC` | `30` | how far ahead to pre-fetch |
@@ -422,12 +422,12 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 **Rust owns the backend** (`src-tauri/src/backend.rs`); the webview has no `shell:*` permission.
 
-- `setup()`: port = `AMP_PORT` or a free port (bind `127.0.0.1:0`, drop); data dir = `app.path().app_data_dir()` (`%APPDATA%\com.amp.v2` on Windows). Spawn with `--host 127.0.0.1 --port <p> --data-dir <dir> --parent-watch`: in debug builds `<amp>/venv` Python (or `AMP_PYTHON`) `-m backend.main` from `amp/`; in release builds the PyInstaller sidecar `amp-backend` (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>[.exe]`, built by `scripts/build_sidecar.py`). `set_process_group(true)` (a Windows job object): the venv launcher and the PyInstaller bootloader both start a second process. The environment is inherited (Node must stay on `PATH`), plus `PYTHONIOENCODING=utf-8`.
+- `setup()`: port = `AMP_PORT` or a free port (bind `127.0.0.1:0`, drop); data dir = `app.path().app_data_dir()` (`%APPDATA%\com.amp.player` on Windows; a `com.amp.v2` folder from before 1.0 is moved there once). Spawn with `--host 127.0.0.1 --port <p> --data-dir <dir> --parent-watch`: in debug builds `<amp>/venv` Python (or `AMP_PYTHON`) `-m backend.main` from `amp/`; in release builds the PyInstaller sidecar `amp-backend` (`tauri.conf.json → bundle.externalBin`, file `src-tauri/binaries/amp-backend-<target-triple>[.exe]`, built by `scripts/build_sidecar.py`). `set_process_group(true)` (a Windows job object): the venv launcher and the PyInstaller bootloader both start a second process. The environment is inherited (Node must stay on `PATH`), plus `PYTHONIOENCODING=utf-8`.
 - Output: stdout/stderr lines decoded with `String::from_utf8_lossy` (P7), kept in a 1000-line ring (`backend_logs`) and emitted as `backend-log`; `Terminated` of the current backend → `backend-status {state: "stopped"}`.
 - Commands: `backend_info() → {port, token}` (token always `null` until per-launch tokens (AGENTS.md Known Issues) are done), `backend_logs()`, `restart_backend()`.
 - Exit (`RunEvent::Exit`): write `exit` to the backend's stdin, wait ≤ 2 s, then kill the process tree.
 - **Parent watch** (`--parent-watch`): a daemon thread reads stdin; EOF (the app died, even from the Task Manager) or `exit` → graceful uvicorn shutdown, `os._exit` after 1.5 s at the latest.
-- `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit. At startup a WARNING is logged if the recorded backend still answers `/api/health` with that `pid` (`app: "AMP v2"`). `app.py` uses it for Force Kill.
+- `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit. At startup a WARNING is logged if the recorded backend still answers `/api/health` with that `pid` (`app: "AMP"`). `app.py` uses it for Force Kill.
 - One instance (`tauri-plugin-single-instance`): a second launch focuses the running window. Two backends must not share one segment cache.
 - Frontend (`sidecar.ts`): `initBackend()` runs before the first render and sets `api.ts`'s base URL from `backend_info`; then the health poll (1 s, in-flight guard), the log ring and the events; restart button → `restart_backend` (the port may change). Outside Tauri (Vite in a browser) the base URL stays `http://127.0.0.1:8000` and the backend is started by hand or by `app.py`.
 - Node.js is not bundled; `/api/health` reports it (P2).

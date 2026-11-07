@@ -5,7 +5,7 @@
 ├── README.md                    # what AMP is + how to launch it
 ├── mkdocs.yml, docs/            # this documentation
 ├── AGENTS.md                    # progress tracker: revisions, decisions, known issues
-├── DESIGN_DOC_2.md              # design spec, incl. the pitfall list P1–P30
+├── DESIGN_DOC.md                # design spec, incl. the pitfall list P1–P30
 ├── icon/                        # logo-square.svg, logo-round.svg
 ├── .github/workflows/           # python-ci.yml, tauri-build.yml
 ├── .ruff.toml                   # lint rules
