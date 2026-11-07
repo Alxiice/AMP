@@ -32,6 +32,8 @@ def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
     parser.add_argument("--token", default=None, help="Optional Bearer auth token (if set, all requests require it)")
     parser.add_argument("--host", default=settings.HOST, help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=settings.PORT, help="Bind port (default: 8000; 0 = any free port)")
+    parser.add_argument("--widget-port", type=int, default=settings.WIDGET_PORT,
+                        help="OBS now-playing widget port (default: 8001; 0 = off)")
     parser.add_argument("--data-dir", type=Path, default=None,
                         help="Cache, logs, credentials and DB go here (default: amp/.amp/ + amp/userdb.sqlite)")
     parser.add_argument("--parent-watch", action="store_true",
@@ -45,6 +47,7 @@ def apply_args(args: argparse.Namespace) -> None:
     settings.AUTH_TOKEN = args.token
     settings.HOST = args.host
     settings.PORT = args.port
+    settings.WIDGET_PORT = args.widget_port
     if args.debug:
         settings.DEBUG = True
     if args.data_dir is not None:
@@ -90,6 +93,9 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     from backend.api.server import create_app
 
     app = create_app(auth_token=args.token)
+    if settings.WIDGET_PORT:
+        from backend.widget import start_widget_server
+        start_widget_server(settings.HOST, settings.WIDGET_PORT)
     server = uvicorn.Server(uvicorn.Config(
         app,
         host=settings.HOST,

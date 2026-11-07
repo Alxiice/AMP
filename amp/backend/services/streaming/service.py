@@ -89,6 +89,7 @@ class StreamingService:
         self._epochs_lock = threading.Lock()
         self._play_seq = 0  # bumped by every /play; only the newest one takes the session
         self._play_lock = threading.Lock()
+        self._now_meta: Dict[str, Any] = {}  # title/artist/cover sent with /play, for the OBS widget
 
         # HTTP session for CDN requests
         self._http = requests.Session()
@@ -118,7 +119,7 @@ class StreamingService:
 
     # --- Playback session ---
 
-    def start_playback(self, song_id: str) -> Dict[str, Any]:
+    def start_playback(self, song_id: str, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """Resolve the stream (blocks for the extraction on first play), then start
         the session and its buffer-ahead. Raises ExtractionError.
 
@@ -136,6 +137,7 @@ class StreamingService:
             superseded = seq != self._play_seq
             if not superseded:
                 self._playback.start(song_id, epoch)
+                self._now_meta = {**(meta or {}), "song_id": song_id, "duration_ms": info.duration_ms}
         if superseded:
             logger.info("Play %s superseded by a newer /play; session unchanged", song_id)
         else:
@@ -196,6 +198,19 @@ class StreamingService:
 
     def get_playback_state(self) -> Dict[str, Any]:
         return self._playback.snapshot().to_dict()
+
+    def now_playing(self) -> Optional[Dict[str, Any]]:
+        """Current song for the OBS widget, position extrapolated to now; None when idle."""
+        state = self._playback.snapshot()
+        meta = self._now_meta
+        if not state.song_id or meta.get("song_id") != state.song_id:
+            return None
+        position = state.position_ms
+        if state.is_playing and state.last_updated:
+            position += int((time.time() - state.last_updated) * 1000)
+        duration = meta.get("duration_ms") or 0
+        return {**meta, "position_ms": min(position, duration) if duration else position,
+                "is_playing": state.is_playing}
 
     def buffer_ahead(self, song_id: str, mode: str = "current") -> Dict[str, Any]:
         """mode=current: buffer around the playhead. mode=prefetch: see prefetch()."""

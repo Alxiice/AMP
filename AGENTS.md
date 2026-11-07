@@ -27,8 +27,21 @@
 | Refactor Phase 6 | Lifecycle & packaging | **DONE** — see Revision 14 |
 | Revision 15 | MkDocs documentation, simpler READMEs, plan files removed | **DONE** — see Revision 15 |
 | Revision 16 | Covers, playlist view, play queue + saved queues, likes, UI redesign | **DONE** — see Revision 16 |
+| Revision 17 | OBS now-playing widget on its own port | **DONE** — see Revision 17 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 17 — OBS now-playing widget (2026-11-07)
+
+| Area | Change |
+|---|---|
+| **Server** | `backend/widget.py`: stdlib `ThreadingHTTPServer` in a daemon thread on `WIDGET_PORT` (default 8001, `--widget-port`, 0 = off), started from `main.py` only. `GET /` → `backend/widget.html`, `GET /now.json`. Loopback `Host` only; `allow_reuse_address = False` so a second backend can't share the port (port taken → WARNING, no widget). `widget.html` added to the PyInstaller spec datas |
+| **Data** | `POST /play` takes an optional JSON body `{title, artist, cover_url}` (`NowPlayingMeta`); `StreamingService.now_playing()` merges it with the session (position extrapolated while playing, capped at duration). PlayerBar sends it and reports the position on pause |
+| **Page** | Design "C": cream/pink card, cover, title + artist (marquee when too long), discreet animated wave over the played part (frozen on pause). `?w=&h=` sizes the card; everything scales with `h` |
+
+**Verification:** scratch backend (ports 8765/8766), real song played via HTTP with metadata; widget in the Chromium pane at 320×72 and 520×120: cover fallback (ytimg), progress advancing, frozen on pause. **Not verified:** inside OBS; from the real app UI (metadata sent by PlayerBar only checked by `npm run build`).
+
+**Test results:** 399 unit tests pass (`test_widget.py` 11 new), 27 vitest, ruff clean, `npm run build` OK, `mkdocs build --strict` OK.
 
 ### Revision 16 — Covers, queue, likes, redesign (2026-11-06)
 
