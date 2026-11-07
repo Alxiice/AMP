@@ -26,6 +26,7 @@ a = Analysis(
         # yt-dlp's own hook (pyinstaller40 entry point) also adds these; explicit so a hook change can't drop them
         *collect_data_files("yt_dlp_ejs", includes=["**/*.js"]),  # JS challenge solver (P2)
         *collect_data_files("ytmusicapi"),  # locales/*.mo
+        (str(project_root / "backend" / "widget.html"), "backend"),  # OBS now-playing widget
     ],
     hiddenimports=[
         # uvicorn

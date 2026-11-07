@@ -342,16 +342,24 @@ def get_stream_info(song_id: str):
     return get_streaming_service().get_stream_info_summary(song_id)
 
 
+class NowPlayingMeta(BaseModel):
+    """Shown by the OBS now-playing widget (backend/widget.py)."""
+    title: str = Field("", max_length=500)
+    artist: str = Field("", max_length=500)
+    cover_url: str = Field("", max_length=2000)
+
+
 @router.post("/stream/{song_id}/play")
-def play_song(song_id: str):
+def play_song(song_id: str, meta: Optional[NowPlayingMeta] = None):
     """POST /api/stream/{id}/play — resolve the stream, then start session + buffer.
 
     Blocks for the extraction on first play. 200 → {song_id, duration_ms,
     mime_type, segment_count, is_dash, epoch, cached_ahead}; errors use the
-    {detail: {code, message}} shape (api/errors.py).
+    {detail: {code, message}} shape (api/errors.py). Optional JSON body:
+    {title, artist, cover_url} for the now-playing widget.
     """
     validate_song_id(song_id)
-    return get_streaming_service().start_playback(song_id)
+    return get_streaming_service().start_playback(song_id, meta.model_dump() if meta else None)
 
 
 @router.post("/stream/buffer/{song_id}")

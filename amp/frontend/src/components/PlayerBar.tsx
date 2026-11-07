@@ -6,6 +6,7 @@ import { Icon } from "./Icon";
 import { LikeButton } from "./LikeButton";
 import type { BackendStatus } from "../sidecar";
 import { describeError, describeMediaError } from "../player/errors";
+import { coverUrl } from "../format";
 
 /** Player events go to the API log relay (Logs page → "API relay"). */
 function relayLog(line: string): void {
@@ -142,7 +143,11 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     store.setDurationMs(song.duration_ms || 0);
 
     try {
-      const info = await api.playSong(song.id, ctrl.signal);
+      const info = await api.playSong(song.id, ctrl.signal, {
+        title: song.title,
+        artist: song.artist,
+        cover_url: song.thumbnail_url ? coverUrl(song.thumbnail_url, 240) : "",
+      });
       if (gen !== loadGen.current) return; // a newer song was chosen
       store.setDurationMs(info.duration_ms);
       ttfaRef.current = { songId: song.id, start, cached: info.cached_ahead };
@@ -220,6 +225,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     if (state.isPlaying) {
       audio.pause();
       api.pause().catch(() => {});
+      api.updatePosition(Math.floor(audio.currentTime * 1000)).catch(() => {}); // the widget freezes here
     } else {
       setAudioError(null);
       setAudioLoading(false);

@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     # --- Server ---
     HOST: str = "127.0.0.1"
     PORT: int = 8000
+    WIDGET_PORT: int = 8001  # OBS now-playing widget (backend/widget.py); 0 = off
     AUTH_TOKEN: Optional[str] = None  # optional; if set, all requests require Bearer token
     DEBUG: bool = False
 
