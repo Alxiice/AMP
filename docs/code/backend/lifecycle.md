@@ -39,7 +39,7 @@ The Tauri app runs it as
 Under PyInstaller one-file, `__file__` points into a temporary extraction folder wiped at every
 launch, so the frozen default must not be relative to the code.
 
-`app_data_dir()` mirrors Tauri's `app_data_dir()` for identifier `com.amp.v2`: `%APPDATA%` on
+`app_data_dir()` mirrors Tauri's `app_data_dir()` for identifier `com.amp.player`: `%APPDATA%` on
 Windows, `~/Library/Application Support` on macOS, `$XDG_DATA_HOME` or `~/.local/share` on Linux.
 
 ## Socket (`lifecycle.bind_socket`)
@@ -61,7 +61,7 @@ The backend binds its own socket and hands it to uvicorn:
 
 Written atomically at startup, removed on exit if it still names this process.
 `find_running_backend()` reads it and probes `http://127.0.0.1:<port>/api/health`: the backend
-counts as alive only if the answer has `app: "AMP v2"` **and** the same `pid`. This avoids
+counts as alive only if the answer has `app: "AMP"` **and** the same `pid`. This avoids
 mistaking a reused PID, or another program on the port, for AMP. `app.py`'s Force Kill uses the
 same check before killing anything.
 

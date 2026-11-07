@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AMP v2 App Launcher — tkinter GUI for debugging the full stack.
+"""AMP App Launcher — tkinter GUI for debugging the full stack.
 
 The normal entry point is the Tauri app, which starts and stops its own backend.
 This launcher is a developer tool. Standard library only. Provides:
@@ -15,7 +15,7 @@ This launcher is a developer tool. Standard library only. Provides:
                  also starts the backend (a browser can't spawn it)
         Desktop: `npm run tauri dev` (Vite + Tauri window). The app spawns its own
                  backend on a free port with its data in the per-user app data dir
-                 (%APPDATA%/com.amp.v2 on Windows), separate from the one above
+                 (%APPDATA%/com.amp.player on Windows), separate from the one above
     - OBS widget card: what the widget on WIDGET_PORT (8001) shows, copy/open its URL
     - Segment strip of the launcher backend's current song, and the last log lines
 
@@ -284,7 +284,7 @@ def backend_pid_from_file(path: Path = PID_FILE) -> Optional[dict]:
             health = json.loads(resp.read().decode("utf-8"))
     except (OSError, ValueError):
         return None
-    return data if health.get("app") == "AMP v2" and health.get("pid") == data["pid"] else None
+    return data if health.get("app") == "AMP" and health.get("pid") == data["pid"] else None
 
 
 def force_kill_backend(port: int) -> str:
@@ -806,7 +806,7 @@ PILLS = {  # state: (text prefix, background, foreground)
 # ---------------------------------------------------------------------------
 
 class AppLauncher(tk.Tk):
-    """AMP v2 launcher window: sidebar + pages (Overview, Logs, API tester, Chunks)."""
+    """AMP launcher window: sidebar + pages (Overview, Logs, API tester, Chunks)."""
 
     PAGES = (("overview", "◉   Overview"), ("logs", "☰   Logs"),
              ("api", "⇄   API tester"), ("chunks", "▦   Chunks"))
@@ -933,7 +933,6 @@ class AppLauncher(tk.Tk):
         brand = tk.Frame(side, bg=SURFACE)
         brand.pack(fill=tk.X, padx=18, pady=(18, 16))
         _label(brand, "AMP", 16, bold=True).pack(side=tk.LEFT)
-        _label(brand, " v2", 16, ACCENT, bold=True).pack(side=tk.LEFT)
 
         self._nav: dict[str, FlatButton] = {}
         for key, text in self.PAGES:

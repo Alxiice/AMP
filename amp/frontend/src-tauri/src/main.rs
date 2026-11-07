@@ -1,4 +1,4 @@
-// AMP v2 — Tauri v2 entry point
+// AMP — Tauri entry point
 // The backend is spawned and owned by the backend module (Rust), never by the frontend.
 // YouTube login is handled by the youtube_login module.
 
@@ -32,7 +32,7 @@ fn main() {
             backend::restart_backend,
         ])
         .build(tauri::generate_context!())
-        .expect("error while building AMP v2");
+        .expect("error while building AMP");
 
     app.run(|app, event| {
         if let RunEvent::Exit = event {

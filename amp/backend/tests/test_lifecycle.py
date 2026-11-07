@@ -59,15 +59,15 @@ class TestArgs:
         import backend.config as config
 
         monkeypatch.setattr(config, "is_frozen", lambda: True)
-        monkeypatch.setattr(config, "app_data_dir", lambda: tmp_path / "com.amp.v2")
+        monkeypatch.setattr(config, "app_data_dir", lambda: tmp_path / "com.amp.player")
         settings.configure_paths()
-        assert settings.data_dir == tmp_path / "com.amp.v2"
-        assert settings.db_file == tmp_path / "com.amp.v2" / "userdb.sqlite"
+        assert settings.data_dir == tmp_path / "com.amp.player"
+        assert settings.db_file == tmp_path / "com.amp.player" / "userdb.sqlite"
 
     def test_app_data_dir_uses_identifier(self):
         from backend.config import APP_IDENTIFIER, app_data_dir
 
-        assert app_data_dir().name == APP_IDENTIFIER == "com.amp.v2"
+        assert app_data_dir().name == APP_IDENTIFIER == "com.amp.player"
 
 
 class TestPidFile:
@@ -98,14 +98,14 @@ class TestPidFile:
     def test_live_backend_detected(self, tmp_path, monkeypatch):
         path = tmp_path / "backend.pid"
         path.write_text(json.dumps({"pid": 4242, "port": 8123}), encoding="utf-8")
-        monkeypatch.setattr(lifecycle, "probe_backend", lambda port: {"app": "AMP v2", "pid": 4242})
+        monkeypatch.setattr(lifecycle, "probe_backend", lambda port: {"app": "AMP", "pid": 4242})
         assert lifecycle.find_running_backend(path) == {"pid": 4242, "port": 8123}
 
     def test_stale_pid_file_ignored(self, tmp_path, monkeypatch):
         """Recorded port now answers for another process (or nothing): not a live backend."""
         path = tmp_path / "backend.pid"
         path.write_text(json.dumps({"pid": 4242, "port": 8123}), encoding="utf-8")
-        monkeypatch.setattr(lifecycle, "probe_backend", lambda port: {"app": "AMP v2", "pid": 1})
+        monkeypatch.setattr(lifecycle, "probe_backend", lambda port: {"app": "AMP", "pid": 1})
         assert lifecycle.find_running_backend(path) is None
         monkeypatch.setattr(lifecycle, "probe_backend", lambda port: None)
         assert lifecycle.find_running_backend(path) is None

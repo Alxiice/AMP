@@ -1,4 +1,4 @@
-# AMP v2 — Tasks
+# AMP — Tasks
 
 Open work, in no particular order. Tick a box when it is done and note the revision in `AGENTS.md`.
 Items marked **decide** need a choice before implementation.

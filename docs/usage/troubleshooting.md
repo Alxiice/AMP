@@ -23,7 +23,7 @@ shows what happened to a song.
 
 ??? question "Nothing happens when I start AMP a second time"
     That's intended: AMP runs once, and a second launch focuses the existing window. If you can't
-    see it, check the task bar or kill `amp-v2` in the task manager.
+    see it, check the task bar or kill `amp` in the task manager.
 
 ## A song won't play
 

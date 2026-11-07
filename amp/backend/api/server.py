@@ -84,14 +84,14 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
         svc = get_streaming_service()
         svc.start()
         auth_mode = "token required" if token else "open (no token)"
-        logger.info("AMP v2 backend started on %s:%d (auth=%s)", settings.HOST, settings.PORT, auth_mode)
+        logger.info("AMP backend started on %s:%d (auth=%s)", settings.HOST, settings.PORT, auth_mode)
         try:
             yield
         finally:
             get_streaming_service().stop()
-            logger.info("AMP v2 backend shut down")
+            logger.info("AMP backend shut down")
 
-    app = FastAPI(title="AMP v2 Backend", version="2.0.0", lifespan=lifespan)
+    app = FastAPI(title="AMP Backend", version="1.0.0", lifespan=lifespan)
 
     # --- Auth + Host middleware (P17) ---
     class AuthMiddleware(BaseHTTPMiddleware):
@@ -143,7 +143,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
     # --- Root + Health (no auth required) ---
     @app.get("/")
     def root():
-        return {"app": "AMP v2", "version": "2.0.0", "status": "running"}
+        return {"app": "AMP", "version": "1.0.0", "status": "running"}
 
     started = time.time()
 
@@ -153,7 +153,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
         auth = get_auth_service()
         return {
             "status": "ok",
-            "app": "AMP v2",  # lifecycle.probe_backend: tells an AMP backend from anything else on the port
+            "app": "AMP",  # lifecycle.probe_backend: tells an AMP backend from anything else on the port
             "pid": os.getpid(),
             "uptime_s": int(time.time() - started),
             "widget_port": settings.WIDGET_PORT,  # 0 = not served by this backend (off or port taken)

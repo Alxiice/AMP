@@ -16,7 +16,7 @@ backend it starts, and YouTube's servers.
 
 ```mermaid
 flowchart TB
-    subgraph app["Tauri app (amp-v2)"]
+    subgraph app["Tauri app (amp)"]
         rust["Rust shell<br/>backend.rs · youtube_login.rs"]
         subgraph web["Webview: React + TypeScript"]
             ui["Pages: Search · Library · Playlists · Auth · Logs"]

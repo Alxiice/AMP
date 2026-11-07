@@ -1,4 +1,4 @@
-# AMP v2
+# AMP
 
 **Another Music Player**: a desktop app that plays music from the YouTube Music library.
 

@@ -95,10 +95,10 @@ The installers end up in `frontend/src-tauri/target/release/bundle/`:
 
 | Platform | Output |
 |---|---|
-| Windows | `msi/AMP v2_2.0.0_x64_en-US.msi` and `nsis/AMP v2_2.0.0_x64-setup.exe` |
+| Windows | `msi/AMP_1.0.0_x64_en-US.msi` and `nsis/AMP_1.0.0_x64-setup.exe` |
 | Linux | `deb/…` (also built by CI on every push) |
 
-The release app (`src-tauri/target/release/amp-v2[.exe]`) runs the bundled sidecar rather than
+The release app (`src-tauri/target/release/amp[.exe]`) runs the bundled sidecar rather than
 your venv, so it works without Python installed.
 
 !!! warning "Unsigned"

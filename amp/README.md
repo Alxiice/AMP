@@ -1,4 +1,4 @@
-# AMP v2: application
+# AMP: application
 
 This folder holds the app itself:
 

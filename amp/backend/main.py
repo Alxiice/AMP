@@ -1,4 +1,4 @@
-"""AMP v2 Backend entry point.
+"""AMP Backend entry point.
 
 Usage:
     python -m backend.main [--token <uuid>] [--host 127.0.0.1] [--port 8000]
@@ -28,7 +28,7 @@ from backend.utils.logger import configure_logging, get_logger
 
 
 def parse_args(argv: Optional[Sequence[str]] = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="AMP v2 Backend")
+    parser = argparse.ArgumentParser(description="AMP Backend")
     parser.add_argument("--token", default=None, help="Optional Bearer auth token (if set, all requests require it)")
     parser.add_argument("--host", default=settings.HOST, help="Bind host (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=settings.PORT, help="Bind port (default: 8000; 0 = any free port)")
@@ -87,7 +87,7 @@ def main(argv: Optional[Sequence[str]] = None) -> None:
     settings.PORT = sock.getsockname()[1]
 
     auth_mode = "token required" if args.token else "open (no token)"
-    logger.info("Starting AMP v2 backend on %s:%d (debug=%s, auth=%s, data=%s)",
+    logger.info("Starting AMP backend on %s:%d (debug=%s, auth=%s, data=%s)",
                 settings.HOST, settings.PORT, settings.DEBUG, auth_mode, settings.data_dir)
 
     from backend.api.server import create_app
