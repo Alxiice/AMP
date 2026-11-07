@@ -3,6 +3,8 @@
 The window has a sidebar on the left (pages, session badge, cache use, backend status), the page
 in the middle, the [queue panel](#the-queue) on the right and the player bar along the bottom.
 
+![AMP with search results, the queue panel and a song playing](../assets/screenshots/search.webp){ .screenshot }
+
 ## Search
 
 Type in the search box and press ++enter++. The chips switch between `Songs` and `Videos`.
@@ -41,11 +43,15 @@ Shuffle starts off.
 
 ## Saved queues
 
+![The Saved queues page](../assets/screenshots/saved-queues.webp){ .screenshot }
+
 The **Saved queues** page lists what you saved. Open one to play it, shuffle it, add it to the
 current queue, rename it, replace its content with the current queue, delete it, or remove single
 songs through their menu. Saved queues are stored locally in the app's database, not on YouTube.
 
 ## History
+
+![The History page](../assets/screenshots/history.webp){ .screenshot }
 
 **History** lists what you listened to, grouped by day, with the share of each song you actually
 heard (jumps in the song don't count) and how it ended: *Finished*, *Skipped*, *Stopped* or *App
@@ -54,6 +60,14 @@ listening time. Click a song to play it, ✕ removes one entry, **Clear history*
 Plays shorter than 5 seconds aren't recorded. The history is stored locally, not on YouTube.
 
 ## Settings
+
+<div class="grid" markdown>
+
+![Settings, dark theme](../assets/screenshots/settings.webp){ .screenshot }
+
+![Settings, light theme with a violet accent](../assets/screenshots/settings-light.webp){ .screenshot }
+
+</div>
 
 | Setting | What it does |
 |---|---|
@@ -156,7 +170,9 @@ rotated at 5 MB, 3 old files kept).
 
 ## Developer
 
-The **Developer** page gathers what the [debug launcher](debugging.md) shows, inside the app:
+![The Developer page](../assets/screenshots/developer.webp){ .screenshot }
+
+The **Developer** page gathers what the [developer launcher](launcher.md) shows, inside the app:
 the backend (URL, process id, uptime, yt-dlp / Node.js / EJS, YouTube session, **Restart
 backend**), the [OBS widget](obs-widget.md) (port, what it shows, **Copy widget URL**), cache use,
 the segments of the current song (the playing one outlined), and an API tester with quick buttons

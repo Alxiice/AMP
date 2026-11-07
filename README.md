@@ -20,6 +20,22 @@ AMP is a desktop app that plays music from the YouTube Music library. Songs are 
 small segments and cached on disk, so playback starts fast and you can seek right away. Search and
 playback work without an account; signing in with YouTube adds your liked songs and playlists.
 
+<p align="center">
+  <img src="docs/assets/screenshots/search.webp" alt="AMP playing a song, with search results and the queue" width="900"/>
+</p>
+
+- **Fast playback**: ~10 s segments, cached songs start in about 24 ms, seek anywhere at once
+- **Queue** with drag and drop, shuffle and restore, repeat, saved queues; restored on restart
+- **Your library**: liked songs and playlists after an optional YouTube sign-in
+- **Listening history** with the share of each song you actually heard
+- **Settings**: dark, light or system theme, any accent colour, fade between songs
+- **OBS now-playing widget** on its own local port, for streamers
+- **Developer tools**: a Developer page in the app and the `app.py` launcher
+
+<p align="center">
+  <img src="docs/assets/screenshots/widget.png" alt="The OBS now-playing widget" width="420"/>
+</p>
+
 ## Requirements
 
 - **Python** 3.10 or newer
@@ -81,9 +97,11 @@ mkdocs serve                       # then open http://127.0.0.1:8000
 | | |
 |---|---|
 | [Install & launch](https://Alxiice.github.io/AMP/usage/install/) | prerequisites, setup, installers, updating yt-dlp |
-| [Using the app](https://Alxiice.github.io/AMP/usage/using-the-app/) | search, player, queue, logs |
+| [Using the app](https://Alxiice.github.io/AMP/usage/using-the-app/) | search, player, queue, history, settings, Developer page |
+| [OBS widget](https://Alxiice.github.io/AMP/usage/obs-widget/) | show the current song on stream |
+| [Developer launcher](https://Alxiice.github.io/AMP/usage/launcher/) | `app.py`: run and inspect the backend and frontend |
 | [Troubleshooting](https://Alxiice.github.io/AMP/usage/troubleshooting/) | when a song won't play, the app won't start… |
 | [Code](https://Alxiice.github.io/AMP/code/) | architecture, backend, frontend, tests, CI |
 
-> **Personal prototype, not for distribution.** Fetching YouTube streams this way goes against
-> YouTube's Terms of Service.
+> **Independent project**, not affiliated with YouTube or Google. AMP fetches streams the way
+> yt-dlp does, which YouTube's Terms of Service don't allow.

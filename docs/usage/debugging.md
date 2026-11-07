@@ -1,4 +1,4 @@
-# Debug launcher & manual runs
+# Manual runs
 
 The desktop app is the normal way to use AMP. This page covers the other ways to run it, for
 development and debugging.
@@ -39,27 +39,9 @@ the [advanced methods](sign-in.md#advanced-methods).
 
 ## `app.py` launcher
 
-```bash
-python app.py
-```
-
-A small tkinter window (standard library only, dark theme like the app) for working on the full
-stack. The sidebar switches between four pages:
-
-| Page | What it does |
-|---|---|
-| **Overview** | One card per service. **Backend**: Start/Stop, ↻ restart, ✕ force kill, on `:8000` (or `AMP_PORT`) using `amp/.amp/`; ✕ stops the backend recorded in `amp/.amp/backend.pid` (only if it still answers as that process), else whatever listens on the port. **Frontend**: *Web* mode runs the Vite dev server, opens it in the chosen browser and starts the backend; *Desktop* mode runs `npm run tauri dev`, and that app starts **its own** backend with its own data folder. **OBS widget**: the song the [widget](obs-widget.md) shows, with buttons to copy or open its URL. Below the cards: the segments of the song playing in the launcher's backend, and the last log lines |
-| **Logs** | backend output and `app.log`, with search and an All / Warn+ / Errors filter |
-| **API tester** | send any request to the backend, with quick buttons for common routes |
-| **Chunks** | segment rows from the SQLite database, refreshed every 2 s, filterable by song |
-
-The browser picker and **Open web app** sit at the bottom of the sidebar. On Windows the title bar
-is dark too.
-
-!!! note
-    In *Desktop app* mode you end up with two backends: the one from the launcher (`:8000`,
-    `amp/.amp/`) and the one the app started (random port, app data folder). They don't share
-    cache or sign-in.
+`python app.py` (from `amp/`) opens a small window that starts and stops the backend and the
+frontend for you, with logs, an API tester and the segment table: see
+[Developer launcher](launcher.md).
 
 ## Several backends on one data folder
 

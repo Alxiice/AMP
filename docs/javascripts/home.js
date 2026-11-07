@@ -1,0 +1,88 @@
+/* Home page behaviour: reveal on scroll, screenshot tour, counters. No-op on other pages. */
+(function () {
+  const root = document.querySelector(".amp-hero");
+  if (!root) return;
+  document.body.classList.add("amp-home");
+  document.documentElement.classList.add("js");
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  // Reveal sections as they scroll in
+  const reveal = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      e.target.classList.add("is-visible");
+      reveal.unobserve(e.target);
+    }
+  }, { threshold: 0.15 });
+  document.querySelectorAll(".amp-reveal").forEach((el) => reveal.observe(el));
+
+  // Screenshot tour: tabs, auto-advance, pause on hover/focus
+  const tour = document.querySelector(".amp-showcase");
+  if (tour) {
+    const tabs = [...tour.querySelectorAll(".amp-showcase__tab")];
+    const frames = [...tour.querySelectorAll(".amp-showcase__frame")];
+    const caption = tour.querySelector(".amp-showcase__caption");
+    const interval = Number(tour.dataset.interval) || 5000;
+    tour.style.setProperty("--amp-interval", `${interval}ms`);
+    let current = 0;
+    let timer = null;
+
+    const show = (i) => {
+      current = (i + tabs.length) % tabs.length;
+      tabs.forEach((t, n) => {
+        t.classList.toggle("is-active", n === current);
+        t.setAttribute("aria-selected", String(n === current));
+        // restart the progress bar animation
+        const bar = t.querySelector(".amp-showcase__progress");
+        bar.style.animation = "none";
+        void bar.offsetWidth;
+        bar.style.animation = "";
+      });
+      frames.forEach((f, n) => f.classList.toggle("is-active", n === current));
+      caption.textContent = tabs[current].dataset.caption;
+    };
+    const start = () => {
+      if (reduced) return;
+      stop();
+      timer = setInterval(() => show(current + 1), interval);
+      tour.classList.remove("is-paused");
+    };
+    const stop = () => {
+      clearInterval(timer);
+      timer = null;
+      tour.classList.add("is-paused");
+    };
+
+    tabs.forEach((t, n) => t.addEventListener("click", () => { show(n); start(); }));
+    tour.addEventListener("mouseenter", stop);
+    tour.addEventListener("mouseleave", start);
+    tour.addEventListener("focusin", stop);
+    tour.addEventListener("focusout", start);
+    if (reduced) tour.classList.add("is-paused");
+
+    // only run while visible
+    new IntersectionObserver(([e]) => (e.isIntersecting ? start() : stop()), { threshold: 0.3 }).observe(tour);
+  }
+
+  // Count the numbers up once they are on screen
+  const counters = document.querySelectorAll("[data-count]");
+  const countObs = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      countObs.unobserve(e.target);
+      const el = e.target;
+      const target = Number(el.dataset.count);
+      const decimals = Number(el.dataset.decimals || 0);
+      if (reduced || target === 0) continue;
+      const t0 = performance.now();
+      const step = (now) => {
+        const p = Math.min(1, (now - t0) / 1400);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = (target * eased).toFixed(decimals);
+        if (p < 1) requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
+    }
+  }, { threshold: 0.6 });
+  counters.forEach((el) => countObs.observe(el));
+})();
