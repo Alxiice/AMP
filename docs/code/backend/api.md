@@ -19,7 +19,7 @@ layer: if you change a response shape, change `api.ts` too.
     | Method | Path | Returns |
     |---|---|---|
     | GET | `/` | `{app, version, status}` |
-    | GET | `/api/health` | `{status, app: "AMP v2", pid, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}` |
+    | GET | `/api/health` | `{status, app: "AMP v2", pid, uptime_s, widget_port, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}`. `widget_port` is 0 when this backend doesn't serve the [OBS widget](../../usage/obs-widget.md) |
     | GET | `/api/search?q=&type=songs&limit=20` | list of songs (`limit` 1–50; `type` = songs, videos) |
     | GET | `/api/song/{id}` | song metadata |
     | GET | `/api/artist/{id}`, `/api/album/{id}` | metadata dicts |
@@ -29,6 +29,9 @@ layer: if you change a response shape, change `api.ts` too.
     | GET | `/api/user/playlists` | the user's playlists (**401** when signed out) |
     | GET / POST | `/api/queues` | saved queues, newest first, without songs / create from `{name, songs}` (**201**) |
     | GET / PUT / DELETE | `/api/queues/{id}` | read / change `{name?, songs?}` / delete a saved queue (table `saved_queues`) |
+    | POST | `/api/history` | record one play `{song, listened_ms, duration_ms, started_at?, end_reason}` (`finished`, `skipped`, `stopped`, `closed`) → the entry (**201**). Table `listening_history` |
+    | GET | `/api/history?days=0&limit=200&offset=0` | `{entries, total, listened_ms}`, newest first; each entry has `percent` (listened / duration, capped at 100, `null` if the length is unknown). `days=0` = all time |
+    | DELETE | `/api/history`, `/api/history/{id}` | clear the whole history / remove one entry |
 
 === "Streaming"
 
@@ -43,6 +46,7 @@ layer: if you change a response shape, change `api.ts` too.
     | POST | `/api/stream/position?position_ms=` | playhead report (every 2 s) |
     | POST | `/api/stream/seek?position_ms=` | bump epoch, buffer from the new segment |
     | GET | `/api/stream/playback-state` | the in-memory `PlaybackInfo` |
+    | GET | `/api/stream/now-playing` | what the OBS widget shows (`{song_id: null}` when idle); used by the Developer page, since the widget server sends no CORS headers |
     | GET | `/api/stream/cache-info` | `{total_bytes, total_mb, max_mb, usage_pct, file_count, song_count, songs[]}` |
     | GET | `/api/stream/logs?n=200` | last lines of the in-memory log ring (all backend INFO+ lines, 1000 kept) |
 
