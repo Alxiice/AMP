@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """
-PyInstaller spec for the AMP v2 backend sidecar binary.
+PyInstaller spec for the AMP backend sidecar binary.
 
 Build (and copy to frontend/src-tauri/binaries/amp-backend-<target-triple>[.exe]):
     python scripts/build_sidecar.py

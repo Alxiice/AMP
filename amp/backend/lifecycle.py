@@ -20,7 +20,7 @@ from backend.utils.logger import get_logger
 
 logger = get_logger("backend.lifecycle")
 
-APP_NAME = "AMP v2"  # what /api/health answers in "app"
+APP_NAME = "AMP"  # what /api/health answers in "app"
 HEALTH_PROBE_TIMEOUT_S = 1.0
 EXIT_GRACE_S = 1.5  # graceful shutdown budget before os._exit
 

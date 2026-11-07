@@ -1,7 +1,7 @@
-# AMP v2 — Agent Progress Tracker
+# AMP — Agent Progress Tracker
 
-> **Project**: AMP v2 — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
-> **Spec**: `DESIGN_DOC_2.md` (authoritative)
+> **Project**: AMP — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
+> **Spec**: `DESIGN_DOC.md` (authoritative; `DESIGN_DOC_2.md` before Revision 20)
 > **Docs**: `docs/` (MkDocs Material, `mkdocs.yml` at the root): usage guide + code reference. Update the matching page when behaviour changes; `mkdocs build --strict` must pass
 > **Last updated**: 2026-10-31
 

@@ -14,7 +14,7 @@ from typing import Dict, List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-APP_IDENTIFIER = "com.amp.v2"  # tauri.conf.json "identifier"
+APP_IDENTIFIER = "com.amp.player"  # tauri.conf.json "identifier"
 
 
 def _project_root() -> Path:

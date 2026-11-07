@@ -31,7 +31,7 @@ tauri::Builder::default()
 ```mermaid
 flowchart LR
     setup["setup()"] --> port["port = AMP_PORT<br/>or a free port (bind 127.0.0.1:0)"]
-    port --> dir["data dir = app_data_dir()<br/>(%APPDATA%\com.amp.v2)"]
+    port --> dir["data dir = app_data_dir()<br/>(%APPDATA%\com.amp.player)"]
     dir --> cmd{"build type"}
     cmd -- debug --> py["amp/venv python (or AMP_PYTHON)<br/>-m backend.main, cwd amp/"]
     cmd -- release --> side["sidecar amp-backend<br/>(bundle.externalBin)"]
@@ -100,7 +100,7 @@ If you add a new external resource (fonts, another image host), add it to **both
 
 | Key | Value |
 |---|---|
-| `identifier` | `com.amp.v2`: also the name of the data folder (the backend's `config.APP_IDENTIFIER` must match) |
+| `identifier` | `com.amp.player`: also the name of the data folder (the backend's `config.APP_IDENTIFIER` must match) |
 | `build.beforeDevCommand` / `devUrl` | `npm run dev`, `http://localhost:1420` |
 | `build.beforeBuildCommand` / `frontendDist` | `npm run build`, `../dist` |
 | `app.windows[0]` | 1200×800, min 800×600 |
