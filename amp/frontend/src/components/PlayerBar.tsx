@@ -7,6 +7,7 @@ import { LikeButton } from "./LikeButton";
 import type { BackendStatus } from "../sidecar";
 import { describeError, describeMediaError } from "../player/errors";
 import { coverUrl } from "../format";
+import { isPlayPauseKey } from "../player/keyboard";
 
 /** Player events go to the API log relay (Logs page → "API relay"). */
 function relayLog(line: string): void {
@@ -238,6 +239,19 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     }
   }, [state.isPlaying, state.currentSong, load]);
 
+  // Space bar: play/pause from anywhere but text fields
+  const playPauseRef = useRef(handlePlayPause);
+  playPauseRef.current = handlePlayPause;
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!isPlayPauseKey(e)) return;
+      e.preventDefault(); // no page scroll, no click on a focused button
+      if (!audioLoading) playPauseRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [audioLoading]);
+
   // Handle stop
   const handleStop = useCallback(() => {
     const audio = audioRef.current;
@@ -350,7 +364,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
             className="btn-icon play-pause"
             onClick={handlePlayPause}
             disabled={!state.currentSong || audioLoading}
-            title={audioLoading ? "Loading..." : state.isPlaying ? "Pause" : "Play"}
+            title={audioLoading ? "Loading..." : state.isPlaying ? "Pause (Space)" : "Play (Space)"}
           >
             {audioLoading ? <span className="spinner" /> : <Icon name={state.isPlaying ? "pause" : "play"} />}
           </button>
