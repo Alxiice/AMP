@@ -29,8 +29,25 @@
 | Revision 16 | Covers, playlist view, play queue + saved queues, likes, UI redesign | **DONE** — see Revision 16 |
 | Revision 17 | OBS now-playing widget on its own port | **DONE** — see Revision 17 |
 | Revision 18 | `app.py` launcher redesign (sidebar, cards, live status) | **DONE** — see Revision 18 |
+| Revision 19 | Developer page, space bar, Settings (theme, accent, fade), listening history | **DONE** — see Revision 19 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 19 — Developer page, space bar, settings, listening history (2026-11-07)
+
+| Area | Change |
+|---|---|
+| **Build** | The native app failed because `binaries/amp-backend-<triple>` was missing (gitignored, built by `scripts/build_sidecar.py`). `build.rs` now fails with that command. Rebuild the sidecar after backend changes: the release app bundles whatever is there |
+| **Developer page** | `/developer`: backend (URL, pid, uptime, yt-dlp/node/EJS, session, restart), OBS widget, cache, current song's segments, API tester (`rawRequest`). `/api/health` + `uptime_s`, `widget_port` (0 if this backend doesn't serve it); new `GET /api/stream/now-playing` (the widget server has no CORS) |
+| **Space bar** | `player/keyboard.ts`: play/pause except in text fields; on a focused button it plays/pauses instead of clicking |
+| **Settings** | `settings.ts` (`amp.settings.v1`, applied before first render): theme dark/light/system (`:root[data-theme="light"]` token set; `--surface-hover`, `--hover-wash` tokens replace two hard-coded colours), accent (`--accent`, `--on-accent` = white while ≥ 3:1 contrast, `--accent-hover` via `color-mix`), fade 0–10 s. Fade = `volume × fadeGain()` every 50 ms on the single element: fade-out then fade-in, no overlap (true crossfade left in TASKS.md) |
+| **History** | Table `listening_history`; `POST/GET/DELETE /api/history`. `player/history.ts` `HistoryTracker` in the store: forward steps < 2 s count (seeks don't), new `playToken` → skipped, `ended` → finished, Stop/empty queue → stopped, < 5 s dropped, in-progress play saved every 5 s and sent as `closed` on next start. History page by day with %, 7/30/all, remove/clear, reloads on `amp:history` |
+
+**Verification:** real frontend (Vite, browser pane) against a scratch backend (scratch data dir) with real YouTube search/streaming: space pauses/resumes, types a space in the search box; skip → `skipped` 9 % (14.1 s, the paused second not counted); reload mid-song → `closed` entry on next start; end of song → `finished`; light theme + blue accent tokens applied and stored; fade 4 s measured on the element (0.10 → 1.00 over 4 s, 0.65 → 0.13 over the last 3 s); Developer page values and API tester (HTTP 200). Headless Edge screenshots of Developer, History, Settings (dark). `build_sidecar.py --smoke` OK, `npx tauri build --no-bundle` OK.
+
+**Not verified:** inside the Tauri/WebView2 window; the light theme by eye (computed tokens only); clipboard copy of the widget URL in WebView2; Restart backend from the page.
+
+**Test results:** 411 unit tests pass, ruff clean, 48 vitest, `npm run build` OK, `mkdocs build --strict` OK.
 
 ### Revision 18 — Launcher redesign (2026-11-07)
 

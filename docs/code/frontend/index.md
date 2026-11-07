@@ -32,7 +32,10 @@ routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked
 | `/playlists/:id` | `PlaylistDetail` | `GET /api/playlist/{id}` |
 | `/queues`, `/queues/:id` | `SavedQueues`, `SavedQueueDetail` | `/api/queues` |
 | `/auth` | `Auth` | status, webview sign-in, Advanced (paste, Firefox) |
+| `/history` | `History` | `GET /api/history` by period, grouped by day; reloads on the `amp:history` window event |
+| `/settings` | `Settings` | `settings.ts` (localStorage, no API) |
 | `/logs` | `Logs` | backend output (Tauri events), `/api/stream/logs`, `/api/logs` relay |
+| `/developer` | `Developer` | `/api/health`, `/playback-state`, `/now-playing`, `/cache-info`, `/chunks` every 2 s; API tester (`rawRequest`) |
 
 ## Modules
 
@@ -43,12 +46,22 @@ routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked
 | `state.ts` | the queue and playback store (below) |
 | `authSession.ts` | shared sign-in status: 60 s poll, refresh on 401, badge labels |
 | `tauri_auth.ts` | `youtubeLogin()` → Tauri command `youtube_login`; `mightBeTauri()` |
-| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts` |
+| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts`, `keyboard.ts` (space bar), `fade.ts` (fade gain), `history.ts` (listening tracker) |
+| `settings.ts` | theme, accent, fade: `amp.settings.v1` in localStorage, validated by `parseSettings`, applied to `<html>` (`data-theme`, `--accent`, `--on-accent`) when the module loads, so before the first render |
 | `likes.ts`, `savedQueues.ts`, `ui.ts` | liked songs store; saved queue list and actions; toasts and dialogs |
 | `player/queue.ts` | the pure queue model |
 | `components/` | `PlayerBar`, `QueuePanel`, `SongList` (click = play with the list as queue), `SongMenu`, `CollectionHeader`, `Cover`, `Icon`, `LikeButton`, `UiLayer`, `SignInPrompt` |
 
 ## State: `state.ts`
+
+!!! note "Fade and history live in the store"
+    **Fade**: the element's volume is `volume × fadeGain(position, duration, fadeSec)`, refreshed
+    every 50 ms while playing. One audio element: the end of a song fades out, the next fades in;
+    they never overlap (the backend session holds one song).
+    **History**: `HistoryTracker` gets every `timeupdate`; only forward steps under 2 s count, so
+    seeks don't. A new `playToken` ends the play as `skipped`, `ended` as `finished`, Stop or an
+    emptied queue as `stopped`. Plays under 5 s are dropped. The play in progress is saved to
+    `amp.history.pending.v1` every 5 s and sent as `closed` on the next start.
 
 The **queue belongs to the frontend**; the backend only stores named copies (`/api/queues`).
 `player/queue.ts` is a pure model: items with a `uid` (the same song can be queued twice), the
