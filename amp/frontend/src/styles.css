@@ -10,7 +10,9 @@
   --text-secondary: #a8a8b3;
   --text-muted: #6e6e7a;
   --accent: #ff4d67;
-  --accent-hover: #ff6b81;
+  --accent-hover: color-mix(in srgb, var(--accent) 82%, white);
+  --surface-hover: #33333e;
+  --hover-wash: rgba(255,255,255,.08);
   --on-accent: #fff;
   --success: #2ecc71;
   --warning: #f0a500;
@@ -26,6 +28,25 @@
   --nav-width: 216px;
   --queue-width: 340px;
 }
+
+/* Light theme (Settings → Theme). Only the neutrals change; the accent is set by settings.ts */
+:root[data-theme="light"] {
+  --bg: #ececf1;
+  --surface: #ffffff;
+  --surface-2: #f3f3f6;
+  --surface-3: #e6e6ec;
+  --surface-hover: #d9d9e1;
+  --hover-wash: rgba(0,0,0,.06);
+  --border: #d6d6de;
+  --text: #17171d;
+  --text-secondary: #55555f;
+  --text-muted: #8a8a95;
+  --segment-pending: #dcdce3;
+  --segment-downloaded: #a5a5b2;
+  --accent-hover: color-mix(in srgb, var(--accent) 85%, black);
+  color-scheme: light;
+}
+:root { color-scheme: dark; }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -98,7 +119,7 @@ code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .btn:hover:not(:disabled) { background: var(--accent-hover); }
 .btn:disabled { opacity: .45; cursor: default; }
 .btn-secondary { background: var(--surface-3); color: var(--text); }
-.btn-secondary:hover:not(:disabled) { background: #33333e; }
+.btn-secondary:hover:not(:disabled) { background: var(--surface-hover); }
 .btn-danger { background: transparent; color: var(--error); box-shadow: inset 0 0 0 1px var(--error); }
 .btn-danger:hover:not(:disabled) { background: rgba(255,95,86,.15); }
 .btn-small { padding: 4px 10px; font-size: 12px; }
@@ -153,7 +174,7 @@ code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 
 .menu { position: fixed; z-index: 50; width: 240px; max-height: 70vh; overflow-y: auto; padding: 6px; background: var(--surface-3); border: 1px solid var(--border); border-radius: var(--radius-small); box-shadow: 0 12px 32px rgba(0,0,0,.5); cursor: default; }
 .menu-item { display: block; width: 100%; padding: 8px 10px; border: none; border-radius: 6px; background: transparent; text-align: left; font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.menu-item:hover { background: rgba(255,255,255,.08); }
+.menu-item:hover { background: var(--hover-wash); }
 .menu-sep { height: 1px; margin: 6px 4px; background: var(--border); }
 .menu-label { padding: 4px 10px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
 
@@ -271,3 +292,24 @@ input[type="range"] { accent-color: var(--text); }
 .dev-status.ok { color: var(--success); }
 .dev-status.bad { color: var(--error); }
 .dev-response { height: auto; max-height: 360px; margin: 0; white-space: pre; }
+
+/* --- Settings page --- */
+
+.settings { max-width: 760px; }
+.settings-section { margin-bottom: 20px; padding: 6px 18px; background: var(--surface-2); border-radius: var(--radius); }
+.settings-section h2 { margin: 12px 0 4px; font-size: 13px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.settings-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 0; border-top: 1px solid var(--border); }
+.settings-section h2 + .settings-row { border-top: none; }
+.settings-label { font-weight: 600; }
+.settings-hint { margin-top: 2px; font-size: 12px; color: var(--text-muted); }
+.segmented { display: flex; padding: 3px; background: var(--surface-3); border-radius: 999px; }
+.segmented button { padding: 6px 16px; border: none; border-radius: 999px; background: transparent; color: var(--text-secondary); font-weight: 600; font-size: 13px; cursor: pointer; }
+.segmented button.on { background: var(--accent); color: var(--on-accent); }
+.swatches { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 320px; }
+.swatch { position: relative; display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: none; border-radius: 50%; cursor: pointer; color: var(--text-secondary); font-weight: 700; }
+.swatch.on { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 4px var(--text); }
+.swatch.custom { background: var(--surface-3); }
+.swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.settings-slider { display: flex; align-items: center; gap: 12px; }
+.settings-slider input { width: 200px; accent-color: var(--accent); }
+.settings-value { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
