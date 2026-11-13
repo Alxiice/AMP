@@ -109,16 +109,3 @@ class TestModels:
             assert loaded is not None
             assert loaded.song.title == "Test"
 
-    def test_playlist_models(self, temp_dirs):
-        from backend.database.models import Song, Playlist, PlaylistSong
-        from backend.database.session import session_scope
-
-        with session_scope() as session:
-            pl = Playlist(id="PL123", name="My Playlist", song_count=1)
-            song = Song(id="dQw4w9WgXcQ", title="Test")
-            ps = PlaylistSong(playlist_id="PL123", song_id="dQw4w9WgXcQ", position=0)
-            session.add_all([pl, song, ps])
-
-        with session_scope() as session:
-            loaded = session.get(Playlist, "PL123")
-            assert loaded.name == "My Playlist"

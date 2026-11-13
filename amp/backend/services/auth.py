@@ -272,10 +272,6 @@ class AuthService:
         with self._lock:
             return "; ".join(f"{k}={v}" for k, v in self._by_name.items())
 
-    def get_cookies_dict(self) -> Dict[str, str]:
-        with self._lock:
-            return dict(self._by_name)
-
     def get_cookies(self) -> List[Cookie]:
         with self._lock:
             return list(self._cookies)
@@ -325,11 +321,6 @@ class AuthService:
             if self._state == AuthState.SIGNED_IN:
                 self._state = AuthState.EXPIRED
                 logger.warning("Auth marked as expired")
-
-    def reset_expired(self) -> None:
-        with self._lock:
-            if self._state == AuthState.EXPIRED:
-                self._state = self._evaluate_state()
 
     @property
     def account(self) -> Optional[Dict[str, Any]]:

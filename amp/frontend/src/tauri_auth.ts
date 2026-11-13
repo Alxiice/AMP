@@ -12,7 +12,6 @@ export interface TauriCookie {
 
 // Lazy import of invoke to avoid issues when not in Tauri
 let invokeFn: ((command: string, ...args: any[]) => Promise<any>) | null = null;
-let isAvailableCache: boolean | null = null;
 
 async function getInvoke(): Promise<((command: string, ...args: any[]) => Promise<any>) | null> {
   if (invokeFn !== null) {
@@ -21,10 +20,8 @@ async function getInvoke(): Promise<((command: string, ...args: any[]) => Promis
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     invokeFn = invoke;
-    isAvailableCache = true;
     return invoke;
   } catch {
-    isAvailableCache = false;
     return null;
   }
 }
@@ -54,23 +51,13 @@ export async function youtubeLogin(): Promise<TauriCookie[]> {
   }
 }
 
-/**
- * Check if Tauri is available (running in a Tauri app).
- */
-export async function isTauriAvailable(): Promise<boolean> {
-  if (isAvailableCache !== null) {
-    return isAvailableCache;
-  }
-  const invoke = await getInvoke();
-  return invoke !== null;
-}
 
 /**
  * Synchronous check if Tauri might be available (for UI rendering).
  * This is a best-effort check that doesn't throw.
  */
 export function mightBeTauri(): boolean {
-  // Not isAvailableCache: importing @tauri-apps/api/core also succeeds in a plain browser.
+  // Not getInvoke(): importing @tauri-apps/api/core also succeeds in a plain browser.
   // Tauri 2 injects __TAURI_INTERNALS__ into its webviews; a plain browser (Vite dev) has none
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }

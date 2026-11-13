@@ -24,14 +24,6 @@ export function setAuthToken(token: string): void {
   authToken = token;
 }
 
-export function getAuthToken(): string {
-  return authToken;
-}
-
-export function clearAuthToken(): void {
-  authToken = "";
-}
-
 // ---------------------------------------------------------------------------
 // Types (mirror backend response shapes)
 // ---------------------------------------------------------------------------
@@ -51,23 +43,6 @@ export interface SegmentStatus {
   status: "pending" | "downloading" | "downloaded" | "error";
   duration_ms: number;
   size_bytes: number;
-}
-
-export interface StreamInfoSummary {
-  song_id: string;
-  title: string;
-  duration_ms: number;
-  mime_type: string;
-  init_range: [number, number];
-  total_bytes: number;
-  is_dash: boolean;
-  segment_count: number;
-  segments: Array<{
-    index: number;
-    byte_start: number;
-    byte_end: number;
-    duration_ms: number;
-  }>;
 }
 
 /** POST /api/stream/{id}/play — the stream is resolved when this returns. */
@@ -296,8 +271,6 @@ export const api = {
   search: (q: string, type = "songs", limit = 20) =>
     fetchApi<Song[]>(`/api/search?q=${encodeURIComponent(q)}&type=${type}&limit=${limit}`),
 
-  getSong: (id: string) => fetchApi<Song>(`/api/song/${id}`),
-  getArtist: (id: string) => fetchApi<Record<string, unknown>>(`/api/artist/${id}`),
   getAlbum: (id: string) => fetchApi<AlbumDetail>(`/api/album/${encodeURIComponent(id)}`),
   getSongAlbumId: (id: string) => fetchApi<{ album_id: string | null }>(`/api/song/${id}/album`),
   getSongLoudness: (id: string) => fetchApi<{ loudness_db: number | null }>(`/api/song/${id}/loudness`),
@@ -329,7 +302,6 @@ export const api = {
   clearHistory: () => fetchApi<{ deleted: number }>("/api/history", { method: "DELETE" }),
 
   // --- Streaming ---
-  getStreamInfo: (id: string) => fetchApi<StreamInfoSummary>(`/api/stream/info/${id}`),
   getStreamAudioUrl: (id: string) => `${BASE_URL}/api/stream/${id}/audio`,
   getSegmentStatuses: (id: string) =>
     fetchApi<{ segments: SegmentStatus[] }>(`/api/stream/${id}/chunks`),
