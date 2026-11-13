@@ -110,6 +110,16 @@ code { background: var(--surface-3); padding: 1px 5px; border-radius: 4px; }
 .collection-title { font-size: 34px; font-weight: 800; margin: 4px 0 6px; overflow-wrap: anywhere; }
 .collection-sub { color: var(--text-secondary); }
 
+/* Now playing */
+.now-playing-header { align-items: center; }
+.now-playing-header .collection-title .explicit { font-size: 13px; vertical-align: 6px; }
+.now-playing-artist { font-size: 18px; color: var(--text); margin-bottom: 12px; }
+.now-playing-facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 0 0 16px; color: var(--text-secondary); }
+.now-playing-facts dt { color: var(--text-muted); }
+.now-playing-facts dd { margin: 0; overflow-wrap: anywhere; }
+.now-playing-next-title { font-size: 16px; margin: 8px 0; }
+.player-meta-link { cursor: pointer; }
+
 .loading, .empty-state { padding: 48px 16px; text-align: center; color: var(--text-muted); }
 .error-message { margin: 12px 0; padding: 10px 14px; border: 1px solid var(--error); border-radius: var(--radius-small); background: rgba(255,95,86,.1); color: var(--error); overflow-wrap: anywhere; }
 

@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { goToAlbum } from "../albumNav";
 import type { Song } from "../api";
 import { useAuthStatus } from "../authSession";
 import { toggleLike, useLikes } from "../likes";
@@ -13,9 +15,12 @@ interface SongMenuProps {
   onClose: () => void;
   /** Extra entry for lists that can remove a row (saved queue page). */
   onRemove?: () => void;
+  /** Extra entry for queue items: show the song in the now-playing view. */
+  onShowInfo?: () => void;
 }
 
-export function SongMenu({ song, x, y, onClose, onRemove }: SongMenuProps) {
+export function SongMenu({ song, x, y, onClose, onRemove, onShowInfo }: SongMenuProps) {
+  const navigate = useNavigate();
   const auth = useAuthStatus();
   const { ids } = useLikes();
   const saved = useSavedQueues();
@@ -62,6 +67,8 @@ export function SongMenu({ song, x, y, onClose, onRemove }: SongMenuProps) {
 
   return (
     <div className="menu" ref={ref} style={pos} onClick={(e) => e.stopPropagation()} role="menu">
+      {onShowInfo && item("Display song info", onShowInfo)}
+      {item("Go to album", () => goToAlbum(song, navigate))}
       {item("Play next", () => { store.playNext([song]); toast("Playing next"); })}
       {item("Add to queue", () => { store.addToQueue([song]); toast("Added to queue"); })}
       {auth?.is_authenticated &&

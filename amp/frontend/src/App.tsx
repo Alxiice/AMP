@@ -12,6 +12,8 @@ import { Search } from "./pages/Search";
 import { Library } from "./pages/Library";
 import { Playlists } from "./pages/Playlists";
 import { PlaylistDetail } from "./pages/PlaylistDetail";
+import { AlbumDetail } from "./pages/AlbumDetail";
+import { NowPlaying } from "./pages/NowPlaying";
 import { SavedQueues } from "./pages/SavedQueues";
 import { SavedQueueDetail } from "./pages/SavedQueueDetail";
 import { Auth } from "./pages/Auth";
@@ -25,6 +27,7 @@ import { store } from "./state";
 const QUEUE_OPEN_KEY = "amp.queuePanel";
 
 const NAV_ITEMS = [
+  { path: "/now-playing", label: "Now playing", icon: "music" },
   { path: "/", label: "Search", icon: "search", exact: true },
   { path: "/library", label: "Liked songs", icon: "heart" },
   { path: "/playlists", label: "Playlists", icon: "playlist" },
@@ -179,6 +182,8 @@ export default function App() {
             <Route path="/library" element={<Library />} />
             <Route path="/playlists" element={<Playlists />} />
             <Route path="/playlists/:id" element={<PlaylistDetail />} />
+            <Route path="/albums/:id" element={<AlbumDetail />} />
+            <Route path="/now-playing" element={<NowPlaying />} />
             <Route path="/queues" element={<SavedQueues />} />
             <Route path="/queues/:id" element={<SavedQueueDetail />} />
             <Route path="/history" element={<History />} />
