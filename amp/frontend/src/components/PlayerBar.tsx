@@ -1,4 +1,5 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type SegmentStatus, type Song } from "../api";
 import { store, useQueueState } from "../state";
 import { Cover } from "./Cover";
@@ -37,6 +38,7 @@ interface PlayerBarProps {
 
 export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBarProps) {
   const state = useQueueState();
+  const navigate = useNavigate();
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const handledTokenRef = useRef(0); // last playToken the load effect acted on
   // Load sequence (F13): a newer load() invalidates older ones
@@ -389,8 +391,10 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
   return (
     <div className="player-bar">
       <div className="player-info">
-        <Cover url={state.currentSong?.thumbnail_url} songId={state.currentSong?.id} size={56} className="player-cover" />
-        <div className="player-meta">
+        <div className="player-meta-link" onClick={() => state.currentSong && navigate("/now-playing")} title="Show the song">
+          <Cover url={state.currentSong?.thumbnail_url} songId={state.currentSong?.id} size={56} className="player-cover" />
+        </div>
+        <div className="player-meta player-meta-link" onClick={() => state.currentSong && navigate("/now-playing")}>
           <div className="player-title">{state.currentSong?.title || "Nothing playing"}</div>
           <div className="player-artist">
             {audioLoading ? "Loading audio..." : state.currentSong?.artist || "—"}

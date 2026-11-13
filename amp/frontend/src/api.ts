@@ -188,6 +188,16 @@ export interface PlaylistDetail extends PlaylistInfo {
   songs: Song[];
 }
 
+export interface AlbumDetail {
+  id: string;
+  title: string;
+  artist: string;
+  year: string;
+  type: string; // Album, Single, EP…
+  thumbnail_url: string;
+  songs: Song[];
+}
+
 export interface SavedQueueInfo {
   id: number;
   name: string;
@@ -288,7 +298,9 @@ export const api = {
 
   getSong: (id: string) => fetchApi<Song>(`/api/song/${id}`),
   getArtist: (id: string) => fetchApi<Record<string, unknown>>(`/api/artist/${id}`),
-  getAlbum: (id: string) => fetchApi<Record<string, unknown>>(`/api/album/${id}`),
+  getAlbum: (id: string) => fetchApi<AlbumDetail>(`/api/album/${encodeURIComponent(id)}`),
+  getSongAlbumId: (id: string) => fetchApi<{ album_id: string | null }>(`/api/song/${id}/album`),
+  getSongLoudness: (id: string) => fetchApi<{ loudness_db: number | null }>(`/api/song/${id}/loudness`),
   getPlaylist: (id: string) => fetchApi<PlaylistDetail>(`/api/playlist/${encodeURIComponent(id)}`),
   getUserPlaylists: () => fetchApi<PlaylistInfo[]>("/api/user/playlists"),
   getUserLikes: () => fetchApi<Song[]>("/api/user/likes"),
