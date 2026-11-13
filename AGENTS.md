@@ -3,7 +3,7 @@
 > **Project**: AMP — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
 > **Spec**: `DESIGN_DOC.md` (authoritative; `DESIGN_DOC_2.md` before Revision 20)
 > **Docs**: `docs/` (MkDocs Material, `mkdocs.yml` at the root): usage guide + code reference. Update the matching page when behaviour changes; `mkdocs build --strict` must pass
-> **Last updated**: 2026-10-31
+> **Last updated**: 2026-11-13
 
 ---
 
@@ -32,8 +32,24 @@
 | Revision 19 | Developer page, space bar, Settings (theme, accent, fade), listening history | **DONE** — see Revision 19 |
 | Revision 20 | 1.0 naming (no "v2"), docs site redesign with screenshots, launcher page | **DONE** — see Revision 20 |
 | Revision 21 | OS media controls (Media Session API) | **DONE** — see Revision 21 |
+| Revision 22 | True crossfade, volume normalization, now-playing view, album page, queue menu, volume 0.5 | **DONE** — see Revision 22 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 22 — Crossfade, normalization, now playing (2026-11-13)
+
+| Area | Change |
+|---|---|
+| **Crossfade** | `PlayerBar` owns two `<audio>` elements. In the active song's last `fadeSec` s (`crossfadeDue` in `player/fade.ts`) with a next song (not repeat-one), the store records `finished`, moves on with `playToken === crossfadeToken` and ignores the old element until `PlayerBar` loads the next song on the spare element and calls `store.handOver()`; the old one fades out to its end (`fading`). Next/previous/jump/pause/stop/empty queue → `stopFading()` cuts it. **Backend unchanged**: the new `/play` takes the single session at the start of the overlap (buffer-ahead, position reports, widget, media session move with it); the fading song finishes over its open `/audio` request (`ensure_segment` fetches anything missing). Listened time of the fading song's last seconds isn't counted |
+| **Normalization** | Setting (off by default). `GET /api/song/{id}/loudness` → YouTube's `loudnessDb` (ytmusicapi `get_song` adaptive formats; yt-dlp doesn't expose it; `null` on error). Gain `min(1, 10^((−6 − dB)/20))` per element (`player/normalize.ts`); requested at load (load waits ≤ 1 s for it) and at prefetch. Target −6 dB, not YouTube's 0: YouTube Music values are around −5…+2 dB, so 0 would barely act. Web Audio rejected: `MediaElementAudioSourceNode` needs CORS on `/audio` (silent otherwise) |
+| **Now playing** | `/now-playing` (first nav item; click the player bar's song): cover, title, artist, album, duration, queue position, like, Go to album, next 5; follows the current song; `?uid=` pins a queue item |
+| **Album** | `GET /api/album/{id}` normalized (`{id, title, artist, year, type, thumbnail_url, songs}`), new `GET /api/song/{id}/album` (watch playlist). Page `/albums/:id`; `albumNav.goToAlbum` in every song menu |
+| **Queue panel** | Move up/down arrows removed (drag stays; `up`/`down` icons deleted); new ⋮ menu = `SongMenu` + "Display song info" |
+| **Volume** | `DEFAULT_VOLUME = 0.5` when nothing valid is stored |
+
+**Verification:** real Tauri dev window over CDP (Revision 21 method), user's data dir (queue, settings restored and the 9 test history entries deleted afterwards): 4 s crossfade sampled every 250 ms — overlap 3.6 s, volumes crossing (old 0.47 → 0.02, new 0.004 → 0.49), fading element removed at its end; backend session, media session title and widget switched to the next song; first song recorded `finished`. Next during the overlap cut the fading song and the next one played. Normalization: `fHI8X4OXluQ` (+0.19 dB) at volume 0.5 ramped to 0.245 from the first sample (no jump). Now playing follows the queue; queue ⋮ menu via a real mouse click; Display song info (`?uid=`); Go to album → Homework (16 tracks); a song without album → toast. 424 unit tests (13 new), ruff clean, 53 vitest, `npm run build` OK, `mkdocs build --strict` OK.
+
+**Not verified:** pause during the overlap (code path only); crossfade on an uncached next song (start delayed by `/play`, ~1.4 s, the fade-in still starts at 0); the release build (**rebuild the sidecar**: new routes).
 
 ### Revision 21 — OS media controls (2026-11-13)
 

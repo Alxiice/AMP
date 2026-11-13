@@ -22,7 +22,10 @@ layer: if you change a response shape, change `api.ts` too.
     | GET | `/api/health` | `{status, app: "AMP", pid, uptime_s, widget_port, services: {auth, streaming, database, extractor: {node, ejs, yt_dlp}}}`. `widget_port` is 0 when this backend doesn't serve the [OBS widget](../../usage/obs-widget.md) |
     | GET | `/api/search?q=&type=songs&limit=20` | list of songs (`limit` 1–50; `type` = songs, videos) |
     | GET | `/api/song/{id}` | song metadata |
-    | GET | `/api/artist/{id}`, `/api/album/{id}` | metadata dicts |
+    | GET | `/api/song/{id}/album` | `{album_id}` from the song's watch playlist (`null` for videos without an album; **502** if YouTube fails) |
+    | GET | `/api/song/{id}/loudness` | `{loudness_db}`: YouTube's loudness of the track (`loudnessDb` of the audio formats in the player response, read with ytmusicapi `get_song`; yt-dlp doesn't expose it). `null` when missing or on any error: normalization is best effort |
+    | GET | `/api/artist/{id}` | metadata dict (ytmusicapi as is) |
+    | GET | `/api/album/{id}` | `{id, title, artist, year, type, thumbnail_url, songs}`; tracks get the album's name and cover, unavailable ones are left out |
     | GET | `/api/playlist/{id}?limit=1000` | `{id, name, owner, thumbnail_url, song_count, songs}`; unavailable tracks left out |
     | GET | `/api/user/likes` | liked songs (**401** when signed out) |
     | POST / DELETE | `/api/user/likes/{id}` | like (optional song body fills the local cache) / clear the rating on the account (**401** when signed out) |

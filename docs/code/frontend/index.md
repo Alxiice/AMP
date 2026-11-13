@@ -26,10 +26,12 @@ routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked
 
 | Route | Page | Data |
 |---|---|---|
+| `/now-playing` | `NowPlaying` | the store: current song, following the queue; `?uid=` pins a queue item (queue menu "Display song info") |
 | `/` | `Search` | `GET /api/search`, results in `SongList` |
 | `/library` | `Library` | `GET /api/user/likes`; `SignInPrompt` when signed out or on 401 |
 | `/playlists` | `Playlists` | `GET /api/user/playlists` as cards; same sign-in prompt |
 | `/playlists/:id` | `PlaylistDetail` | `GET /api/playlist/{id}` |
+| `/albums/:id` | `AlbumDetail` | `GET /api/album/{id}`; reached through `albumNav.goToAlbum` (`GET /api/song/{id}/album` first: songs don't carry their album ID) |
 | `/queues`, `/queues/:id` | `SavedQueues`, `SavedQueueDetail` | `/api/queues` |
 | `/auth` | `Auth` | status, webview sign-in, Advanced (paste, Firefox) |
 | `/history` | `History` | `GET /api/history` by period, grouped by day; reloads on the `amp:history` window event |
@@ -46,18 +48,38 @@ routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked
 | `state.ts` | the queue and playback store (below) |
 | `authSession.ts` | shared sign-in status: 60 s poll, refresh on 401, badge labels |
 | `tauri_auth.ts` | `youtubeLogin()` → Tauri command `youtube_login`; `mightBeTauri()` |
-| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts`, `keyboard.ts` (space bar), `fade.ts` (fade gain), `history.ts` (listening tracker). OS media controls are wired in `PlayerBar.tsx` through `navigator.mediaSession` (metadata, playback state, action handlers calling the player bar's own handlers; position comes from the `<audio>` element) |
-| `settings.ts` | theme, accent, fade: `amp.settings.v1` in localStorage, validated by `parseSettings`, applied to `<html>` (`data-theme`, `--accent`, `--on-accent`) when the module loads, so before the first render |
+| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts`, `keyboard.ts` (space bar), `fade.ts` (fade gain, `crossfadeDue`), `normalize.ts` (loudness → gain), `history.ts` (listening tracker). OS media controls are wired in `PlayerBar.tsx` through `navigator.mediaSession` (metadata, playback state, action handlers calling the player bar's own handlers; position comes from the `<audio>` element) |
+| `settings.ts` | theme, accent, crossfade, normalization: `amp.settings.v1` in localStorage, validated by `parseSettings`, applied to `<html>` (`data-theme`, `--accent`, `--on-accent`) when the module loads, so before the first render |
 | `likes.ts`, `savedQueues.ts`, `ui.ts` | liked songs store; saved queue list and actions; toasts and dialogs |
 | `player/queue.ts` | the pure queue model |
 | `components/` | `PlayerBar`, `QueuePanel`, `SongList` (click = play with the list as queue), `SongMenu`, `CollectionHeader`, `Cover`, `Icon`, `LikeButton`, `UiLayer`, `SignInPrompt` |
 
 ## State: `state.ts`
 
-!!! note "Fade and history live in the store"
-    **Fade**: the element's volume is `volume × fadeGain(position, duration, fadeSec)`, refreshed
-    every 50 ms while playing. One audio element: the end of a song fades out, the next fades in;
-    they never overlap (the backend session holds one song).
+!!! note "Crossfade, normalization and history live in the store"
+    **Crossfade**: `PlayerBar` owns two `<audio>` elements. When the active one reaches its last
+    `fadeSec` seconds (`crossfadeDue`) and the queue has a next song (not repeat-one), the store
+    ends the play as `finished`, moves to the next song with `playToken === crossfadeToken`, and
+    ignores the old element until `PlayerBar` loads the next song on the spare element and calls
+    `store.handOver(next)`. The old element becomes the *fading* one and plays its end; Next,
+    Previous, a jump, Pause, Stop or an emptied queue call `stopFading()` and cut it.
+    Each element's volume is `volume × fadeGain(its position, its duration, fadeSec) × normalization
+    gain of its song`, refreshed every 50 ms while something plays or fades.
+    **One backend session**: the new song's `/play` takes the session (buffer-ahead, position
+    reports, OBS widget, OS media controls all move to it at the start of the overlap). The fading
+    song keeps streaming over its open `/audio` request; anything not yet on disk is fetched by
+    the request itself (`ensure_segment`), and buffer-ahead had already downloaded ~30 s past the
+    playhead, so the last ≤ 10 s are normally cached. The backend needs no change.
+    **Normalization**: `GET /api/song/{id}/loudness` once per song (at load, in parallel with
+    `/play`, and at prefetch); the load waits up to 1 s for it so the song starts at the right
+    volume. Gain `min(1, 10^((-6 − loudnessDb) / 20))` (`normalize.ts`).
+    Why YouTube's value rather than Web Audio: a `MediaElementAudioSourceNode` on the stream needs
+    CORS on `/audio` (otherwise the output is silent) and would route every sample through the
+    audio graph; a compressor changes the dynamics instead of the level; measuring loudness
+    ourselves needs the whole song before it plays. YouTube already measures every track and
+    sends it with the player response. Its values for released music sit around −5…+2 dB, so
+    YouTube's own rule (only turn down above 0 dB) would hardly change anything; AMP aims at −6 dB
+    instead. The element's volume can't exceed 1, so songs quieter than −6 dB are not boosted.
     **History**: `HistoryTracker` gets every `timeupdate`; only forward steps under 2 s count, so
     seeks don't. A new `playToken` ends the play as `skipped`, `ended` as `finished`, Stop or an
     emptied queue as `stopped`. Plays under 5 s are dropped. The play in progress is saved to

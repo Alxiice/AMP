@@ -16,10 +16,10 @@ Items marked **decide** need a choice before implementation.
   - [x] **Theme**: dark / light / system and an **accent colour** (8 presets + custom).
   - [x] **Fade between songs**: slider 0–10 s (0 = off). Done as fade-out + fade-in on one audio
     element: the songs don't overlap. Manual skips are not faded.
-  - [ ] **True crossfade** (the two songs overlapping): needs a second `<audio>` element *and* the
-    backend to stream two songs at once (today the newest `/play` owns the single session, and
-    position reports drive buffer-ahead for that one song). **decide** whether the difference is
-    worth that change.
+  - [x] **True crossfade** (Revision 22): two `<audio>` elements; the next song takes the backend
+    session at the start of the overlap and the fading one finishes over its open `/audio` request
+    (no backend change).
+  - [x] **Volume normalization** from YouTube's `loudnessDb` (Revision 22).
 
 ### Listening history
 
