@@ -53,6 +53,7 @@ e.g. `# P14: never save`. Before changing code that mentions one, read its entry
     | # | Rule |
     |---|---|
     | P12 | Every polling timer has an in-flight guard |
+    | P28 | No `Referer` on cover images: `*.googleusercontent.com` answers `http://localhost:1420/` with a 429 HTML page, which WebView2 blocks (`ERR_BLOCKED_BY_ORB`). `index.html` sets `<meta name="referrer" content="no-referrer">`; without it the OS media controls get no artwork in dev |
 
 ??? danger "Tests"
     | # | Rule |

@@ -12,6 +12,8 @@
                img-src 'self' https://*.ytimg.com https://*.ggpht.com https://*.googleusercontent.com data:;
                style-src 'self' 'unsafe-inline';"
     />
+    <!-- googleusercontent answers a localhost Referer with a 429 page: covers (incl. the OS media controls' artwork) need no Referer -->
+    <meta name="referrer" content="no-referrer" />
     <link rel="icon" href="/favicon.ico" sizes="48x48" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
