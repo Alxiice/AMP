@@ -3,7 +3,11 @@
 > **Project**: AMP — YouTube Music DASH-segment streaming desktop app (Tauri + FastAPI)
 > **Spec**: `DESIGN_DOC.md` (authoritative; `DESIGN_DOC_2.md` before Revision 20)
 > **Docs**: `docs/` (MkDocs Material, `mkdocs.yml` at the root): usage guide + code reference. Update the matching page when behaviour changes; `mkdocs build --strict` must pass
-> **Last updated**: 2026-10-31
+> **Open work**: `TASKS.md` (requested features, proposals) and [Known Issues](#known-issues) below
+> **Last updated**: 2026-11-13
+
+This file was condensed in Revision 23. The full per-revision notes (measurements, verification
+steps, new tests) are in git history: `git show 3ae702a:AGENTS.md`.
 
 ---
 
@@ -11,846 +15,165 @@
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| Phase 1 | Backend core + auth | **DONE** |
-| Phase 2 | DASH streaming core | **DONE** |
-| Phase 3 | Tauri shell + player (frontend) | **DONE** |
-| Phase 4 | Polish (Logs page, error surfacing, settings) | **DONE** |
-| Phase 5 | Packaging + tests + README | **DONE** |
+| Phases 1–5 | Backend core + auth, DASH streaming core, Tauri shell + player, polish, packaging + tests | **DONE** |
 | Revision | Open mode (no token) + venv support | **DONE** |
-| Refactor Phase 0 | Safety net + hotfixes | **DONE** — see Revision 7 |
-| Revision 8 | Logos, CI (lint + tests + coverage, Tauri build), badges, root README | **DONE** — see Revision 8 |
-| Refactor Phase 1 | Single-flight extraction | **DONE** — see Revision 9 |
-| Refactor Phase 2 | Exact segment table from the fMP4 sidx | **DONE** — see Revision 10 |
-| Refactor Phase 3 | Download pipeline correctness | **DONE** — see Revision 11 |
-| Refactor Phase 4 | Playback UX & frontend | **DONE** — see Revision 12 |
-| Refactor Phase 5 | Auth simplification & local API hardening | **DONE** — see Revision 13 |
-| Refactor Phase 6 | Lifecycle & packaging | **DONE** — see Revision 14 |
-| Revision 15 | MkDocs documentation, simpler READMEs, plan files removed | **DONE** — see Revision 15 |
-| Revision 16 | Covers, playlist view, play queue + saved queues, likes, UI redesign | **DONE** — see Revision 16 |
-| Revision 17 | OBS now-playing widget on its own port | **DONE** — see Revision 17 |
-| Revision 18 | `app.py` launcher redesign (sidebar, cards, live status) | **DONE** — see Revision 18 |
-| Revision 19 | Developer page, space bar, Settings (theme, accent, fade), listening history | **DONE** — see Revision 19 |
-| Revision 20 | 1.0 naming (no "v2"), docs site redesign with screenshots, launcher page | **DONE** — see Revision 20 |
-| Revision 21 | OS media controls (Media Session API) | **DONE** — see Revision 21 |
+| Refactor Phases 0–6 | Safety net, single-flight extraction, sidx segment table, download pipeline, playback UX, auth & local API hardening, lifecycle & packaging | **DONE** — Revisions 7, 9–14 |
+| Revisions 8, 15 | CI + logos; MkDocs documentation | **DONE** |
+| Revisions 16–22 | Covers, queue, likes, redesign; OBS widget; launcher redesign; Developer page, settings, history; 1.0 naming + docs site; OS media controls; crossfade, normalization, now playing, albums | **DONE** |
+| Revision 23 | Repo cleanup: dead code removed, markdown and docs brought up to date | **DONE** |
 
-**Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+Left from the refactoring plan: 5.6 (per-launch token), under Known Issues. The plan files
+(`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15 (last at `cc4453d`).
 
-### Revision 21 — OS media controls (2026-11-13)
+## Current model
 
-`PlayerBar.tsx` uses the Media Session API (WebView2/Chromium maps it to Windows SMTC, MPRIS, macOS Now Playing): metadata (title, artist, album, cover at 512 px or the ytimg fallback), `playbackState`, handlers play / pause / nexttrack / previoustrack / stop / seekto calling the bar's own handlers (so `/pause`, `/resume`, `/seek`, history all stay in sync). No `setPositionState`: Chromium reports the `<audio>` element's position. Docs: "System media controls" in Using the app. `AMP.bat` at the repo root runs `npm run tauri dev`.
-
-**Missing artwork (fixed):** in dev, `*.googleusercontent.com` answers the `http://localhost:1420/` Referer with a 429 HTML page; WebView2 blocks it (`ERR_BLOCKED_BY_ORB`), so Windows got no thumbnail (`i.ytimg.com` and no-Referer requests were fine; `Cover.tsx` already used `referrerPolicy="no-referrer"`). `index.html` now has `<meta name="referrer" content="no-referrer">` (pitfall P28).
-
-**Verification:** real Tauri dev window driven over CDP (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…`), Windows session read with the WinRT `GlobalSystemMediaTransportControlsSessionManager` (Python `winrt` packages in a scratch venv): title, artist, Playing, and after the fix the yt3 cover as a 150×150 thumbnail (before: none). `npm run build` OK, 48 vitest, `mkdocs build --strict` OK. **Not verified:** media keys / flyout buttons pressed by hand; the release build (its `https://tauri.localhost/` Referer was accepted by curl anyway).
-
-### Revision 20 — 1.0 naming, docs site redesign (2026-11-07)
-
-| Area | Change |
-|---|---|
-| **Naming** | "v2" dropped: product/window "AMP", version 1.0.0 everywhere, identifier `com.amp.player` (exe `amp`, installers `AMP_1.0.0_*`), health `app: "AMP"`, `DESIGN_DOC_2.md` → `DESIGN_DOC.md`. `backend.rs` `migrate_legacy_data_dir`: moves `com.amp.v2` to the new data folder once if the new one doesn't exist (2 Rust tests). The sidecar must be rebuilt (it answers the health `app` name) |
-| **Docs theme** | Material with the app's palette (`docs/stylesheets/amp.css`), dark first, Inter / JetBrains Mono, glass header, glightbox (click to zoom; `mkdocs-glightbox` added to `docs/requirements.txt`) |
-| **Home** | `overrides/home.html` (`template: home.html` in `index.md`): hero with floating screenshot + widget, 8 feature cards, auto-rotating screenshot tour, animated stats (factual: 24 ms / 1.4 s TTFA from Revision 12), how-it-works, OBS section, CTA. `docs/javascripts/home.js`: reveal on scroll, tour (pauses on hover/focus and off-screen), counters; honours reduced motion |
-| **Screenshots** | `docs/assets/screenshots/`: app pages (dark + light) and the widget from `amp/scripts/docs_screenshots.mjs` (headless Edge over CDP, Node built-in WebSocket; needs a backend on a scratch data dir + Vite); launcher pages captured from `app.py`. No chunks screenshot: it would publish the dev cache's song IDs |
-| **Pages** | New `usage/launcher.md`; `debugging.md` → "Manual runs"; screenshots in Using the app, OBS widget; README with screenshot + feature list; "personal prototype, not for distribution" note replaced by an "independent project" ToS note |
-
-**Verification:** `mkdocs build --strict` OK; home captured with headless Edge at 1440 px (after fixing rem widths: Material's root is 20 px on wide screens) and checked at 375 px in the pane (no horizontal overflow); 411 unit tests, 48 vitest, 3 cargo tests; `npx tauri build` → `amp.exe`, `AMP_1.0.0_x64_en-US.msi`, `AMP_1.0.0_x64-setup.exe`.
-
-**Not verified:** the data folder move on a real `com.amp.v2` folder (unit-tested on temp dirs only); the GitHub Pages deploy itself (runs on push).
-
-### Revision 19 — Developer page, space bar, settings, listening history (2026-11-07)
-
-| Area | Change |
-|---|---|
-| **Build** | The native app failed because `binaries/amp-backend-<triple>` was missing (gitignored, built by `scripts/build_sidecar.py`). `build.rs` now fails with that command. Rebuild the sidecar after backend changes: the release app bundles whatever is there |
-| **Developer page** | `/developer`: backend (URL, pid, uptime, yt-dlp/node/EJS, session, restart), OBS widget, cache, current song's segments, API tester (`rawRequest`). `/api/health` + `uptime_s`, `widget_port` (0 if this backend doesn't serve it); new `GET /api/stream/now-playing` (the widget server has no CORS) |
-| **Space bar** | `player/keyboard.ts`: play/pause except in text fields; on a focused button it plays/pauses instead of clicking |
-| **Settings** | `settings.ts` (`amp.settings.v1`, applied before first render): theme dark/light/system (`:root[data-theme="light"]` token set; `--surface-hover`, `--hover-wash` tokens replace two hard-coded colours), accent (`--accent`, `--on-accent` = white while ≥ 3:1 contrast, `--accent-hover` via `color-mix`), fade 0–10 s. Fade = `volume × fadeGain()` every 50 ms on the single element: fade-out then fade-in, no overlap (true crossfade left in TASKS.md) |
-| **History** | Table `listening_history`; `POST/GET/DELETE /api/history`. `player/history.ts` `HistoryTracker` in the store: forward steps < 2 s count (seeks don't), new `playToken` → skipped, `ended` → finished, Stop/empty queue → stopped, < 5 s dropped, in-progress play saved every 5 s and sent as `closed` on next start. History page by day with %, 7/30/all, remove/clear, reloads on `amp:history` |
-
-**Verification:** real frontend (Vite, browser pane) against a scratch backend (scratch data dir) with real YouTube search/streaming: space pauses/resumes, types a space in the search box; skip → `skipped` 9 % (14.1 s, the paused second not counted); reload mid-song → `closed` entry on next start; end of song → `finished`; light theme + blue accent tokens applied and stored; fade 4 s measured on the element (0.10 → 1.00 over 4 s, 0.65 → 0.13 over the last 3 s); Developer page values and API tester (HTTP 200). Headless Edge screenshots of Developer, History, Settings (dark). `build_sidecar.py --smoke` OK, `npx tauri build --no-bundle` OK.
-
-**Not verified:** inside the Tauri/WebView2 window; the light theme by eye (computed tokens only); clipboard copy of the widget URL in WebView2; Restart backend from the page.
-
-**Test results:** 411 unit tests pass, ruff clean, 48 vitest, `npm run build` OK, `mkdocs build --strict` OK.
-
-### Revision 18 — Launcher redesign (2026-11-07)
-
-`amp/app.py` UI layer rewritten, still tkinter + stdlib only; process control, log tailing, port/PID utilities unchanged. Palette = the app's tokens (`styles.css`). Sidebar pages (Overview, Logs, API tester, Chunks) instead of the notebook. `FlatButton` (hover, kinds) and `Card` (canvas-drawn rounded panel; auto height from the body's *requested* height, since the body only gets a size once the canvas shows it). Overview: Backend / Frontend / OBS widget cards (pill, port · pid · uptime from `backend.pid`, Start↔Stop, ↻, ✕; Web/Desktop toggle locked while running; widget `/now.json` + copy/open URL), segment strip of the launcher backend's current song, last 200 log lines. Logs: All / Warn+ / Errors filter. Dark title bar on Windows (DWM attribute 20).
-
-**Verification:** screenshots of every page (idle), and Overview + Logs with the launcher's backend running on `AMP_PORT=8765` / `WIDGET_PORT=8766` and a song played via HTTP (pills, uptime, widget song, 4/26 segments with the current one outlined); closing the window stopped that backend. **Not verified:** Frontend start (web/desktop) from the new buttons, force kill, the API Send button (quick fill only), Linux/macOS.
-
-### Revision 17 — OBS now-playing widget (2026-11-07)
-
-| Area | Change |
-|---|---|
-| **Server** | `backend/widget.py`: stdlib `ThreadingHTTPServer` in a daemon thread on `WIDGET_PORT` (default 8001, `--widget-port`, 0 = off), started from `main.py` only. `GET /` → `backend/widget.html`, `GET /now.json`. Loopback `Host` only; `allow_reuse_address = False` so a second backend can't share the port (port taken → WARNING, no widget). `widget.html` added to the PyInstaller spec datas |
-| **Data** | `POST /play` takes an optional JSON body `{title, artist, cover_url}` (`NowPlayingMeta`); `StreamingService.now_playing()` merges it with the session (position extrapolated while playing, capped at duration). PlayerBar sends it and reports the position on pause |
-| **Page** | Design "C": cream/pink card, cover, title + artist (marquee when too long), discreet animated wave over the played part (frozen on pause). `?w=&h=` sizes the card; everything scales with `h` |
-
-**Verification:** scratch backend (ports 8765/8766), real song played via HTTP with metadata; widget in the Chromium pane at 320×72 and 520×120: cover fallback (ytimg), progress advancing, frozen on pause. **Not verified:** inside OBS; from the real app UI (metadata sent by PlayerBar only checked by `npm run build`).
-
-**Test results:** 399 unit tests pass (`test_widget.py` 11 new), 27 vitest, ruff clean, `npm run build` OK, `mkdocs build --strict` OK.
-
-### Revision 16 — Covers, queue, likes, redesign (2026-11-06)
-
-| Area | Change |
-|---|---|
-| **Covers** | Root cause: art moved to `yt3.googleusercontent.com`, CSP only allowed `lh3`. CSP now `*.googleusercontent.com`, `*.ytimg.com`, `*.ggpht.com` (`index.html`, `tauri.conf.json`). `Cover.tsx`: URL resized to display size → `i.ytimg.com/vi/<id>/mqdefault.jpg` → placeholder. `_parse_song` reads `get_song`'s `videoDetails` shape |
-| **Playlists** | `GET /api/playlist/{id}` normalized (`songs`); new page `/playlists/:id` |
-| **Queue** | Pure model `player/queue.ts` (uids allow duplicates; insert next, append, remove, move, clear, shuffle with restore, repeat off/all/one). `state.ts` applies it; `playToken` tells PlayerBar to (re)load. `QueuePanel.tsx`; persisted `repeat` added to `amp.queue.v1` |
-| **Saved queues** | Table `saved_queues`, `/api/queues` CRUD, pages `/queues`, `/queues/:id`; `savedQueues.ts` |
-| **Likes** | `YouTubeService.rate_song`, `POST`/`DELETE /api/user/likes/{id}`; `likes.ts` store (optimistic, rollback), liked list limit 100 → 2000 |
-| **UI** | New shell + `styles.css` (tokens at the top), SVG `Icon`, `SongMenu`, `CollectionHeader`, toasts/dialogs (`ui.ts`, `UiLayer`). Cache use moved to the sidebar. Search offers songs/videos only: the albums/artists/playlists options returned non-song dicts that failed `SongResponse`. `dragDropEnabled: false` so HTML5 drag works in WebView2 |
-
-**Verification:** real frontend (Vite, Chromium pane) against a scratch backend with real YouTube search, playlists and streaming, and a **stubbed** signed-in session and `rate_song`: covers, play, like, menu, drag and arrows, remove, shuffle/restore, repeat cycle, auto-advance at song end, clear stops playback, save, restore after reload, saved queue page, public playlist page.
-
-**Not verified:** liking on a real account, the user's own playlists list, anything in the Tauri/WebView2 window (including drag with `dragDropEnabled: false`). `loading="lazy"` covers stayed pending in the idle pane until a frame was forced (looks specific to the pane; player/header/card covers are now eager).
-
-**Test results:** 388 unit tests pass, 27 vitest, ruff clean, `npm run build` OK.
-
-### Revision 15 — Documentation (2026-10-31)
-
-- New MkDocs Material site: `mkdocs.yml` + `docs/` (`docs/requirements.txt`). **Usage**: install & launch, using the app, signing in, configuration, troubleshooting, debug launcher. **Code**: architecture, repository layout, backend (API, extraction, segment table, pipeline, cache, serving, auth, lifecycle), frontend (overview, player, Tauri shell), development (testing, CI & packaging, pitfalls). Collapsible sections for details. `mkdocs build --strict` passes (mkdocs 1.6.1, material 9.8.0).
-- Root `README.md` cut down to requirements, launch, installer build and links to the docs; `amp/README.md` is now a short index (its configuration/API/structure content moved to the docs).
-- Removed `improvement-plan/` (all phases done) and `amp/AUTH_AUTO_EXTRACTION_DESIGN.md` (still described the browser-polling sign-in removed in Revision 13). Links in this file and `DESIGN_DOC_2.md` updated.
-- Found while writing the docs: the Playlists page lists playlists as cards only; clicking a card does nothing (no track view). The Phase 3 note "user playlists + tracks" was inaccurate. Added to Known Issues.
-- No code changes; tests not rerun.
-
-**Test results**: 388 unit tests pass (`pytest -m "not integration"`), 0 failed, 0 errors; backend coverage 87% at Revision 14 (floor 60%). 27 frontend unit tests pass (`npm test`, vitest). 1 Rust test (`cargo test`). Integration 11/11 (`BAgTQhR8MLo`). Ruff clean. CI runs lint + unit tests on every push (Revision 8). Before Revision 7 the suite was actually at 18 failed / 54 errors under pydantic 2.14, despite the "147 pass" claims in earlier revisions.
-
-**Auth model**: Open by default — no token required, but cross-site requests are refused (Revision 13). Search, browse, and play work immediately. YouTube sign-in (optional, Tauri webview; paste / Firefox import as fallbacks) unlocks liked songs and user playlists. Only youtube.com cookies are stored, with their domains.
-
-**Startup model** (Revision 14): the Tauri app is the entry point. Rust (`src-tauri/src/backend.rs`) spawns the backend on a free port with `--data-dir <app data dir> --parent-watch` and stops it on exit; the frontend only asks `backend_info` for the port. `amp/app.py` is a debugging tool (backend on :8000 with `amp/.amp/`).
-
-**Virtualenv**: dev builds of the Tauri app run `amp/venv/Scripts/python.exe` (Windows) or `amp/venv/bin/python` (Unix), or `AMP_PYTHON`. Release builds run the PyInstaller sidecar.
+- **Auth**: open by default — no token, but cross-site requests are refused (`Origin` /
+  `Sec-Fetch-Site`, Revision 13). Search, browse and play work signed out. YouTube sign-in
+  (Tauri webview; paste a Cookie header or Firefox import as fallbacks) unlocks likes and user
+  playlists. Only youtube.com cookies are stored, with their domains (credential store v2).
+- **Startup**: the Tauri app is the entry point. Rust (`src-tauri/src/backend.rs`) spawns the
+  backend on a free port with `--data-dir <app data dir> --parent-watch` and stops it on exit; the
+  frontend asks `backend_info` for the port. `amp/app.py` is a debugging launcher (backend on
+  :8000 with `amp/.amp/`).
+- **Python**: dev builds run `amp/venv/Scripts/python.exe` (Windows) / `amp/venv/bin/python`, or
+  `AMP_PYTHON`. Release builds run the PyInstaller sidecar from `src-tauri/binaries/` — **rebuild it
+  (`scripts/build_sidecar.py`) after any backend change**, the release app bundles whatever is there.
 
 ## Commit Guidelines
 
-To keep the repository history clean and maintainable, follow these commit guidelines:
+1. **Atomic commits**: each commit is a single logical change. Don't bundle unrelated changes.
+2. **Clear scope**: self-contained and complete for its purpose; one feature across several files is fine.
+3. **Messages**: `<type>: <description>`, type one of `feat`, `fix`, `docs`, `refactor`, `cleanup`, `test`, `chore`. Say what changed and why.
+4. **No mega-commits**: split unrelated features, fixes and cleanup.
+5. **Branches**: `feat/<name>`, `fix/<name>`, `docs/<name>`, `refactor/<name>`. Keep `master` clean.
+6. **Docs**: when behaviour changes, update the matching page in `docs/` and check `mkdocs build --strict`.
+7. **Tests**: in the same commit as the code they test.
 
-1. **Atomic commits**: Each commit should represent a single logical change. Do not bundle multiple unrelated changes into one commit.
-2. **Clear scope**: A commit should be self-contained and complete for its stated purpose. If a change requires modifications across multiple files for a single feature or fix, that is acceptable as one commit.
-3. **Descriptive messages**: Use clear, concise commit messages that explain **what** changed and **why**. Follow the convention: `<type>: <description>` where type is one of: `feat`, `fix`, `docs`, `refactor`, `cleanup`, `test`, `chore`.
-4. **Avoid mega-commits**: Do not combine unrelated features, fixes, or cleanup into a single large commit. Split them into separate, focused commits.
-5. **Branch organization**: Use feature branches (`feat/<name>`, `fix/<name>`, `docs/<name>`, `refactor/<name>`) for development. Keep `master` clean with logical, reviewable commits.
-6. **Documentation updates**: When changing behavior, update the corresponding documentation page in `docs/` and verify `mkdocs build --strict` passes.
-7. **Test updates**: Include test changes in the same commit as the code they test, when they are directly related to that code change.
+## Revision log
 
-### Revision 2 — Bug fixes + control panel + segment visualization (2026-10-27)
+Newest first. One entry per revision; details in git history.
 
-**User-reported issues fixed:**
-
-| Issue | Root Cause | Fix |
-|-------|-----------|-----|
-| Playback doesn't work | CSP missing `media-src` — `<audio>` blocked from loading `http://127.0.0.1:8000` | Added `media-src 'self' http://127.0.0.1:8000` to CSP in `index.html` and `tauri.conf.json` |
-| No album art in search | CSP `img-src` missing `lh3.googleusercontent.com` (YouTube Music thumbnails) | Added `https://lh3.googleusercontent.com` to `img-src` |
-| Cookie auth shows signed_in but likes/playlists fail | `YTMusic(auth=cookie_string)` — ytmusicapi expects headers dict, not raw Cookie string | Changed `get_client()` to pass `auth=self.get_auth_headers()` (dict with Cookie + Authorization + Origin) |
-| `transformCallback` error on backend start | `encoding: "utf-8"` option in Tauri shell plugin spawn causes internal error | Removed `encoding` option from `Command.create()` and `Command.sidecar()` calls |
-| Firefox browser import fails | No helpful error for locked profile; no cookie filtering | Added better error messages, YouTube-relevant cookie filtering, Firefox-specific hint |
-
-**New features:**
-
-| Feature | Files |
-|---------|-------|
-| **Tkinter control panel** | `amp/amp_control.py` (deleted in Revision 14; `app.py` remains) — double-click GUI: start/stop/restart backend + frontend, force-kill port 8000/1420, health check, live log |
-| **Segment visualization in player bar** | `PlayerBar.tsx` redesigned — seek bar is now segment-colored rectangles (green=downloaded, yellow=downloading+pulse, gray=pending, red=error), played portion overlaid, click-to-seek |
-| **Cache info display** | New `GET /api/stream/cache-info` endpoint + `getCacheInfo()` in streaming service + cache bar in player (size, usage %, song/segment counts) |
-| **Player bar height** | Increased from 80px to 96px to accommodate cache info row |
-
-**New API endpoint:**
-- `GET /api/stream/cache-info` — returns `{total_bytes, total_mb, max_mb, usage_pct, file_count, song_count, songs[]}`
-
-### Revision 3 — yt-dlp format selector fix (2026-10-27)
-
-**User-reported issue:** `ERROR: [youtube] Cjtt_BlQ6Us: Requested format is not available` — playback fails for videos without itag 140.
-
-**Root cause:** Format selector `"140/bestaudio"` was too strict. When a video doesn't have itag 140 AND `bestaudio` also fails to match, yt-dlp returns an error instead of falling back.
-
-**Fix in `backend/services/streaming.py`:**
-- Changed format selector from `"140/bestaudio"` to `"140/bestaudio/best"` — always falls back to `best`
-- Added `_try_extract()` helper with two-attempt strategy:
-  1. Primary: `"140/bestaudio/best"` — prefers itag 140, falls back gracefully
-  2. Fallback: `"best"` with `prefer_audio=True` — gets any format, then filters for audio-only in Python
-- Audio format selection in Python: prefers itag 140 → MP4/M4A container → highest bitrate
-- Added `nocheckcertificate` and `socket_timeout=15` for robustness
-- Added negative cache (`_extract_failures` dict, 5-min TTL) — failed extractions are not retried for 5 minutes, preventing yt-dlp hammering
-- Better error logging: logs available format IDs when no audio formats found
-- Better 404 error message: "Stream not available - could not extract audio URL (video may be unavailable, region-locked, or format not found)"
-- `refresh_stream_url()` now also clears the negative cache
-
-**Frontend build**: `npm run build` succeeds — TypeScript compiles, Vite bundles 48 modules (191.68 kB JS, 7.95 kB CSS).
-
-### Revision 4 — yt-dlp "page needs to be reloaded" fix (2026-10-29)
-
-**User-reported issue:** `ERROR: [youtube] V_CqKqi1_Ec: The page needs to be reloaded` — repeated yt-dlp extraction failures, resulting in 404 on `/api/stream/{id}/audio`.
-
-**Root cause:** yt-dlp's default web client on `music.youtube.com` triggers YouTube's stale-player-response detection ("The page needs to be reloaded"). The `music.youtube.com` subdomain is more aggressive about this check than `www.youtube.com`.
-
-**Fix in `backend/services/streaming.py`:**
-
-- **Changed watch URL** from `https://music.youtube.com/watch?v={id}` to `https://www.youtube.com/watch?v={id}`
-- **Multi-strategy player client rotation** in `_extract_stream_url()` — tries 8 strategies in sequence:
-  1. `player_client=android` + `po_token=android` + `bestaudio/best`
-  2. `player_client=android` + `po_token=android` + `best`
-  3. `player_client=web_safari` + `bestaudio/best`
-  4. `player_client=web_safari` + `best`
-  5. `player_client=tv_embedded` + `bestaudio/best`
-  6. `player_client=tv_embedded` + `best`
-  7. `player_client=mweb` + `bestaudio/best`
-  8. `player_client=mweb` + `best`
-- Each strategy builds its own `extractor_args` with `js_runtimes=node` + `player_client=...` + optional `po_token=...`
-- First successful extraction wins; subsequent strategies are skipped
-- Negative cache (5-min TTL) still applies after all 8 strategies fail
-
-**Why this works:** The `android` player client uses a different API endpoint that doesn't trigger YouTube's web-client bot detection. `web_safari` and `tv_embedded` are additional fallbacks for videos where android is restricted.
-
-> **Correction (Revision 7 / Phase 0):** client rotation was a no-op until Phase 0. The list-form `extractor_args` (`{"youtube": ["js_runtimes=node", "player_client=..."]}`) is silently ignored by yt-dlp, so `player_client`, `po_token` and `js_runtimes` never took effect. Every success was with yt-dlp's default client, and the explanation above was never actually tested.
-
-**Test results:** 147 unit tests pass (`pytest -m "not integration"`). Frontend build succeeds.
-
-### Revision 5 — yt-dlp format errors + integration download test (2026-10-29)
-
-**User-reported issue:** `ERROR: [youtube] Tmz3mpOq8aE: Requested format is not available` — yt-dlp format selector fails even with `bestaudio/best` and `best` fallbacks.
-
-**Root cause:** When yt-dlp's format selector matches nothing, it raises `DownloadError("Requested format is not available")` before returning the info dict. This means Python-side format filtering never runs. Some videos have formats that don't match `bestaudio` or `best` selectors (e.g., only video-only formats, or formats with unusual codec combinations).
-
-**Fix in `backend/services/streaming.py`:**
-
-- **Added `"worst"` format selector** as a third fallback per player client (12 strategies total: 4 clients x 3 format selectors)
-- **Auto-retry without format selector** in `_try_extract()`: when `DownloadError` contains "not available", strips the `format` key from ydl_opts and retries. yt-dlp then uses its default behavior and returns all formats for Python-side filtering.
-- **`_log_available_formats()` diagnostic**: when all 12 strategies fail, runs a final extraction with `listformats=True` and logs every available format (itag, ext, codecs, bitrate, URL presence). Helps identify region-locks, age-restrictions, or truly unavailable videos.
-- `prefer_audio` now applies to both `"best"` and `"worst"` format selectors
-
-> **Correction (Revision 7 / Phase 0):** client rotation was a no-op until Phase 0 (list-form `extractor_args`). The integration successes below all came from yt-dlp's default client.
-
-**New integration test:** `backend/tests/test_integration_download.py` — **VERIFIED PASSING**
-
-| Test | Song | Result |
-|------|------|--------|
-| `test_download_chunks` | `Tmz3mpOq8aE` (user's failing song) | PASSED — 37 segments, 3.62 MB, all verified, 0.5s |
-| `test_download_chunks` | `BAgTQhR8MLo` (default) | PASSED — 37 segments, 4.17 MB, all verified |
-| `test_download_chunks_quick` | Both songs | PASSED — init + 5 segments verified |
-
-Run with:
-```bash
-cd /e/Documents/TRAVAIL/packages/AMP2/amp
-
-# Default song (BAgTQhR8MLo) — both tests
-venv/Scripts/python.exe -m pytest backend/tests/test_integration_download.py -m integration -v -s
-
-# Your failing song
-AMP_TEST_SONG_ID=Tmz3mpOq8aE venv/Scripts/python.exe -m pytest backend/tests/test_integration_download.py -m integration -v -s
-```
-
-**Bugs found & fixed during testing:**
-- `temp_dirs` fixture sets `CACHE_MAX_SIZE_MB=1` (1 MB) — full song downloads (~4 MB) triggered LRU eviction mid-download, deleting earlier segments. Fixed by overriding `CACHE_MAX_SIZE_MB=10000` in the integration test fixture.
-- `test_integration.py` had a `ScopeMismatch` bug — module-scoped `streaming_service` fixture using function-scoped `temp_dirs`. Changed to function scope in both integration test files.
-
-**Test results:** 147 unit tests pass, 2 integration download tests **VERIFIED PASSING** (real network).
-
----
-
-
-### Revision 6 — Runtime fixes (2026-10-30)
-
-**Bug fixes:**
-
-| Issue | Root Cause | Fix |
-|-------|-----------|-----|
-| Vite command not found in frontend | PATH issue on Windows where `node_modules/.bin` isn't available to subprocess | Changed `vite` to `npx vite` in all npm scripts in `package.json` |
-| Force kill says "nothing running" but port is in use | `is_port_open()` used socket-based check, `force_kill_port()` used netstat-based check - mismatch between methods | Enhanced `force_kill_port()` with multi-stage approach: 1) kill listening processes, 2) if port still open via socket test, find and kill any process using the port, 3) if still open, report as TIME_WAIT state |
-| UnicodeDecodeError on French Windows | `text=True` uses cp1252 encoding which can't decode UTF-8 characters in netstat output | Replaced `text=True` with explicit `decode('utf-8', errors='ignore')` in all subprocess.run calls |
-
-**Improvements to force kill:**
-- Added `is_port_open()` (socket-based) for checking if port accepts connections
-- Added `is_port_listening()` (netstat-based) for checking if there's a LISTENING process
-- Added `find_any_pid_on_port()` to find any process using the port (not just listeners)
-- Added `/T` flag to `taskkill` to kill child processes
-- Check return codes from kill commands
-- Better error messages for TIME_WAIT state
-
-**Test results**: claimed 147 unit tests pass. In fact the suite was at 18 failed / 54 errors under pydantic 2.14 (see Revision 7).
-
-### Revision 7 — Phase 0: safety net + hotfixes (2026-10-31)
-
-Plan: `improvement-plan/phase-0-safety-net.md` (removed, see git history) · Branch: `fix/phase-0-safety-net`
-
-| # | Problem | Fix |
-|---|---------|-----|
-| F1 | Unit suite: 18 failed, 54 errors. `monkeypatch.setattr(settings, "_cache_dir", …)` on pydantic private attrs; with pydantic 2.14, `undo()` *deletes* them | `Settings.configure_paths(data_dir, db_file)` + `snapshot_paths()` / `restore_paths()` in `config.py`. `temp_dirs` fixture uses them; `test_auth.py` uses `temp_dirs`. No test patches private settings attrs any more |
-| F2 | `extractor_args` was list-form, so yt-dlp ignored `player_client`, `po_token` and `js_runtimes` | `build_ydl_opts()` in `streaming.py`: top-level `js_runtimes={"node": {}}`, `extractor_args={"youtube": {"player_client": [...]}}`. Removed the fake `po_token=android` and `nocheckcertificate` |
-| F3 | No JS challenge solver | `yt-dlp[default]` (pulls in `yt-dlp-ejs`). Startup logs whether `node` and `yt_dlp_ejs` are present (WARNING if missing) |
-| F9 | CDN 403 called `mark_expired()`, so the URL refresh extracted *without* cookies | Removed `mark_expired()` / `reset_expired()` from the segment-403 path. Session expiry stays in `youtube.py` and `status(verify=True)` |
-| F10 | Buffer-ahead window measured from song start (and O(n²)) | Duration accumulates from `start_index` (O(n)) |
-| F12 | Browser import stored every site's cookies (`… or True`) and made a network request just to load them | `filter_youtube_cookies()` in `auth.py` (youtube.com + subdomains; `.youtube.com` wins over subdomains). `import_browser` and `SignInFlow` use `yt_dlp.cookies.extract_cookies_from_browser()` (no network) |
-| F18 | AGENTS.md claims were inaccurate | Corrected test count, Revisions 4/5 notes, P2/P7 rows |
-
-**Found during integration testing** (two behaviour changes caused by making the options actually work):
-
-1. **`android` without a PO token returns only itag 18** (360p muxed video+audio, no itag 140). Once the shape was fixed, the app downloaded video, 7.3 MB instead of 4.2 MB. Following the plan's risk note, yt-dlp's default client (`None`) is now first in the strategy list. The diagnostic `_log_available_formats` also uses the default client.
-2. **With node + ejs available, yt-dlp's default client becomes `TVHTML5`**, and its URLs return **403 for about 5 s** after extraction (yt-dlp's `available_at`; yt-dlp itself sleeps "as required by the site"). Before, no JS runtime was ever configured, so yt-dlp fell back to `VISIONOS`, which has no delay. Fix: `_try_extract` now selects a format via `_select_audio_format()` and then `_wait_until_available()` sleeps until `available_at` (capped at `MAX_AVAILABLE_AT_WAIT_S = 30`). **Cost: first play of an uncached song takes about 5 s longer.** Phase 1 (client strategy as a setting) should revisit this.
-3. `test_integration_download.py` always asserted an `init.bin` file, which progressive streams never have (`has_init=False`). So it could not have passed for these songs, and the Revision 5 "VERIFIED PASSING" was not reproducible on the pre-Phase-0 code. The test now skips the init step when `has_init` is false.
-
-**Dependencies:** `requirements.txt` / `pyproject.toml` cap major versions (yt-dlp deliberately uncapped, now `yt-dlp[default]>=2026.10.26`). New `amp/requirements.lock` (`pip freeze`). A fresh venv built from it passes the unit suite. README documents installing from the lock and the yt-dlp upgrade procedure.
-
-**New tests:** `test_paths_survive_override_restore`, `test_temp_dirs_restores_paths` (config) · `TestBuildYdlOpts` (3), `TestCdn403::test_403_does_not_change_auth_state`, `TestBufferAhead` (2), `TestAvailableAt` (3) (streaming) · `TestFilterYoutubeCookies` (4) (auth) · `test_import_browser_keeps_only_youtube_cookies`, `test_import_browser_no_youtube_cookies` (endpoints).
-
-**Test results:** 182 unit tests pass, 0 failed, 0 errors (also `test_auth.py` alone, and in reversed file order). Integration download tests **pass** for `BAgTQhR8MLo` (4,172,237 B) and `Tmz3mpOq8aE` (3,797,479 B), both itag 140 via the default client.
-
-**Action for users:** anyone who used browser import before this revision has non-YouTube cookies stored in `ytm_session.json`. Log out and sign in again. Phase 5 migrates stored cookies.
-
-
-### Revision 8 — Logos, CI, badges (2026-10-31)
-
-Ported the useful pieces from the old `master` branch (a different, earlier layout: `app/` frontend, no DASH core) onto this codebase, then made the Tauri build actually work.
-
-| Area | Change |
-|------|--------|
-| **Logos** | `icon/logo-square.svg` + `icon/logo-round.svg` (repo root, used by README). Favicon set + `site.webmanifest` in `amp/frontend/public/`, linked from `index.html` (same-origin, CSP unchanged). Copies are byte-identical to `master`. |
-| **App icons** | Placeholder solid-colour icons replaced with a set generated from `logo-square.svg` (`npx tauri icon`): `32x32`, `128x128`, `128x128@2x`, `icon.png`, `icon.ico`, new `icon.icns` (added to `tauri.conf.json`). Unreferenced `256x256.png` / `512x512.png` placeholders removed. |
-| **Root README** | New `README.md` with the logo, CI/Codecov/Tauri badges, quick start, quality checks, doc index. (The repo had no root README.) Codecov badge points at `master` (`develop` doesn't exist). |
-| **Python CI** | `.github/workflows/python-ci.yml`: Python 3.13, `pip install -r amp/requirements.lock`, `ruff check amp/backend/`, `pytest -m "not integration" --cov`, Codecov upload (`CODECOV_TOKEN` secret, non-fatal). |
-| **Tauri CI** | `.github/workflows/tauri-build.yml`: builds the PyInstaller sidecar first (copied to `binaries/amp-backend-<target-triple>`), then `npx tauri build --bundles deb`; uploads the `.deb` as an artifact. Node 24, `dtolnay/rust-toolchain` (master used the archived `actions-rs`), Rust cache. |
-| **Ruff** | `.ruff.toml` from `master`, paths adapted; `fastapi.Depends/Query/Header` declared immutable (B008) instead of a blanket ignore. Fixed the 3 real findings: `l` → `row` (E741, `endpoints.py`), `noqa` with reason for backoff jitter (S311) and MPD parsing (S314). |
-| **Coverage** | `[tool.coverage.*]` in `amp/pyproject.toml` (master's root `.coveragerc` would not be read with CI's `cd amp`). Tests omitted, branch coverage on. `fail_under = 60` as a regression floor (actual 63%; master's 80% would fail immediately). |
-| **Deps** | `pytest-cov` and `ruff` added to dev deps; `requirements.lock` regenerated. |
-
-**Found and fixed while verifying the Tauri build locally:**
-- `Cargo.toml` requested `tauri` feature `shell-sidecar`, a **Tauri v1** feature that doesn't exist in v2, so the Rust shell had never compiled. Removed (sidecars come from `tauri-plugin-shell`). `npx tauri build --no-bundle` now succeeds (Windows, 2 min release build) with the PyInstaller sidecar present. `Cargo.lock` is now committed.
-- `amp/.gitignore` had `src-tauri/target/`, anchored to `amp/`, so it never matched `amp/frontend/src-tauri/target/`. Fixed, and added `frontend/src-tauri/gen/schemas/`, PyInstaller `/build/`, the copied sidecar, and coverage/ruff outputs.
-- `test_integration.py` had the same `init.bin` assumption as the download test (fails on progressive streams); fixed with the same `has_init` guard. It had never been run; all 8 tests now pass.
-
-**Not ported from master:** `CONTRIBUTING.md` (describes the old layout and a `develop` branch that no longer exists), `.gitattributes`, `activate.*`, `run.sh`, the old `app/` frontend and its docs.
-
-**Not verified:** the workflows themselves run only on GitHub; the Linux `.deb` bundle step and the Linux PyInstaller build were not run locally (the Windows equivalents were). The Codecov badge needs the `CODECOV_TOKEN` repository secret.
-
-**Test results:** 182 unit tests pass, coverage 63.3%, ruff clean, frontend build OK, Tauri release build OK (Windows), 12/12 integration tests pass.
-
-### Revision 14 — Phase 6: lifecycle & packaging (2026-10-31)
-
-Plan: `improvement-plan/phase-6-lifecycle-packaging.md` (removed, see git history) · Branch: `fix/phase-6-lifecycle`
-
-**6.0 — result.** With the old code, `npm run tauri dev` printed `Scoped command venv/Scripts/python.exe not found` (twice: React StrictMode mounts twice). `shell:allow-spawn` had no scope, so the shell plugin rejected **every** JS spawn (dev `Command.create` and prod `Command.sidecar` alike, `ProgramNotAllowed`), and `sidecar.ts` silently adopted whatever answered on :8000. **The Tauri app never started its own backend**, which explains the past "port already in use" / "works only if app.py runs" reports. Also: without an `env` option the plugin's JS path calls `env_clear()`, so even an allowed spawn would have lost `PATH` (and Node).
-
-| # | Problem | Fix |
+| Rev | Date | Summary |
 |---|---|---|
-| F14 | JS spawn always failed; no kill on exit; `shell:*` granted to the webview | New `src-tauri/src/backend.rs`: spawned in `setup()` (debug: `amp/venv` python or `AMP_PYTHON`, `-m backend.main`, cwd `amp/`; release: sidecar `amp-backend`), `set_process_group(true)` (Windows job object: the venv launcher and the PyInstaller bootloader each start a second process), env inherited + `PYTHONIOENCODING=utf-8`. `RunEvent::Exit` → `exit` on stdin, ≤ 2 s, then kill the tree. Commands `backend_info → {port, token: null}`, `backend_logs` (1000-line ring, so startup errors aren't lost), `restart_backend`; events `backend-log`, `backend-status`. `capabilities/default.json` = `core:default` only; `@tauri-apps/plugin-shell` removed from `package.json` |
-| — | Backend outlived a killed app | `--parent-watch`: daemon thread reads fd 0; EOF or `exit` → `server.should_exit` (graceful, lifespan shutdown), `os._exit` after 1.5 s at the latest (`backend/lifecycle.py`) |
-| — | Fixed port 8000 | Rust picks a free port (`AMP_PORT` overrides). `backend.main` binds the socket itself (`lifecycle.bind_socket`: `SO_EXCLUSIVEADDRUSE` on Windows instead of uvicorn's `SO_REUSEADDR`; real port known for `--port 0`) and runs `uvicorn.Server.run(sockets=[sock])`. `api.ts` base URL set once by `initBackend()` **before the first render** (`main.tsx`); outside Tauri it stays `http://127.0.0.1:8000`. CSP `connect-src` / `media-src` → `http://127.0.0.1:*` |
-| F16 | PyInstaller one-file: data next to `__file__` = temp extraction dir | `--data-dir` → `configure_paths(data_dir, data_dir/userdb.sqlite)`; Rust passes `app_data_dir()` (`%APPDATA%\com.amp.v2`). Without `--data-dir`: checkout → `amp/.amp/` as before; frozen → `config.app_data_dir()` (same dir as Tauri's). Dev hint logged if the data dir has no sign-in but `amp/.amp/cache/ytm_session.json` exists; credentials are never copied |
-| 6.3 | — | `<data>/backend.pid` = `{pid, port, started_at}`, removed on exit if still ours; startup WARNING if the recorded backend answers `/api/health` with that pid. `/api/health` adds `app: "AMP v2"`, `pid` |
-| 6.5 | Sidecar build steps only inline in CI; spec missing data files | `amp/scripts/build_sidecar.py [--skip-pyinstaller] [--smoke]`: PyInstaller → `rustc -vV` host triple → `binaries/amp-backend-<triple>[.exe]`; `--smoke` starts it on a free port with a temp data dir, checks health + search, closes stdin, expects exit. Tauri CI uses it. Spec: `collect_data_files("yt_dlp_ejs")` (also in yt-dlp's own hook), `ytmusicapi` locales, `collect_submodules("backend")` (the hand-written list lacked `backend.api.errors`), **`console=True`** (pipes must be real for `--parent-watch` / log forwarding; uvicorn's logging breaks on a `None` stdout; Tauri spawns with `CREATE_NO_WINDOW`) |
-| 6.6 | Two launchers | `amp_control.py` deleted. `app.py`: `AMP_PORT`; Force Kill reads `amp/.amp/backend.pid` first (only if `/api/health` on the recorded port answers with that pid: no PID-reuse kills), port scan as fallback; docstring and desktop-mode log say the Tauri app runs its own backend |
-| 6.7 | — | `RotatingFileHandler` 5 MB × 3 (`delay=True`) for `app.log` / `streaming.log`; `configure_logging(console=True)` (from `main`) also logs INFO+ to stderr, which is what the Logs page's "Backend stdout" now shows. `@app.on_event` → `lifespan`. `datetime.utcnow()` → `now(timezone.utc).replace(tzinfo=None)` (stored values stay naive UTC) |
-| 6.8 #6 | Two instances | **Single instance** (`tauri-plugin-single-instance`): a second launch exits and focuses the first window. Two backends sharing one data dir would each own the same segment cache (Phase 3 assumes one owner: eviction / startup reconcile in one deletes files the other serves) |
-| P7 | Windows encoding of sidecar output | Rust `String::from_utf8_lossy` + `PYTHONIOENCODING=utf-8` |
-| — | Sidebar status hidden | Found while smoke-testing: the fixed player bar covered the bottom 96 px of the sidebar, so "Backend: …" and the Phase 5 session badge were never visible. `.sidebar { padding-bottom: var(--player-bar-height) }` |
-
-**Smoke checklist 6.8**: release build `src-tauri/target/release/amp-v2.exe` (sidecar next to it, not installed), `%APPDATA%\com.amp.v2` moved aside first (it only held data from this revision's dev run):
-
-| # | Result |
-|---|---|
-| 1 | Backend healthy **1.5 s** after launch (port 23850); window shows "Backend: running" + "Signed out" (screenshot) |
-| 2 | Search: 20 results. `/play` + first 64 KB of `/audio` (206): uncached `Tmz3mpOq8aE` 3.5 s (first extraction in a fresh frozen process ~3 s, later ones ~1.4 s); `BAgTQhR8MLo` after restart 1.5 s (re-extraction, known open item). Via HTTP, not by clicking |
-| 3 | `CloseMainWindow()` → app exits, `Exit requested by the parent` → clean shutdown; **0** `amp-backend.exe` left, `backend.pid` removed |
-| 4 | `Stop-Process -Force` on the app → both `amp-backend.exe` gone after **0.8 s** (parent watch) |
-| 5 | Relaunch → 5 / 27 entries of `BAgTQhR8MLo` still downloaded, `/play` reports `cached_ahead: true`; data dir holds `cache`, `logs`, `userdb.sqlite`, `backend.pid` |
-| 6 | Second launch exits with code 0; still 1 `amp-v2`, 2 `amp-backend` (one backend) |
-
-Dev (`npm run tauri dev`, with the user's app.py backend still on :8000): backend spawned on free port 25471 with the app data dir, `node` found (PATH kept), window rendered against it; closing the window → `Exit requested by the parent`, nothing left. `app.py` Force Kill tested against a scratch backend on :18001 (killed via `backend.pid`, file removed; falls back to the port scan when nothing is recorded).
-
-**Installers:** `npx tauri build` → `src-tauri/target/release/bundle/msi/AMP v2_2.0.0_x64_en-US.msi` (34 MB) and `bundle/nsis/AMP v2_2.0.0_x64-setup.exe` (32 MB). Not installed.
-
-**Not verified:** installing either installer; the Logs page "Backend stdout" tab and the Restart button inside the window (screenshots only, no clicks); Linux/macOS (CI builds the Linux sidecar + `.deb` and now smoke-tests the sidecar, not run until pushed); the CI smoke's search from a GitHub runner (YouTube may treat it differently).
-
-**New tests:** `test_lifecycle.py` (22): `test_main_data_dir_arg`, defaults unchanged, frozen default = app data dir, identifier; `test_pid_file_written`, foreign PID file kept, junk ×4, live/stale backend detection, probe of a non-AMP port; health `app` + `pid`; `bind_socket` port 0 / port in use; parent watch EOF / `exit` / invalid fd; `test_parent_watch_exits_on_eof` ×2 (real `python -m backend.main --parent-watch --port 0 --data-dir <tmp>`, EOF and `exit`, exits < 3 s); `test_rotating_handlers`. Rust: `free_port_is_bindable`.
-
-**Action for users:** the desktop app now keeps its data in `%APPDATA%\com.amp.v2\` (macOS `~/Library/Application Support/com.amp.v2/`, Linux `~/.local/share/com.amp.v2/`), not `amp/.amp/`: sign in again in the app; songs re-download on first play. `app.py` / manual runs keep using `amp/.amp/`. `amp_control.py` is gone; use `app.py`. Run `python scripts/build_sidecar.py` once: Tauri needs `binaries/amp-backend-<triple>` even for `tauri dev`.
-
-**Test results:** 379 unit tests pass, coverage 87% (`lifecycle.py` 86%; `main.py` 40% in-process, its run path is covered by the subprocess tests), ruff clean, 12 vitest, 1 cargo test, `npm run build` OK, integration 11/11, `build_sidecar.py --smoke` OK.
-
-### Revision 13 — Phase 5: auth simplification & local API hardening (2026-10-31)
-
-Plan: `improvement-plan/phase-5-auth-security.md` (removed, see git history) · Branch: `fix/phase-5-auth-security`
-
-| # | Problem | Fix |
-|---|---|---|
-| F12 | `ytm_session.json` written before Phase 0 could hold every site's cookies, flattened by name (another site's `SID` overwrote YouTube's) and sent to YouTube/googlevideo | Store **v2** `{"version": 2, "cookies": [{name, value, domain}]}` (atomic, 0600 unchanged). `AuthService` keeps `list[Cookie]`; every entry point goes through `set_cookies` → `filter_youtube_cookies` (now returns `Cookie`s, one per (name, domain)). Pasted header → domain `.youtube.com`. Cookie header via `cookies_by_name` (`.youtube.com` wins); Netscape file writes each cookie once on its own domain (was: every cookie on both `.youtube.com` and `.music.youtube.com`) |
-| 5.2 | — | v1 file (no `version`) migrated on load: only the 19-name allowlist (`V1_COOKIE_ALLOWLIST`), domain `.youtube.com`, file rewritten, `Migrated credential store v1→v2: kept N of M cookies` (counts only). M > 3·N → WARNING + `migrated_from_full_jar: true` in `/api/auth/status` until the next sign-in/logout. The store is now loaded in `_startup`, so the migration is in the startup log |
-| — | Four sign-in flows; browser polling read Chrome while opening the default browser; Chrome/Edge decryption broken on Windows | Removed `services/signin_flow.py` + `test_signin_flow.py`, `/start-signin-flow`, `/signin-status/{id}`, `/cancel-signin-flow/{id}`, `/open-signin`, their `api.ts` methods/types. `/import-browser` accepts **Firefox only** (400 otherwise, 404 if no YouTube cookies, "Close Firefox" hint on a locked DB). `youtube_login.rs` reads `music.youtube.com` **and** `www.youtube.com`, merged by (name, domain); incognito + 10 min timeout kept |
-| F15 | Any web page could POST to `127.0.0.1:8000` in open mode (logout, seek, stop, `DELETE /logs`…) | Middleware, every mode: non-GET/HEAD/OPTIONS with an `Origin` not in `ALLOWED_ORIGINS` → 403 `{"detail": {"code": "forbidden_origin", …}}`; no `Origin` (curl, control panel, `app.py`) allowed. GET `/api/auth/*` with `Sec-Fetch-Site: cross-site` and no allowed Origin → 403. `https://tauri.localhost` added to `ALLOWED_ORIGINS`. CORS unchanged |
-| — | Host check split on `:` → `[::1]:8000` rejected | `host_name()`: bracketed IPv6 kept whole, port stripped only when there is exactly one `:` |
-| 5.4 | Session expiry invisible outside the Auth page | `authSession.ts` (shared store): sidebar badge `Signed in` / `Signed out` / `Session expired — reconnect` → `/auth`; `/api/auth/status` polled every 60 s while the backend runs (in-flight guard, P12) and after any 401 from `/api/user/*` (`setUserUnauthorizedHandler` in `api.ts`). Library / Playlists show `SignInPrompt` ("Sign in to see your library" + button) when signed out or on 401 |
-| 5.3 | — | Auth page = status (+ migration warning), "Sign in with YouTube", collapsed "Advanced" (paste Cookie header, Firefox import). `mightBeTauri()` checks `__TAURI_INTERNALS__` (was `true` in any browser) |
-
-**Verification** (scratch backend on :8765, `AMP_DIR`/`DB_PATH` in the scratchpad; the user's backend and `.amp/` untouched):
-- Synthetic v1 store, 246 cookies incl. `SAPISID`/`__Secure-3PAPISID`/`bank_session` (fake values): startup `app.log` → `Migrated credential store v1→v2: kept 5 of 246 cookies` + the WARNING; file rewritten as v2 with 5 allowlisted names on `.youtube.com`; status `signed_in`, `migrated_from_full_jar: true`; no cookie value in either log. (The real `ytm_session.json` was already v2, so no pre-Phase-0 copy was available.)
-- Headless Edge, attacker page served by `python -m http.server 9999` doing `fetch(POST /api/auth/logout, /stream/stop, /auth/import-browser; DELETE /logs; GET /auth/status?verify=true)`: from `http://localhost:9999` every POST → 403 `forbidden_origin` (logged `Rejected …`), the auth GET → 403, `DELETE` stopped by the CORS preflight; from `http://127.0.0.1:9999` every POST → 403. Still `signed_in` after both.
-- `cargo check` OK (`youtube_login.rs`), `npm run build` OK, integration 11/11 (`BAgTQhR8MLo`).
-
-**Not verified:** the webview sign-in itself (Google login → Library shows liked songs) — needs a manual run in the Tauri window; the sidebar badge / Library prompt in the real window (only `npm run build` + vitest). From a page on `127.0.0.1:<other port>` (same-site), `GET /api/auth/status` is not blocked (`Sec-Fetch-Site: same-site`); only a local process can serve such a page, and it could call the API directly anyway. The user agent in `youtube_login.rs` still says Chrome 125. **Not done:** 5.6 (per-launch token), which waits for Phase 6.
-
-**New tests:** `test_auth.py`: `TestStoreV2` (`test_store_v2_roundtrip`, pasted header domain, v2 load drops foreign domains, unknown version ignored, `test_netscape_file_uses_real_domains`), `TestMigrateV1` (`test_migrate_v1_keeps_allowlist_only` — 300 cookies, warning, no values logged —, small file no warning, flag cleared by sign-in, allowlist), `test_tauri_cookies_filters_domains`, filter tests moved to `Cookie` / `cookies_by_name`. `test_endpoints.py`: Firefox-only import (×3 browsers), locked-profile hint, `/tauri-cookies` keeps domains / 400, status flag, `test_signin_flow_routes_removed` (×4), `TestCrossSite` (`test_cross_origin_post_forbidden`, 4 state-changing routes, with token, `test_allowed_origin_post_ok` ×4 origins, `test_post_without_origin_ok`, cross-origin GET outside auth OK, cross-site auth GET 403, same-site OK, app origin OK, preflight not blocked), `TestHostParsing` (8 cases, `test_ipv6_loopback_host_accepted`, 3 rejected hosts). Frontend: `authSession.test.ts` (badge labels, 401 from `/api/user/*` refreshes the status). Removed: `test_signin_flow.py`.
-
-**Action for users:** if the Auth page shows the migration warning, sign in again. Browser import from Chrome/Edge/Brave is gone — use "Sign in with YouTube" (or paste a Cookie header).
-
-**Test results:** 357 unit tests pass, coverage 88%, ruff clean, 12 vitest tests, `npm run build` OK, `cargo check` OK, 11/11 integration.
-
-### Revision 12 — Phase 4: playback UX & frontend (2026-10-31)
-
-Plan: `improvement-plan/phase-4-playback-ux.md` (removed, see git history) · Branch: `fix/phase-4-playback-ux`
-
-| # | Problem | Fix |
-|---|---|---|
-| F13 | `/ready` polled every 1 s (≤ 30×) before `audio.src`; the loop was never cancelled, so song A could take the element after song B | `POST /play` **resolves the stream** (blocks for the extraction), queues buffer-ahead, returns `{song_id, duration_ms, mime_type, segment_count, is_dash, epoch, cached_ahead}`. PlayerBar `load()`: generation counter + `AbortController` on `/play`; `audio.src` only if still the newest load. `/ready` and `api.isStreamReady` deleted |
-| — | Same race on the backend: a slow `/play` for A finishing after `/play` B took the session back | `_play_seq`: only the newest `/play` starts the session and buffer-ahead; an overtaken one returns `message: "superseded"` |
-| F17 | Invalid `song_id` → `ValueError` → 500 | `InvalidSongId(ValueError)` + handlers in `api/errors.py` (`ApiError`, `InvalidSongId`, `ExtractionError`) → `{"detail": {"code", "message"}}`. `invalid_id` 400, `unavailable`/`no_audio` 404, `auth_required` 401, `node_missing` 503, `extract_failed`/`segment_unavailable` 502. `/audio` and `/stream/info` use the same shape (was `{detail, code}` / plain 404) |
-| — | "Audio error (code 4)" for every failure | `fetchApi` parses the code into `ApiError.code`; `player/errors.ts` `describeError` / `describeMediaError` → e.g. "Sign in required for this track", "Node.js not found. Install it and restart." |
-| — | Queue/volume lost on restart (old "settings persistence: done" was false) | `state.ts` saves `{songs, currentIndex, volume}` to `localStorage` `amp.queue.v1` (debounced 500 ms, try/catch); restored **paused**, play button runs `load()`. `player/persistence.ts` validates what it reads (11-char IDs, clamped index/volume) |
-| — | Next song only extracted after `ended` | `< 20 s` left or `> 80 %` → `POST /buffer/{next}?mode=prefetch` once per song: resolves stream info, queues init + 2 segments at **LOW**, session untouched (`StreamingService.prefetch`) |
-| 3.x | Mid-stream abort (Phase 3) left to the player | One reload per load on `MEDIA_ERR_NETWORK`, resuming at `currentTime` |
-| 4.7 | — | `SegmentBar.tsx` (unused) deleted; segment offsets in a `useMemo` (was O(n²) per render); `duration_ms` from `/play` shown until `loadedmetadata`; spinner on the play button while loading |
-
-**TTFA (G1)**, measured in headless Edge (Chromium, same engine as WebView2) on the real frontend (Vite dev) against a scratch backend, from `load()` to the `playing` event, logged as `TTFA <id> <ms> cached=<bool>` to the API relay (Logs → "API relay"):
-
-| Case | TTFA |
-|---|---|
-| Stream resolved + init/seg 0 on disk (`cached=true`) | **24 ms**, 26 ms (restored song, play clicked), 45 ms (next song after prefetch) |
-| Uncached (`cached=false`): extraction (~1.1 s) + sidx head + seg 0 | 1,354 / 1,363 / 1,571 ms |
-| Segments on disk but backend restarted (`cached=true`, stream info must be re-extracted) | 1,035 ms — the open "cached songs still need an extraction after restart" item |
-
-Target met for the cached case (< 300 ms); uncached ≈ extraction + one segment.
-
-**Verification** (same headless setup; page requests to `:8000` rewritten to the scratch backend over CDP — the user's own backend on :8000 was left running and untouched):
-- 5 songs selected within ~2 s (4 uncached, last cached): relay shows **one** `src` line (`src Tmz3mpOq8aE (resolved in 1121 ms)`), the element plays it, backend session = `Tmz3mpOq8aE`.
-- Unknown ID `aaaaaaaaaaa` → player shows "No audio stream for this track" (backend: 404 `no_audio`).
-- Reload → queue (2 songs), index 1, volume 0.3 restored (`audio.volume` 0.3), no `src`, paused; clicking play → `src` + TTFA 26 ms.
-- 2-song queue, seek to 12 s before the end: the next song was extracted + sidx-indexed at the seek (prefetch), its `/play` took 9 ms and TTFA 45 ms `cached=true`.
-- HTTP: `/api/stream/bad/play` → 400 `invalid_id`; `/ready` → 404; prefetch → `queued: 2` (init already from the head fetch), session unchanged, init + seg 0–1 downloaded.
-- Integration: 11/11 (`BAgTQhR8MLo`), 3/3 download (`Tmz3mpOq8aE`).
-- `grep -rn "isStreamReady\|/ready" frontend/src backend` → nothing.
-
-**Not verified:** the Tauri window itself (WebView2) — only Chromium headless; the network-error reload against a real mid-stream abort; the region-locked case (no region-locked ID at hand; the `unavailable` path is unit-tested).
-
-**New tests:** `test_play_api.py` (24): `test_invalid_song_id_is_400`, invalid ID on 4 routes, every extraction code → status/code (+ unknown → `extract_failed`, failed `/play` doesn't take the session), `test_play_unavailable_is_404_coded`, table-build failure, `test_audio_error_is_json`, `/stream/info` coded, `test_ready_route_removed`, `test_play_returns_summary`, `cached_ahead`, `test_superseded_play_leaves_session_alone`, `test_prefetch_uses_low_priority`, prefetch then play re-ranks LOW → CRITICAL, prefetch error, bad mode 422, default mode. Frontend (new `vitest`, `npm test`, also in Tauri CI): `src/player/player.test.ts` (10: `describeError`, `describeMediaError`, persistence round-trip/junk/clamping, `shouldPrefetch`). `test_serving.py` assertions moved to the new body shape.
-
-**Test results:** 325 unit tests pass, coverage 86% (`api/errors.py` 96%), ruff clean, 10 vitest tests, `npm run build` OK, 14/14 integration.
-
-### Revision 11 — Phase 3: download pipeline correctness (2026-10-31)
-
-Plan: `improvement-plan/phase-3-download-pipeline.md` (removed, see git history) · Branch: `fix/phase-3-download-pipeline`
-
-`services/streaming.py` is now a package (public imports unchanged, `from backend.services.streaming import …`):
-
-| Module | Role |
-|---|---|
-| `service.py` | `StreamingService` facade + singleton (endpoint-facing methods keep their signatures) |
-| `registry.py` | `SegmentRegistry`: `MISSING → QUEUED → IN_FLIGHT → DONE / ERROR`, one lock, per-key `Event`; `Priority`, `SegmentStatus` |
-| `downloader.py` | `DownloadManager` (heap of hints, workers `claim()` before working) + `fetch_segment()` (P14 checks unchanged, unique tmp) |
-| `cache.py` | `CacheStore`: paths, `layout.json`, per-file size map + running total, mtime LRU, reconciliation |
-| `serving.py` | `serve_audio_range()`, `parse_range()`, `SegmentUnavailable` |
-| `playback.py` | `PlaybackSession`, `buffer_plan()` |
-
-| # | Problem | Fix |
-|---|---------|-----|
-| F6 | `_downloading` filled at enqueue: after a seek, `enqueue()` of a still-queued index returned False and the worker then dropped the stale item | Registry `request()`: QUEUED + newer epoch / better priority → re-rank and push a new heap item; workers skip items whose (priority, epoch) is no longer current. Heap order (priority, newer epoch, seq). Epoch = priority, not cancellation; in-flight downloads finish |
-| F7 | `download_segment_sync` polled 30 s on queued work; `_iter_audio_range` skipped missing segments → body shorter than `Content-Length` (h11 error) | `ensure_segment()`: DONE → path; IN_FLIGHT → `Event.wait(SEGMENT_SYNC_TIMEOUT_S=15)`; else claim and fetch in the handler thread (jumps the queue). `/audio` ensures the first segment **before** headers (failure → JSON 502 `segment_unavailable`, or 404/401/502/503 from the extraction code); a later failure **raises** in the generator (connection aborted, never short). Evicted-before-open → one retry |
-| F8 | Sync downloads not registered → worker + handler fetch the same segment, shared `NNNN.tmp`, Windows `PermissionError` | Only the claim holder downloads. `mkstemp(dir=song_dir, prefix="NNNN.", suffix=".tmp")` + fsync + `atomic_replace()` (retries `PermissionError`; identical-size winner → drop ours) |
-| F11 | Eviction by download mtime (FIFO), full dir scan after every download, DB `last_accessed` never read | `touch()` bumps mtime when served (≤ once / 30 s) → real LRU. Running total from a size map; `maybe_evict()` O(1) under the limit. Protected: playing song's init + `index ≥ current − SEGMENT_BEHIND`, IN_FLIGHT, `layout.json`. `_touch_segment` DB writes removed |
-| — | Status stayed DOWNLOADED after eviction; `/chunks` did `path.exists()` per segment every 500 ms | Eviction → `registry.evicted()` (MISSING). `/chunks` = `registry.snapshot()`, no filesystem calls; registry rebuilt by `reconcile()` at startup |
-| 3.5 | Buffer-ahead on every 2 s position report | `update_position` re-requests only when the playhead enters a new segment. `start_playback` unqueues other songs' queued items (epochs are per-song, so they can't be ranked against each other); `stop_playback` unqueues the song (no epoch bump) |
-
-**Also fixed on the way:** eviction must not delete a directory that only holds `layout.json` — the in-memory table still refers to it, and a manifest-less dir would be purged as legacy at the next start (caught by `test_manifest_not_counted_or_evicted`). `/audio` errors are JSON `{detail, code}` (the old empty-body 404 special case is gone; the `<audio>` element sees an error either way). New setting `SEGMENT_SYNC_TIMEOUT_S = 15`.
-
-**Verification (live backend, scratch data dir, `CACHE_MAX_SIZE_MB=20`):**
-- Seek check (`BAgTQhR8MLo`, uncached): play, then `seek` + 64 KB Range read at 0 % / 75 % / 10 % / 75 % / 10 % → 0.01 / 0.03 / 0.12 / 0.01 / 0.00 s. No `Too little data` (h11) in `app.log`. Via HTTP, not the Tauri UI.
-- LRU check: full playback of songs 1–5, replay song 1 after 31 s (touch throttle), then songs 6–8 (8 songs, ~37 MB through a 20 MB cache, 3 eviction rounds). Song 1 — the **oldest download** — is still fully cached (27/27 files); songs 2–4 were evicted. Every full GET returned exactly `Content-Length` bytes while evicting. No ERROR lines.
-- Integration: 11/11 (`BAgTQhR8MLo`), 3/3 download (`Tmz3mpOq8aE`), including `test_concat_equals_cdn_file`.
-- `grep -rn "time.sleep(0.05)\|_downloading\|_seg_status" backend/services` → nothing.
-
-**New tests:** `test_registry.py` (15), `test_downloader.py` (19: ordering incl. newer epoch, `test_seek_requeues_queued_segment`, `test_superseded_heap_item_skipped`, unqueued item skipped, handler error → ERROR, `fetch_segment` status classification / Content-Range / short read / `test_unique_tmp_names`), `test_cache.py` (12: `test_lru_respects_access`, touch throttle, `test_eviction_updates_registry`, protected + in-flight, manifest never evicted, `test_running_total_matches_scan`, reconcile rebuilds registry), `test_serving.py` (23: Range parsing, `test_range_first_segment_failure_returns_json_error`, `test_range_mid_stream_failure_raises`, vanished file refetch, extraction code → status, endpoint 502 / abort / 416), `test_playback.py` (7). `test_streaming.py`: `TestEnsureSegment` (`test_sync_and_worker_single_download`, `test_sync_claims_queued_item`, failure, timeout, vanished file, layout change mid-download, `/chunks` after eviction without FS calls), `TestBufferPolicy` (`test_position_update_noop_within_segment`, seek, cross-song unqueue, stop). Removed: old `TestDownloadManager` / `TestSegmentTask` / `TestPlaybackInfo` / `TestSegmentPaths` / `TestAtomicWrite` / `TestSegmentStatus` (moved or rewritten against the registry).
-
-**Not verified:** the abort-mid-stream behaviour in the real webview (only via TestClient, which re-raises); Phase 4 handles retries in the player.
-
-**Test results:** 301 unit tests pass, coverage 84% (registry/playback 100%, serving 94%, downloader 92%, cache 88%, service 81%), ruff clean, 14/14 integration.
-
-### Revision 10 — Phase 2: exact segment table from the fMP4 sidx (2026-10-31)
-
-Plan: `improvement-plan/phase-2-segment-table.md` (removed, see git history) · Branch: `fix/phase-2-segment-table`
-
-**Spike 2.0 — GO.** `scripts/dump_boxes.py` (kept as a dev tool) on itag 140, first 64 KB:
-
-| Song | ftyp | moov | sidx | first moof | sidx refs |
-|---|---|---|---|---|---|
-| `BAgTQhR8MLo` (4,172,237 B) | 0 / 24 | 24 / 644 | 668 / 344 | 1012 | 26 × ~10 s |
-| `Tmz3mpOq8aE` (3,797,479 B) | 0 / 24 | 24 / 735 | 759 / 320 | 1079 | 24 × ~10 s |
-
-(offset / size in bytes.) The first 1,012 B of `BAgTQhR8MLo` (ftyp + moov + sidx, metadata only) are the fixture `backend/tests/fixtures/itag140_head.bin`.
-
-| Area | Change |
-|---|---|
-| **2.1 `utils/mp4.py`** (new, pure) | `iter_boxes` (largesize, size 0), `parse_sidx` (v0/v1, rejects hierarchical), `parse_fmp4_index` → `Mp4Index(init_end, timescale, segments)`, `NeedMoreData(required_len)`. Durations rounded cumulatively so they sum exactly. `init_end` = first fragment − 1, so the virtual file **is** the CDN file (`total_bytes == filesize`) |
-| **2.2 `_build_from_stream`** | m4a/mp4: `Range: bytes=0-65535` (reads at most that even if Range is ignored), parse sidx; on `NeedMoreData` re-fetch `required_len + 64 KB` (≤ 2 re-fetches, stops on a short read). Falls back to proportional on no sidx / HTTP error / sidx total ≠ extracted filesize; WARNING if durations differ from yt-dlp's by > 1 s. Head bytes stored as `init.bin` (no extra request on first play). `is_dash` kept for the API, now means "exact table" |
-| **2.3 MPD removed** | `parse_mpd` and helpers deleted; `utils/dash.py` → `utils/layout.py` (`SegmentInfo`, `StreamInfo`, Range math), `test_dash.py` → `test_layout.py` (MPD tests dropped, layout/Range tests kept on a hand-built table). XML sniffing removed. Proportional builder renamed `_build_proportional_info` |
-| **2.4 Cache identity** | `StreamInfo.itag` + `layout_id` = sha256(`itag|total_bytes|n_segments|method`)[:16]. `segments/{song_id}/layout.json` (atomic). Different `layout_id` → purge the song's dir, DB rows and in-memory statuses, log INFO, write the new manifest. `reconcile_cache()` deletes dirs without `layout.json` and rows whose `layout_id` ≠ the manifest's. LRU/cache-info ignore `layout.json` |
-| **2.5 DB** | `Segment.layout_id` (String(16), nullable). `init_db()` drops + recreates `segments` if a column is missing (cache only) |
-| **2.6 Spec** | DESIGN_DOC_2.md §6.1–6.4, §6.6, module tree, tests, glossary; READMEs |
-| API | `/api/stream/info/{id}` adds `method`, `itag`, `layout_id` |
-
-**Not done:** the optional 2.4 bonus (serve a cached song from `layout.json` without extracting after restart) — every first request after restart still extracts (~1 s with visionos). Workers already downloading under an old layout when a refresh changes it can still write one stale file after the purge (Phase 3 pipeline work).
-
-**Verification:**
-- Live backend on the Phase 1 scratch data dir (old `segments` table, pre-Phase-2 segments for `Tmz3mpOq8aE`): startup logged `segments table lacks ['layout_id']; recreating it` and `… 1 song dirs without layout.json removed`.
-- `GET /api/stream/info/BAgTQhR8MLo`: `is_dash: true`, `method: sidx`, 26 segments (9,948 / 9,984 / 9,985 … ms), sum 257,613 ms (yt-dlp: 258 s), `total_bytes` 4,172,237, `init_range` [0, 1011].
-- Seek to 50 % (`POST /api/stream/seek?position_ms=128806`) → `current_segment_index` 12 (segment 12 spans ~119.8–129.8 s); segments 12–15 downloaded. Via the API, not the Tauri UI.
-- Integration `test_concat_equals_cdn_file`: sha256(init + segments) == sha256(one GET of the URL) for **both** pinned songs (26 and 24 segments). All 14 integration tests pass.
-- `grep -rn parse_mpd backend` → nothing. `googlevideo` / `SAPISID=` in logs: 0.
-
-**New tests:** `test_mp4.py` (18: boxes basic/largesize/size-0/offset/partial/invalid, sidx v0/v1/hierarchical/not-sidx/truncated, synthetic index, `first_offset`, cumulative rounding, `NeedMoreData`, no sidx before fragment, real fixture, virtual layout == file offsets). `test_layout.py` (layout_id stability/identity). `test_streaming.py`: `TestSidxTable` (exact table + init cached + manifest, 50 % maps to the right segment, big-moov re-fetch, short file doesn't loop, filesize mismatch / no sidx / HTTP 403 fall back), `TestLayoutIdentity` (layout change purges, same layout keeps cache, legacy dir deleted, foreign-layout rows dropped, manifest not counted/evicted), `TestSegmentsTableMigration`. Integration: `TestConcatEqualsCdnFile`.
-
-**Action for users:** the first start after this revision deletes the whole segment cache (pre-Phase-2 dirs have no `layout.json`). Songs re-download on next play.
-
-**Test results:** 228 unit tests pass, coverage 72% (`mp4.py` 84%, `layout.py` 96%), ruff clean, 14/14 integration.
-
-### Revision 9 — Phase 1: single-flight stream extraction (2026-10-31)
-
-Plan: `improvement-plan/phase-1-extraction.md` (removed, see git history) · Branch: `fix/phase-1-extraction`
-
-New module **`backend/services/extractor.py`** (no FastAPI, no segments): `build_ydl_opts`, `select_audio_format` (pure), `ExtractedStream` / `ExtractionError`, `SingleFlight`, `BoundedDict` (moved here, re-exported by `streaming.py`), `StreamExtractor.get()` / `refresh(song_id, stale_url)`, `get_extraction_dependencies()`. `streaming.py` no longer imports yt-dlp (1,633 → 1,269 lines).
-
-| # | Problem | Fix |
-|---|---------|-----|
-| F2 | Up to 24 extractions for a failing song (15 client × format strategies + retry without format) | One extraction per client in `YTDLP_PLAYER_CLIENTS`, `format="bestaudio/best"` + `ignore_no_formats_error`, format chosen in Python. "Video unavailable"/"Private video" stops the rotation; "Sign in to confirm"/age-gate tries the next client and is reported as `auth_required` |
-| F4 | Duration always 180 s (DB never filled), size from a `clen=1` probe that appended a parameter, MIME hard-coded | `ExtractedStream` carries `duration_ms` (`info["duration"]`), `filesize` (`filesize` or URL `clen=`), `mime_type`, `title`, `expires_at` (URL `expire=` − 300 s). `_get_song_duration` / `_get_song_title` and the 180 s fallback removed; HEAD / `Range: 0-0` probe only when size is unknown |
-| F5 | `/play`, `/chunks`, `/info`, `/audio` and 4 workers each built the stream; each 403'd worker re-extracted | `SingleFlight` around extraction **and** around stream-info building. 403 refresh passes the URL that failed: N workers → one re-extraction, late workers reuse the rebuilt table |
-| — | `best`/`worst` could return muxed video (itag 18) | `select_audio_format` only returns audio-only formats (itag `STREAM_FORMAT` > m4a/mp4 by bitrate > any, e.g. 251). Muxed fallback is a commented-out hook |
-| — | `_extract_failures` unbounded and unlocked | Negative cache is a `BoundedDict` of `(failed_at, ExtractionError)`: 5 min, 30 min for `unavailable`; `node_missing` not cached; `refresh()` clears it |
-| 1.7 | — | `/api/health` → `services.extractor: {node, ejs, yt_dlp}` (computed once at startup). No `node` → `ExtractionError("node_missing")` without running yt-dlp |
-
-**Client list — measured 2026-10-31, yt-dlp 2026.10.26, songs `BAgTQhR8MLo` / `Tmz3mpOq8aE`, signed out:**
-
-| Client | Audio-only formats | itag 140 `available_at` delay | Extract time |
-|---|---|---|---|
-| `visionos` | 139, 140, 249, 250, 251 | none | ~1.0 s |
-| `default` (tv_samsung + visionos + web) | 139, 140, 249–251 | ~5 s (URL is tv_samsung's) | ~1.8 s |
-| `tv_samsung` | 140, 249–251 | ~5 s | ~1.6 s |
-| `web`, `web_music`, `web_safari`, `tv`, `ios`, `mweb`, `android_vr` | none | — | — |
-
-So **`YTDLP_PLAYER_CLIENTS = ["visionos", "default"]`**. This removes the ~5 s first-play wait (F20). `visionos` has `SUPPORTS_COOKIES=False`, and yt-dlp silently drops such clients when a cookie file is passed, so the extractor runs cookie-less clients **anonymously** and passes cookies only to clients that support them (`default`). Env override is JSON: `YTDLP_PLAYER_CLIENTS='["default"]'`. Re-measure after yt-dlp upgrades (extract with each client, list audio-only itags and `available_at`).
-
-**Other changes:** `streaming.log` also receives `backend.services.extractor`; `amp-backend.spec` hidden import added; `refresh_stream_url(song_id, stale_url=None)` is a thin wrapper over `StreamExtractor.refresh`; `ExtractedStream` is never persisted (P24).
-
-**Verification:**
-- Live backend (scratch data dir), `/play` + 5× `/chunks` + 5× `/info` + `/audio` concurrently, then 6 more `/chunks` polls: **one** `Extracted stream` line (`client=visionos: itag=140 audio/mp4 mp4a.40.2, 3797479 bytes, 234.0s`); first 64 KB of audio in 1.3 s; `googlevideo` / `SAPISID=` in logs: 0. Not clicked through the Tauri UI.
-- `GET /api/stream/info`: `Tmz3mpOq8aE` 234.0 s / 47 segments, `BAgTQhR8MLo` 258.0 s / 52 segments (both previously 37 from the fake 180 s); durations equal yt-dlp's.
-- Integration: 10/10 (`test_integration.py` 8 + download 2) for `BAgTQhR8MLo`, 2/2 download for `Tmz3mpOq8aE`; stream info built in 1.2–1.3 s.
-
-**Not verified:** the signed-in path with real cookies (anonymous `visionos` URL fetched with Cookie headers) — unit-tested with mocks only.
-
-**New tests:** `test_extractor.py` (43): format selection (itag 140, rejects muxed 18/22, opus fallback, mp4-over-bitrate, empty/URL-less formats, `clen=`, `expire=`, metadata), error classification, `build_ydl_opts` (moved), `SingleFlight`, `StreamExtractor` (single-flight 10 threads → 1 extraction, error propagation, positive/expired/negative caches, 30 min `unavailable`, refresh dedup by stale URL, layout-change warning, rotation stop/next/no-audio/auth_required, `node_missing`, cookie file only for cookie clients and deleted), `available_at` (moved). `test_streaming.py`: `TestCdn403` rewritten + `test_concurrent_403s_rebuild_once`, `TestStreamInfo` (extracted duration → 49 × 5 s for 245 s, probe only without size, no 180 s fallback, stream-info single-flight, `ExtractionError` → `None`). `test_endpoints.py`: health reports extractor prerequisites. Removed: `TestTryExtract`, old `TestAvailableAt` / `TestBuildYdlOpts` in `test_streaming.py`.
-
-**Test results:** 221 unit tests pass, coverage 69.9% (`extractor.py` 95%), ruff clean.
-
-## Completed Work
-
-### Phase 1 — Backend core + auth (DONE)
-
-**Files created:**
-```
-amp/
-├── backend/
-│   ├── __init__.py
-│   ├── main.py                  # entry: argparse (--token, --port, --data-dir, --parent-watch) + uvicorn
-│   ├── lifecycle.py             # socket bind, backend.pid, parent watch (Revision 14)
-│   ├── config.py                # pydantic-settings singleton, creates .amp/ dirs on import
-│   ├── api/
-│   │   ├── __init__.py
-│   │   ├── server.py            # FastAPI app, AuthMiddleware (Bearer + Host check P17), CORS, startup/shutdown
-│   │   ├── endpoints.py         # library + streaming + logs routes (specific before parameterized, P9)
-│   │   └── auth_routes.py       # 6 auth endpoints: status, cookies, cookie-header, import-browser (Firefox), tauri-cookies, logout
-│   ├── services/
-│   │   ├── __init__.py
-│   │   ├── auth.py              # AuthService singleton, CredentialStore (atomic write, 0600), SAPISIDHASH, lazy YTMusic
-│   │   ├── youtube.py           # YouTubeService singleton, ytmusicapi wrapper, SongData/PlaylistData dataclasses
-│   │   ├── extractor.py         # StreamExtractor (Revision 9)
-│   │   └── streaming/           # package since Revision 11: service, registry, downloader, cache, serving, playback
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── models.py            # Song, Playlist, PlaylistSong, LikedSong, Segment (SQLAlchemy 2.x)
-│   │   └── session.py           # engine (WAL + busy_timeout=5000, P20), session_scope, get_db
-│   ├── utils/
-│   │   ├── __init__.py
-│   │   ├── logger.py            # app.log + streaming.log + in-memory ring buffer (1000 lines)
-│   │   ├── mp4.py               # fMP4 box + sidx parser (pure, Revision 10)
-│   │   └── layout.py            # SegmentInfo/StreamInfo + Range math (was dash.py; MPD parser removed in Revision 10)
-│   └── tests/                   # 127 unit tests + integration tests
-├── pyproject.toml
-├── requirements.txt
-├── amp-backend.spec             # PyInstaller spec for sidecar binary
-├── .gitignore
-└── README.md
-```
-
-**API routes (29 total, verified via OpenAPI schema):**
-- `GET /`, `GET /api/health` (no auth)
-- `GET /api/search`, `GET /api/song/{id}`, `GET /api/artist/{id}`, `GET /api/album/{id}`, `GET /api/playlist/{id}`
-- `GET /api/user/playlists`, `GET /api/user/likes`
-- `GET /api/stream/info/{id}`, `GET /api/stream/{id}/audio` (Range), `GET /api/stream/{id}/chunks`, `POST /api/stream/{id}/play`, `POST /api/stream/buffer/{id}`
-- `POST /api/stream/pause`, `POST /api/stream/resume`, `POST /api/stream/stop`
-- `POST /api/stream/position`, `POST /api/stream/seek`
-- `GET /api/stream/playback-state`, `GET /api/stream/logs`
-- `GET /api/auth/status`, `POST /api/auth/cookies`, `POST /api/auth/cookie-header`, `POST /api/auth/import-browser` (Firefox only), `POST /api/auth/tauri-cookies`, `POST /api/auth/logout` (`/open-signin` and the sign-in flow routes removed in Revision 13)
-- `GET /api/logs`, `POST /api/logs`, `DELETE /api/logs`
-
-### Phase 2 — DASH streaming core (DONE)
-
-**`utils/dash.py`** — Pure-function MPD parser *(historical: removed in Revision 10; replaced by `utils/mp4.py` (sidx) + `utils/layout.py`)*:
-- SegmentList form (YouTube's audio manifests): `SegmentURL@mediaRange` → exact byte ranges
-- SegmentTemplate + SegmentTimeline form: `S@t/d/r` entries → durations, `$Number$` token resolution
-- Init segment: `SegmentList/Initialization@sourceURL` or `SegmentTemplate@initialization` + `@indexRange`
-- Token resolution: `$RepresentationID$`, `$Bandwidth$`, `$Ext$`, `$Number$`
-- `build_virtual_layout()` — maps virtual byte offsets to segment files
-- `map_range_to_segments()` — maps HTTP Range header to segment file reads (spans boundaries)
-- `position_ms_to_segment_index()` — exact mapping for seek
-- `_parse_duration_to_ms()` — ISO 8601 duration parsing
-
-**`services/streaming.py`** — StreamingService singleton:
-- `DownloadManager`: PriorityQueue + ThreadPoolExecutor(4), daemon threads, start/stop lifecycle
-- Segment download pipeline (P14): verify 206 + Content-Range match + byte count before writing
-- Atomic writes (P15): tmp file + `os.replace()`
-- Retry logic: 403 → refresh URL + rebuild segment table (P4), 429/5xx/timeout → backoff (0.5/1/2s + jitter), other 4xx → permanent ERROR
-- LRU cache eviction: 500MB → 80%, protects current song's segments ahead of playhead
-- Startup reconciliation: orphan files, missing files, size mismatches
-- Real HTTP Range support (P16): 200 (full), 206 (partial), 416 (unsatisfiable)
-- Epoch-based seek cancellation (P18): bump per-song epoch, stale workers discard results
-- Buffer-ahead: CRITICAL (init + seg 0), HIGH (next 2), NORMAL (within 30s)
-- Progressive fallback (P5): 3-strategy content-length probe (clen= param → HEAD → Range 0-0)
-- yt-dlp extraction (P2): moved to `services/extractor.py` in Revision 9 — `js_runtimes=node`, Netscape cookie file (P23: 0600, deleted in finally)
-- BoundedDict for in-memory caches (P19: max 256 entries)
-
-**Pitfalls addressed:** P1–P5, P13–P24 (see design doc §10)
-
-### Phase 3 — Tauri shell + player (DONE)
-
-**Frontend files:**
-```
-amp/frontend/
-├── package.json                 # React 18, react-router-dom 6, @tauri-apps/api 2, @tauri-apps/plugin-shell 2, Vite 5
-├── vite.config.ts               # Port 1420, Tauri dev host support
-├── tsconfig.json                # Strict TS, vite/client types
-├── tsconfig.node.json
-├── index.html                   # CSP meta (§8.5)
-├── src/
-│   ├── main.tsx                 # React entry with BrowserRouter; renders after initBackend() (Revision 14)
-│   ├── App.tsx                  # Sidebar nav, backend status, sidecar lifecycle, PlayerBar
-│   ├── api.ts                   # Typed fetch wrapper, all API methods, TypeScript types
-│   ├── sidecar.ts               # Backend client (Revision 14): backend_info → api.ts base URL, health poll 1s (P12), backend-log events + ring
-│   ├── state.ts                 # Frontend-owned queue + playback state (useSyncExternalStore)
-│   ├── styles.css               # Dark theme, all components
-│   ├── components/
-│   │   ├── PlayerBar.tsx        # Play/pause/stop/next/prev, segment bar (click-to-seek, 500ms poll, P12), volume, load()
-│   │   └── SongList.tsx         # Reusable song list with play-on-click
-│   ├── player/                  # errors.ts, persistence.ts, prefetch.ts + player.test.ts (Revision 12)
-│   └── pages/
-│       ├── Search.tsx           # Query box, results list, play per result
-│       ├── Library.tsx          # Liked songs list
-│       ├── Playlists.tsx        # User playlists (cards; no track view yet)
-│       ├── Auth.tsx             # Import-from-browser, sign-in, status, logout
-│       └── Logs.tsx             # Backend stdout, streaming logs, API log relay
-└── src-tauri/
-    ├── tauri.conf.json          # productName "AMP v2", CSP, externalBin: ["binaries/amp-backend"], icons
-    ├── Cargo.toml               # tauri 2 + tauri-plugin-shell + tauri-plugin-single-instance
-    ├── build.rs
-    ├── src/main.rs              # single-instance + shell plugins, backend::start in setup, backend::stop on RunEvent::Exit
-    ├── src/backend.rs           # spawns/owns/stops the backend (Revision 14)
-    ├── capabilities/default.json # core:default only (no shell:* since Revision 14)
-    ├── icons/                   # generated from icon/logo-square.svg: icon.png, icon.ico, icon.icns, 32x32, 128x128, 128x128@2x
-    └── binaries/                # gitignored; amp-backend-<target-triple>[.exe] from scripts/build_sidecar.py (CI does this)
-```
-
-**Build verified**: `npm run build` → TypeScript compiles clean, Vite bundles successfully.
-
-### Phase 4 — Polish (DONE)
-
-- **Logs page**: Backend stdout/stderr ring buffer, streaming logs, API log relay
-- **Error surfacing**: Backend status indicator in sidebar (starting/running/stopped/error), manual restart button
-- **Settings persistence**: Frontend-owned queue in `state.ts` via `useSyncExternalStore` *(correction: nothing was persisted until Revision 12)*
-
-### Phase 5 — Packaging + tests + README (DONE)
-
-- **PyInstaller spec**: `amp/amp-backend.spec` — bundles backend as `amp-backend` binary
-- **Tauri icons**: Placeholder icons created (solid dark color, multiple sizes)
-- **Tests**: 127 unit tests pass across 5 test files:
-  - `test_dash.py` — 40+ tests: MPD parser (SegmentList, SegmentTemplate, error cases), virtual layout, range mapping, position-to-segment
-  - `test_auth.py` — SAPISIDHASH, CredentialStore, AuthService, Netscape cookie file
-  - `test_streaming.py` — song_id validation (P13), BoundedDict, SegmentTask priority, DownloadManager, PlaybackInfo, epoch, atomic write (P15), cache reconciliation, LRU eviction
-  - `test_endpoints.py` — auth middleware (401/403), route ordering (P9), playback endpoints, log relay, auth endpoints
-  - `test_config.py` — config defaults, dir creation, models CRUD
-  - `test_integration.py` — marked `@pytest.mark.integration`, NOT RUN (requires network + cookies)
-- **README.md**: Complete with architecture, quick start, configuration, API reference, testing, security
-
-### Revision — Open mode + venv (2026-10-27)
-
-**User request**: App must work out of the box without token/auth. Token and cookie auth should be optional features for user-specific data (likes, playlists), not required for search/streaming.
-
-**Changes made:**
-
-| File | Change |
-|------|--------|
-| `backend/config.py` | `AUTH_TOKEN` comment updated — optional, defaults to `None` |
-| `backend/main.py` | `--token` CLI arg is now optional (removed `required=True`) |
-| `backend/api/server.py` | AuthMiddleware: Bearer token check only enforced when token is configured. Host header validation always enforced (DNS-rebinding guard). Removed `RuntimeError` when no token. |
-| `backend/services/auth.py` | `get_cdn_headers()` and `get_auth_headers()` no longer send empty Cookie header when signed out — omits Cookie entirely |
-| `frontend/src/api.ts` | `fetchApi()` only attaches `Authorization` header when `authToken` is set. Added `clearAuthToken()` export. |
-| `frontend/src/sidecar.ts` | Removed token generation. Dev spawn uses `venv/Scripts/python.exe` (venv python). No `--token` passed to backend. |
-| `backend/tests/conftest.py` | Added `client_no_auth` fixture (app without token) and `no_auth_headers` fixture |
-| `backend/tests/test_endpoints.py` | Added `TestOpenMode` class — 10 tests: health, search, streaming, auth status, user endpoints (401), log relay, Host validation, playback state, seek — all without token |
-| `backend/tests/test_auth.py` | Added 2 tests: CDN/auth headers omit Cookie when signed out |
-| `backend/tests/test_config.py` | Assert `AUTH_TOKEN is None` by default |
-| `README.md` | Updated: open-by-default, optional auth, venv instructions, security section |
-
-**Auth model:**
-- **No token configured** → API is open (Host header still validated)
-- **Token configured** → All requests require `Authorization: Bearer <token>`
-- **No YouTube cookies** → Search, browse, play work; `/api/user/likes` and `/api/user/playlists` return 401
-- **YouTube cookies configured** → User-specific features work (via Auth page)
-
----
-
-## Architecture Decisions Made
-
-1. **Path format**: Files use `E:/Documents/...` (forward slashes) for `write_file` tool compatibility on Windows
-2. **Segment table**: exact, from the fMP4 `sidx` for itag 140 (init = ftyp+moov+sidx, virtual file == CDN file); proportional for WebM / no sidx. The MPD parser was removed (Revision 10)
-3. **Cache identity**: `segments/{song_id}/layout.json` holds the `layout_id`; a different layout purges the song's cache; dirs without it are deleted at startup (Revision 10)
-4. **Proportional fallback**: 5-second segments (SEGMENT_TARGET_SEC=5) from the extracted size + duration
-5. **In-memory caches**: BoundedDict (insertion-order, max 256) instead of functools.lru_cache for mutability
-6. **Tauri shell plugin**: Uses `@tauri-apps/plugin-shell` (v2) instead of deprecated `@tauri-apps/api/shell`; registered as `tauri-plugin-shell` in Cargo.toml
-7. **Sidecar spawn** (Revision 14): from Rust only (`backend.rs`): debug → venv python, release → `sidecar("amp-backend")`; free port, `--data-dir <app data dir>`, `--parent-watch`. (Until Revision 14 the JS spawn was rejected by the empty `shell:allow-spawn` scope.)
-8. **TestClient Host header**: Must set `Host: 127.0.0.1:8000` to pass middleware (P17)
-9. **Windows file permissions**: `chmod 0600` not honored on Windows — tests relaxed with `platform.system()` check
-10. **Open mode by default**: No token = no auth required. Token is opt-in for additional security.
-11. **Settings paths**: tests redirect storage with `settings.configure_paths()` / `restore_paths()`, never by monkeypatching private attrs (Revision 7).
-12. **yt-dlp client order**: `YTDLP_PLAYER_CLIENTS = ["visionos", "default"]` — visionos (no `available_at` delay, runs anonymously since it can't take cookies), then yt-dlp's default (~5 s `available_at` wait, uses cookies). One extraction per client (Revision 9).
-13. **CI**: lint + unit tests run from the lock file; coverage config lives in `amp/pyproject.toml`; Tauri CI builds the PyInstaller sidecar before `tauri build` (Revision 8).
-14. **Extraction is single-flight**: `StreamExtractor` (services/extractor.py) owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
-15. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; request handlers use `ensure_segment()` and never poll; the cache LRU clock is file mtime (Revision 11)
-16. **Play contract**: `/play` resolves the stream before returning, newest `/play` owns the session; the player sets `audio.src` only for its newest load. Streaming errors are `{detail: {code, message}}` (`api/errors.py`) (Revision 12)
-18. **Lifecycle (Revision 14)**: the backend exits when its stdin closes (`--parent-watch`), writes `<data>/backend.pid`, binds its own socket; the app is single-instance; logs rotate 5 MB × 3
-17. **Auth (Revision 13)**: one primary sign-in (Tauri webview → `/tauri-cookies`); credential store v2 keeps `(name, value, domain)`, youtube.com only; v1 files migrated at startup. Cross-site requests are refused by `Origin` / `Sec-Fetch-Site` in every mode; requests without `Origin` stay allowed for non-browser clients
-
-## All 24 Pitfalls Addressed
-
-| Pitfall | Implementation |
-|---------|---------------|
-| P1 — CDN requires Cookie | Cookie sent when authenticated; omitted when signed out (most URLs work without it) |
-| P2 — yt-dlp needs JS runtime | Top-level `js_runtimes={"node": {}}` + `yt-dlp-ejs` solver (Revision 7; the earlier extractor_args form was ignored). `/api/health` reports node/ejs/yt-dlp; no node → `node_missing` (Revision 9) |
-| P3 — Cache expensive lookups | `StreamExtractor`: single-flight + BoundedDict until URL `expire=`; negative cache 5/30 min (Revision 9) |
-| P4 — Stream URLs expire | 403 → `refresh(song_id, stale_url)` + rebuild segment table, once per stale URL (Revision 9) |
-| P5 — Content-Length strategies | Size from extraction (`filesize` / URL `clen=`); HEAD → Range 0-0 probe only if unknown (Revision 9) |
-| P6 — Subprocess pipe deadlock | The shell plugin reads stdout/stderr on separate threads; `backend.rs` consumes both from one event channel |
-| P7 — Windows encoding | `String::from_utf8_lossy` in `backend.rs` + `PYTHONIOENCODING=utf-8` for the backend (Revision 14) |
-| P9 — FastAPI route order | Specific routes before parameterized |
-| P11 — localStorage relay | `POST /api/logs` → `GET /api/logs` |
-| P12 — Overlapping polls | In-flight guard on health poll + SegmentBar poll |
-| P13 — song_id validation | `^[A-Za-z0-9_-]{11}$` before file paths |
-| P14 — Verify 206 + Content-Range | Check status, Content-Range match, byte count |
-| P15 — Atomic writes | unique `mkstemp` tmp + fsync + `os.replace()` (Windows `PermissionError` retried) (Revision 11) |
-| P16 — Real Range support | 200/206/416 with correct headers |
-| P17 — Bind 127.0.0.1 + token + Host | Host always validated (`[::1]` accepted); token check only when configured; foreign `Origin` on state-changing requests → 403 (Revision 13) |
-| P18 — Seek epoch | Per-song counter; a seek's requests outrank older queued work, in-flight downloads finish (Revision 11) |
-| P19 — Bound in-memory caches | BoundedDict max 256 entries |
-| P20 — SQLite WAL + busy_timeout | WAL mode, busy_timeout=5000 |
-| P21 — Blocking I/O in `def` | All blocking handlers are plain `def` |
-| P22 — Webview codec support | Default itag 140 (AAC/MP4) |
-| P23 — yt-dlp cookie temp file | Netscape file 0600, deleted in finally |
-| P24 — Never log CDN URLs/Cookie | Sanitized logging |
-
-## Known Issues / TODO
-
-- [x] ~~Integration tests not run~~ — all 12 pass (Revision 8)
-- [x] ~~PyInstaller binary not built~~ — builds locally (Windows) and in Tauri CI (Linux)
-- [x] ~~Tauri app not built~~ — `shell-sidecar` (v1 feature) removed; release build succeeds (Revision 8). MSI + NSIS installers built locally (Revision 14), not installed
-- [x] ~~Icon is a placeholder~~ — generated from the AMP logo (Revision 8)
-- [x] ~~First play of an uncached song waits ~5 s for `available_at`~~ — `visionos` first (Revision 9); the wait remains only when falling back to `default`
-- [x] ~~DASH path never runs~~ — itag 140 gets an exact table from the fMP4 `sidx` (Revision 10); WebM stays proportional
-- [ ] Cached songs still need an extraction after restart (Phase 2's optional `layout.json` bonus not done)
-- [x] ~~Sidecar runtime not verified~~ — release app starts, plays and stops its sidecar (Revision 14 smoke checklist)
-- [x] ~~P7 (Windows encoding of sidecar output) not handled~~ — Revision 14
-- [ ] First extraction in a freshly started sidecar takes ~3 s (frozen yt-dlp imports), later ones ~1.4 s; could be pre-warmed in a startup thread
-- [ ] Installers not installed/tested; Logs page "Backend stdout" and Restart button not clicked in the window; Linux/macOS lifecycle untested (CI builds the Linux sidecar + `.deb` only)
-- [ ] Installers are unsigned (SmartScreen warning); antivirus false positives on the one-file sidecar are possible (switch the spec to one-folder if they happen)
-- [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
-- [ ] MSE upgrade (§8.4) — optional, not done in Phase 4
-- [ ] Phase 4 checked in headless Chromium only, not inside the Tauri/WebView2 window
-- [ ] Phase 5 webview sign-in (Google login in the Tauri window → liked songs) not run manually; `youtube_login.rs` user agent still Chrome 125
-- [ ] Phase 5.6 (automatic per-launch token) — unblocked: `backend_info` already returns `token` (always `null`); needs a random token from Rust passed as `--token`, `setAuthToken` in the frontend, and `?t=<token>` accepted on `/audio` (`<audio>` can't send headers; compare with `hmac.compare_digest`). Manual runs (curl, `app.py`, browser dev) keep open mode
-- [x] ~~Playlists page: clicking a playlist does nothing~~ — Revision 16
+| 23 | 11-13 | **Cleanup.** Removed dead code: DB models `Playlist` / `PlaylistSong` (never written; existing tables in old DBs are left alone), `AuthService.reset_expired` / `get_cookies_dict`, `StreamingService.refresh_stream_url`, `logger.clear_ring`; frontend `api.getSong` / `getArtist` / `getStreamInfo`, `getAuthToken` / `clearAuthToken`, `isTauriAvailable`. `DESIGN_DOC.md` (API, pages, player, CSP, DB), `TASKS.md` (done items removed), docs (layout, DB tables, tests, CI) and this file updated. 423 unit tests, ruff clean |
+| 22 | 11-13 | **Crossfade, normalization, now playing, albums.** Two `<audio>` elements: in the last `fadeSec` s the next song takes the backend session and the old element fades out over its open `/audio` request (backend unchanged). Normalization from YouTube's `loudnessDb` (`GET /api/song/{id}/loudness`, ytmusicapi `get_song`), gain `min(1, 10^((−6 − dB)/20))`, target −6 dB; Web Audio rejected (needs CORS on `/audio`). `/now-playing` page, `/albums/:id` (`GET /api/album/{id}`, `GET /api/song/{id}/album`), queue ⋮ menu, default volume 0.5. Verified in the real Tauri window over CDP |
+| 21 | 11-13 | **OS media controls** (Media Session API in `PlayerBar.tsx` → Windows SMTC / MPRIS / macOS). Fixed missing artwork: `googleusercontent.com` answers a `localhost` Referer with a 429 → `<meta name="referrer" content="no-referrer">` (pitfall P31). `AMP.bat` added |
+| 20 | 11-07 | **1.0 naming**: "v2" dropped, identifier `com.amp.player` (old `com.amp.v2` data dir moved once by `backend.rs`), `DESIGN_DOC_2.md` → `DESIGN_DOC.md`. Docs site redesign (custom home, screenshots from `scripts/docs_screenshots.mjs`, glightbox), launcher page |
+| 19 | 11-07 | **Developer page** (`/developer`), space bar play/pause, **Settings** (theme dark/light/system, accent, fade), **listening history** (table `listening_history`, `/api/history`, `player/history.ts`). `build.rs` fails clearly when the sidecar is missing |
+| 18 | 11-07 | `app.py` launcher redesign (tkinter + stdlib only): sidebar pages, cards with live status, segment strip, log filters |
+| 17 | 11-07 | **OBS widget**: `backend/widget.py` stdlib server on `WIDGET_PORT` (8001, `0` = off), `GET /`, `/now.json`, loopback only; `/play` takes optional `{title, artist, cover_url}` |
+| 16 | 11-06 | Covers fixed (CSP `*.googleusercontent.com`, `Cover.tsx` fallbacks), playlist page, **play queue** (`player/queue.ts`, `QueuePanel`), **saved queues** (`/api/queues`), **likes** (`rate_song`), UI redesign (tokens in `styles.css`, `Icon`, `SongMenu`, toasts/dialogs). `dragDropEnabled: false` for HTML5 drag in WebView2 |
+| 15 | 10-31 | MkDocs Material site (`docs/`), READMEs cut down, plan files removed |
+| 14 | 10-31 | **Lifecycle & packaging** (refactor 6). The Tauri app had never started its own backend (`shell:allow-spawn` had no scope). Now Rust spawns/owns/stops it (`backend.rs`, job object), free port, `--data-dir`, `--parent-watch` (exits on stdin EOF), `backend.pid`, single instance, rotating logs, `build_sidecar.py --smoke`, `capabilities` = `core:default` only. MSI + NSIS built |
+| 13 | 10-31 | **Auth & local API** (refactor 5): credential store v2 `(name, value, domain)`, v1 migration (allowlist), one primary sign-in (Tauri webview), Firefox-only import, cross-site `Origin` check in every mode, IPv6 Host parsing, sidebar session badge |
+| 12 | 10-31 | **Playback UX** (refactor 4): `/play` resolves the stream and returns a summary; newest load/`/play` wins (`_play_seq`, generation counter); coded errors `{detail: {code, message}}`; queue/volume persisted; next-song prefetch; vitest. TTFA cached 24 ms, uncached ~1.4 s |
+| 11 | 10-31 | **Download pipeline** (refactor 3): `streaming/` package, `SegmentRegistry` state machine, `ensure_segment()` (no polling, no short bodies), unique tmp files + `atomic_replace`, real LRU by mtime, O(1) eviction check |
+| 10 | 10-31 | **Exact segment table from the fMP4 `sidx`** (refactor 2): `utils/mp4.py`, init = ftyp+moov+sidx so the virtual file is the CDN file; MPD parser removed; `layout_id` + `layout.json` cache identity |
+| 9 | 10-31 | **Single-flight extraction** (refactor 1): `services/extractor.py`; one extraction per client, format chosen in Python (audio-only); real duration/size/MIME; clients `["visionos", "default"]` (no ~5 s `available_at` wait) |
+| 8 | 10-31 | Logos and app icons, root README, CI (ruff, pytest + coverage, Tauri build), `Cargo.toml` fixed (v1-only `shell-sidecar` feature: the Rust shell had never compiled) |
+| 7 | 10-31 | **Safety net** (refactor 0): unit suite actually green (pydantic private-attr monkeypatching broke 72 tests), `extractor_args` shape fixed (client rotation had been a no-op), `yt-dlp[default]` (EJS solver), cookie domain filtering, `requirements.lock` |
+| 2–6 | 10-27 – 10-30 | Early fixes: CSP `media-src`/`img-src`, ytmusicapi auth headers, format selector fallbacks, `www.youtube.com` watch URL, Windows encoding/port-kill fixes in the launcher. Several claims of that period were later found wrong (client rotation never applied, test counts) — see Revision 7 |
+
+## Architecture Decisions
+
+1. **Segment table**: exact, from the fMP4 `sidx` for itag 140 (init = ftyp+moov+sidx, virtual file == CDN file); proportional 5 s segments for WebM / no sidx (Revision 10).
+2. **Cache identity**: `segments/{song_id}/layout.json` holds the `layout_id`; a different layout purges the song's cache; dirs without it are deleted at startup (Revision 10).
+3. **In-memory caches**: `BoundedDict` (insertion order, max 256) instead of `functools.lru_cache`, for mutability.
+4. **Sidecar spawn**: from Rust only (`backend.rs`): debug → venv python, release → `sidecar("amp-backend")` via `tauri-plugin-shell` (Rust side; the webview has no `shell:*`). Free port, `--data-dir <app data dir>`, `--parent-watch` (Revision 14).
+5. **TestClient Host header**: must be `127.0.0.1:8000` to pass the middleware (P17).
+6. **Windows file permissions**: `chmod 0600` isn't honoured on Windows; tests check `platform.system()`.
+7. **Open mode by default**: no token = no auth; a token is opt-in.
+8. **Settings paths**: tests redirect storage with `settings.configure_paths()` / `restore_paths()`, never by monkeypatching private attrs (Revision 7).
+9. **yt-dlp client order**: `YTDLP_PLAYER_CLIENTS = ["visionos", "default"]` — visionos (no `available_at` delay, runs anonymously since it can't take cookies), then yt-dlp's default (~5 s wait, uses cookies). Re-measure after yt-dlp upgrades (Revision 9).
+10. **Extraction is single-flight**: `StreamExtractor` owns yt-dlp; `StreamingService` never imports it. Stream-info building is single-flight too; 403 refresh is keyed by the stale URL (Revision 9).
+11. **Segment state**: only `SegmentRegistry` knows whether a segment is queued, in flight or on disk; handlers use `ensure_segment()` and never poll; the LRU clock is file mtime (Revision 11).
+12. **Play contract**: `/play` resolves the stream before returning, the newest `/play` owns the session; the player sets `audio.src` only for its newest load. Streaming errors are `{detail: {code, message}}` (Revision 12).
+13. **Auth**: one primary sign-in (Tauri webview → `/tauri-cookies`); store v2 keeps `(name, value, domain)`, youtube.com only. Cross-site requests refused by `Origin` / `Sec-Fetch-Site`; requests without `Origin` allowed for non-browser clients (Revision 13).
+14. **Lifecycle**: the backend exits when its stdin closes, writes `<data>/backend.pid`, binds its own socket; the app is single-instance; logs rotate 5 MB × 3 (Revision 14).
+15. **Frontend owns the queue**: `player/queue.ts` + `state.ts`; the backend only stores named copies (`/api/queues`) and history. Crossfade is frontend-only: the backend has one session, taken by the incoming song (Revisions 16, 22).
+16. **CI**: lint + unit tests from the lock file; coverage config in `amp/pyproject.toml`; Tauri CI builds and smoke-tests the sidecar before `tauri build`; docs deploy to GitHub Pages from `master` (Revisions 8, 20).
+
+## Pitfalls
+
+The canonical list (P1–P31) is in `DESIGN_DOC.md` §10 and `docs/code/development/pitfalls.md`.
+Most often relevant: P2 (yt-dlp needs Node + EJS, top-level `js_runtimes`), P12 (in-flight guard
+on every poll), P13 (validate `song_id` before file paths), P14/P15 (verify 206 + Content-Range,
+atomic writes), P17 (bind 127.0.0.1, validate Host), P24 (never log CDN URLs or cookies),
+P25 (yt-dlp ignores malformed options silently), P27 (don't monkeypatch pydantic private attrs),
+P31 (no Referer on cover images).
+
+## Known Issues
+
+**Open:**
+
+- [ ] Cached songs still need an extraction after restart (~1 s) — TASKS P2
+- [ ] First extraction in a freshly started sidecar takes ~3 s (frozen yt-dlp imports), later ones ~1.4 s — TASKS P4
+- [ ] Per-launch API token (refactor 5.6) — `backend_info` already returns `token` (always `null`); needs a random token from Rust passed as `--token`, `setAuthToken` in the frontend, and `?t=<token>` accepted on `/audio` (`hmac.compare_digest`). Manual runs keep open mode — TASKS P9
+- [ ] Installers unsigned (SmartScreen); antivirus false positives possible on the one-file sidecar — TASKS P10
+- [ ] Search has no albums/artists/playlists results — TASKS P5
 - [ ] Liked state of songs beyond the first 2000 likes is unknown (hearts show empty)
-- [ ] Search has no albums/artists/playlists results (needs result views)
+- [ ] Listened time of a crossfading song's last seconds isn't counted in the history
+- [ ] `youtube_login.rs` user agent still says Chrome 125
+- [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge
+- [ ] MSE upgrade (DESIGN_DOC §8.4) — optional
+
+**Not verified by hand** (code paths and unit tests only):
+
+- Installers installed and run; Linux/macOS lifecycle (CI builds the Linux sidecar + `.deb` only)
+- Webview sign-in with a real Google account → liked songs, liking a song, the user's own playlists list
+- Release build since Revision 22 (rebuild the sidecar first: new routes)
+- Crossfade: pause during the overlap; uncached next song (start delayed by `/play`, ~1.4 s)
+- Media keys / Windows flyout buttons pressed by hand; the widget inside OBS
+- Developer page "Restart backend", Logs page "Backend stdout" / Restart in the window; light theme by eye
+- `app.py`: Frontend start (web/desktop), force kill, API Send button
+- Data folder move from a real `com.amp.v2` folder (unit-tested on temp dirs)
 
 ## Environment Notes
 
-- **OS**: Windows (paths use `E:/Documents/...`)
-- **Python**: 3.13.7
-- **Node.js**: v24.16.0, npm 11.15.0
-- **Project root**: `E:/Documents/TRAVAIL/packages/AMP2/`
-- **App root**: `E:/Documents/TRAVAIL/packages/AMP2/amp/`
-- **Runtime data**: desktop app → `%APPDATA%\com.amp.v2\` (cache, logs, `userdb.sqlite`, `backend.pid`); manual / `app.py` runs → `amp/.amp/` (gitignored) + `amp/userdb.sqlite` (WAL mode)
-- **Rust**: 1.99.1, host `x86_64-pc-windows-gnu` (sidecar file `amp-backend-x86_64-pc-windows-gnu.exe`)
+- **OS**: Windows (paths `E:/Documents/...`)
+- **Python**: 3.13.7 · **Node.js**: v24.16.0, npm 11.15.0 · **Rust**: 1.99.1, host `x86_64-pc-windows-gnu` (sidecar `amp-backend-x86_64-pc-windows-gnu.exe`)
+- **Project root**: `E:/Documents/TRAVAIL/packages/AMP2/` · **App root**: `amp/`
+- **Runtime data**: desktop app → `%APPDATA%\com.amp.player\` (cache, logs, `userdb.sqlite`, `backend.pid`); manual / `app.py` runs → `amp/.amp/` (gitignored) + `amp/userdb.sqlite` (WAL)
 
 ## Verification Commands
 
 ```bash
-# Unit tests (all pass)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m pytest backend/tests/ -m "not integration" -q
-
-# Backend import check (open mode)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -c "from backend.api.server import create_app; app = create_app(auth_token=None); print('OK')"
-
-# Start backend (open mode — no token)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m backend.main --debug
-
-# Start backend (with token)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m backend.main --token my-token --debug
-
-# Using venv python directly
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m backend.main --debug
-
-# Frontend build
-cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run build
-
-# Frontend unit tests (vitest)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm test
-
-# Frontend dev server
-cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run dev
-
-# Tauri dev
-cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run tauri dev
-
-# Integration tests (requires network + cookies)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python -m pytest backend/tests/ -m integration
-
-# Build the PyInstaller sidecar into frontend/src-tauri/binaries/ (+ smoke: health, search, exit on stdin EOF)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_sidecar.py --smoke
-
-# Lint (from repo root) — same as CI
-amp/venv/Scripts/python.exe -m ruff check amp/backend/
+# Unit tests (from amp/)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pytest -m "not integration" -q
 
 # Unit tests + coverage (floor 60%) — same as CI
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pytest -m "not integration" --cov=backend --cov-report=term-missing
 
-# Install pinned deps / regenerate the lock after an upgrade
+# Lint (from repo root) — same as CI
+amp/venv/Scripts/python.exe -m ruff check amp/backend/
+
+# Integration tests (network; cookies optional)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pytest -m integration
+AMP_TEST_SONG_ID=Tmz3mpOq8aE venv/Scripts/python.exe -m pytest backend/tests/test_integration_download.py -m integration -v -s
+
+# Backend alone (open mode, :8000, amp/.amp/)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m backend.main --debug
+
+# Frontend: build, unit tests (vitest), dev server, Tauri dev
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run build
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm test
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run dev
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npm run tauri dev
+
+# Sidecar (+ smoke: health, search, exit on stdin EOF), then installers
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_sidecar.py --smoke
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npx tauri build   # → src-tauri/target/release/bundle/{msi,nsis}/
+
+# Rust unit tests
+cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend/src-tauri && cargo test
+
+# Docs
+cd /e/Documents/TRAVAIL/packages/AMP2 && mkdocs build --strict
+
+# Pinned deps: install / regenerate the lock after an upgrade
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip install -r requirements.lock
 cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe -m pip freeze > requirements.lock
 
-# Local Tauri release build + installers (sidecar first, like CI)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_sidecar.py \
-  && cd frontend && npx tauri build   # → src-tauri/target/release/bundle/{msi,nsis}/
-
-# Rust unit test
-cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend/src-tauri && cargo test
-
-# Debug launcher (tkinter: backend on :8000 with amp/.amp/, web/desktop frontend, API tester, chunk viewer)
-cd /e/Documents/TRAVAIL/packages/AMP2/amp && python app.py
+# Debug launcher (tkinter)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe app.py
 ```

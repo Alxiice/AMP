@@ -50,7 +50,7 @@
       ("heart", "Your library, optionally", "Search and play without an account. Sign in with YouTube to add your liked songs and playlists."),
       ("history", "Listening history", "Every play, grouped by day, with how much of the song you actually heard and how it ended."),
       ("broadcast", "Made for streamers", "A now-playing widget for OBS: cover, title, artist and a moving progress bar, on its own local port."),
-      ("palette", "Your colours", "Dark, light or follow Windows, any accent colour, and a fade between songs from 0 to 10 seconds."),
+      ("palette", "Your colours", "Dark, light or follow Windows, any accent colour, a crossfade of up to 10 seconds and volume normalization."),
       ("code-braces", "Built-in dev tools", "A Developer page in the app and a small launcher: backend status, live logs, an API tester."),
     ] %}
     {% for icon, title, text in features %}
@@ -73,7 +73,7 @@
       {% set screens = [
         ("search", "Search & queue", "Search results, the queue panel and the player bar with its segment map."),
         ("history", "History", "Plays grouped by day, with the share of each song you listened to."),
-        ("settings", "Settings", "Theme, accent colour and fade between songs."),
+        ("settings", "Settings", "Theme, accent colour, crossfade and volume normalization."),
         ("history-light", "Light theme", "The same app in the light theme with a violet accent."),
         ("developer", "Developer", "Backend status, cache, the current song's segments and an API tester."),
       ] %}

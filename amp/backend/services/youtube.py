@@ -174,10 +174,47 @@ class YouTubeService:
 
     def get_album(self, album_id: str) -> Dict[str, Any]:
         try:
-            return self._client.get_album(album_id)
+            raw = self._client.get_album(album_id)
+            title = raw.get("title", "") or ""
+            thumb = _best_thumbnail(raw.get("thumbnails") or [])
+            songs = []
+            for t in raw.get("tracks") or []:
+                if not t.get("videoId"):
+                    continue
+                song = _parse_song(t)
+                # Album tracks carry the album as a plain name and no thumbnails
+                song.album = song.album or title
+                song.thumbnail_url = song.thumbnail_url or thumb
+                songs.append(song.to_dict())
+            return {
+                "id": album_id,
+                "title": title,
+                "artist": ", ".join(a.get("name", "") for a in raw.get("artists") or [] if isinstance(a, dict)),
+                "year": raw.get("year") or "",
+                "type": raw.get("type") or "Album",
+                "thumbnail_url": thumb,
+                "songs": songs,
+            }
         except Exception as e:
             logger.error("get_album failed for %s: %s", album_id, e)
             raise
+
+    def get_song_album_id(self, song_id: str) -> Optional[str]:
+        """Album browse ID of a song (None for videos without one), from its watch playlist."""
+        tracks = self._client.get_watch_playlist(videoId=song_id, limit=1).get("tracks") or []
+        album = tracks[0].get("album") if tracks else None
+        return (album.get("id") or None) if isinstance(album, dict) else None
+
+    def get_loudness_db(self, song_id: str) -> Optional[float]:
+        """YouTube's loudness of the song relative to its playback target, in dB (None if not reported).
+
+        From the player response's audio formats (ytmusicapi `get_song`); yt-dlp doesn't expose it.
+        """
+        formats = (self._client.get_song(song_id).get("streamingData") or {}).get("adaptiveFormats") or []
+        for f in formats:
+            if str(f.get("mimeType", "")).startswith("audio/") and isinstance(f.get("loudnessDb"), (int, float)):
+                return float(f["loudnessDb"])
+        return None
 
     def get_playlist(self, playlist_id: str, limit: int = 1000) -> Dict[str, Any]:
         try:

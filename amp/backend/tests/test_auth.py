@@ -210,7 +210,7 @@ class TestAuthService:
         auth2 = AuthService()
         auth2.load_from_store()
         assert auth2.is_authenticated is True
-        assert "__Secure-3PAPISID" in auth2.get_cookies_dict()
+        assert "__Secure-3PAPISID" in auth2.get_cookie_header()
 
 
 # ---------------------------------------------------------------------------

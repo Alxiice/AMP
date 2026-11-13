@@ -1,5 +1,5 @@
 /**
- * User settings (theme, accent, fade between songs), kept in localStorage
+ * User settings (theme, accent, crossfade, volume normalization), kept in localStorage
  * (amp.settings.v1) and applied to the document as soon as this module loads,
  * so the first render already has the right colours.
  */
@@ -11,12 +11,13 @@ export type Theme = "dark" | "light" | "system";
 export interface Settings {
   theme: Theme;
   accent: string; // #rrggbb
-  fadeSec: number; // 0 = off, up to MAX_FADE_SEC
+  fadeSec: number; // crossfade, 0 = off, up to MAX_FADE_SEC
+  normalize: boolean; // volume normalization from YouTube's loudness
 }
 
 export const SETTINGS_KEY = "amp.settings.v1";
 export const MAX_FADE_SEC = 10;
-export const DEFAULT_SETTINGS: Settings = { theme: "dark", accent: "#ff4d67", fadeSec: 0 };
+export const DEFAULT_SETTINGS: Settings = { theme: "dark", accent: "#ff4d67", fadeSec: 0, normalize: false };
 export const ACCENT_PRESETS = ["#ff4d67", "#ff7ab8", "#b47cff", "#5aa9ff", "#2ec4b6", "#2ecc71", "#f0a500", "#ff7a45"];
 
 const HEX = /^#[0-9a-f]{6}$/i;
@@ -33,7 +34,8 @@ export function parseSettings(raw: string | null): Settings {
   const theme = data.theme === "light" || data.theme === "system" || data.theme === "dark" ? data.theme : DEFAULT_SETTINGS.theme;
   const accent = typeof data.accent === "string" && HEX.test(data.accent) ? data.accent.toLowerCase() : DEFAULT_SETTINGS.accent;
   const fade = typeof data.fadeSec === "number" && Number.isFinite(data.fadeSec) ? data.fadeSec : DEFAULT_SETTINGS.fadeSec;
-  return { theme, accent, fadeSec: Math.min(MAX_FADE_SEC, Math.max(0, Math.round(fade * 2) / 2)) };
+  const normalize = typeof data.normalize === "boolean" ? data.normalize : DEFAULT_SETTINGS.normalize;
+  return { theme, accent, fadeSec: Math.min(MAX_FADE_SEC, Math.max(0, Math.round(fade * 2) / 2)), normalize };
 }
 
 /** Text on the accent: white while it keeps the 3:1 contrast bold UI text needs, else near-black. */

@@ -1,17 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { formatDuration, formatTotal, plural } from "../format";
 import { saveAsNewQueue } from "../savedQueues";
 import { store, useQueueState } from "../state";
 import { askConfirm } from "../ui";
 import { Cover } from "./Cover";
 import { Icon } from "./Icon";
+import { SongMenu } from "./SongMenu";
 
-/** The live queue: click to jump, drag (or the arrows) to reorder, remove, clear, save. */
+/** The live queue: click to jump, drag to reorder, ⋮ menu (song info, album…), remove, clear, save. */
 export function QueuePanel({ onClose }: { onClose: () => void }) {
   const { items, currentIndex } = useQueueState();
   const [dragFrom, setDragFrom] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState<number | null>(null);
   const currentRef = useRef<HTMLDivElement>(null);
+  const [menu, setMenu] = useState<{ uid: number; x: number; y: number } | null>(null);
+  const navigate = useNavigate();
+  const menuItem = menu ? items.find((i) => i.uid === menu.uid) : undefined;
 
   const currentUid = items[currentIndex]?.uid;
   useEffect(() => {
@@ -98,11 +103,8 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
               <div className="song-artist">{item.song.artist} · {formatDuration(item.song.duration_ms)}</div>
             </div>
             <div className="queue-row-actions" onClick={(e) => e.stopPropagation()}>
-              <button className="btn-icon" title="Move up" disabled={index === 0} onClick={() => store.moveItem(index, index - 1)}>
-                <Icon name="up" size={16} />
-              </button>
-              <button className="btn-icon" title="Move down" disabled={index === items.length - 1} onClick={() => store.moveItem(index, index + 1)}>
-                <Icon name="down" size={16} />
+              <button className="btn-icon" title="More" onClick={(e) => setMenu({ uid: item.uid, x: e.clientX, y: e.clientY })}>
+                <Icon name="more" size={16} />
               </button>
               <button className="btn-icon" title="Remove" onClick={() => store.removeItem(item.uid)}>
                 <Icon name="close" size={16} />
@@ -111,6 +113,15 @@ export function QueuePanel({ onClose }: { onClose: () => void }) {
           </div>
         ))}
       </div>
+      {menu && menuItem && (
+        <SongMenu
+          song={menuItem.song}
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          onShowInfo={() => navigate(`/now-playing?uid=${menuItem.uid}`)}
+        />
+      )}
     </aside>
   );
 }

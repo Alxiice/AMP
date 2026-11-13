@@ -512,14 +512,6 @@ class StreamingService:
 
         return 0
 
-    def refresh_stream_url(self, song_id: str, stale_url: Optional[str] = None) -> Optional[str]:
-        """Re-extract the stream URL (P4: on 403); once per stale URL."""
-        try:
-            return self._extractor.refresh(song_id, stale_url).url
-        except ExtractionError as e:
-            logger.warning("Refresh failed for %s: %s (%s)", song_id, e.code, e)
-            return None
-
     # --- Segment status (/chunks, from memory) ---
 
     def get_segment_status(self, song_id: str, index: int) -> SegState:
