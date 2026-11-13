@@ -31,8 +31,17 @@
 | Revision 18 | `app.py` launcher redesign (sidebar, cards, live status) | **DONE** — see Revision 18 |
 | Revision 19 | Developer page, space bar, Settings (theme, accent, fade), listening history | **DONE** — see Revision 19 |
 | Revision 20 | 1.0 naming (no "v2"), docs site redesign with screenshots, launcher page | **DONE** — see Revision 20 |
+| Revision 21 | OS media controls (Media Session API) | **DONE** — see Revision 21 |
 
 **Refactoring plan**: phases 0–6, all done. The plan files (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15; they remain in git history (last at `cc4453d`). Left from the plan: 5.6 (per-launch token), listed under Known Issues.
+
+### Revision 21 — OS media controls (2026-11-13)
+
+`PlayerBar.tsx` uses the Media Session API (WebView2/Chromium maps it to Windows SMTC, MPRIS, macOS Now Playing): metadata (title, artist, album, cover at 512 px or the ytimg fallback), `playbackState`, handlers play / pause / nexttrack / previoustrack / stop / seekto calling the bar's own handlers (so `/pause`, `/resume`, `/seek`, history all stay in sync). No `setPositionState`: Chromium reports the `<audio>` element's position. Docs: "System media controls" in Using the app. `AMP.bat` at the repo root runs `npm run tauri dev`.
+
+**Missing artwork (fixed):** in dev, `*.googleusercontent.com` answers the `http://localhost:1420/` Referer with a 429 HTML page; WebView2 blocks it (`ERR_BLOCKED_BY_ORB`), so Windows got no thumbnail (`i.ytimg.com` and no-Referer requests were fine; `Cover.tsx` already used `referrerPolicy="no-referrer"`). `index.html` now has `<meta name="referrer" content="no-referrer">` (pitfall P28).
+
+**Verification:** real Tauri dev window driven over CDP (`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=…`), Windows session read with the WinRT `GlobalSystemMediaTransportControlsSessionManager` (Python `winrt` packages in a scratch venv): title, artist, Playing, and after the fix the yt3 cover as a 150×150 thumbnail (before: none). `npm run build` OK, 48 vitest, `mkdocs build --strict` OK. **Not verified:** media keys / flyout buttons pressed by hand; the release build (its `https://tauri.localhost/` Referer was accepted by curl anyway).
 
 ### Revision 20 — 1.0 naming, docs site redesign (2026-11-07)
 
