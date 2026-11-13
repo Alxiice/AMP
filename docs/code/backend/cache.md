@@ -69,9 +69,9 @@ and `busy_timeout=5000` (4 workers and the request handlers write concurrently),
 |---|---|---|
 | `segments` | `song_id` + `index` (−1 = init) | `byte_start`, `byte_end`, `size_bytes`, `duration_ms`, `status`, `file_path`, `layout_id` |
 | `songs` | `id` | cached metadata: title, artist, album, duration, thumbnail |
-| `playlists` | `id` | name, owner, thumbnail, song count |
-| `playlist_songs` | auto id | playlist ↔ song with position |
 | `liked_songs` | `song_id` | liked-songs cache |
+| `saved_queues` | auto id | name, songs (JSON list of song dicts, in order), created / updated |
+| `listening_history` | auto id | one play: song metadata, `duration_ms`, `listened_ms`, `started_at`, `end_reason` |
 
 The `segments` table is only a cache: if `init_db()` finds it missing a column, it drops and
 recreates it, and reconciliation then removes the now-orphaned files. Its `last_accessed` column

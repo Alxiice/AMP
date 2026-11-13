@@ -2,9 +2,9 @@
 
 > **Purpose**: Authoritative spec for AMP. An agent reading only this document should be able to build the project. Where the first prototype was exploratory, this spec is prescriptive: decisions are made, alternatives are named only where they remain open.
 
-> **Status (2026-10-31)**: Phases 1–5 below are implemented, and so are refactoring phases 0–6 (AGENTS.md Revisions 7–14; the plan files were removed in Revision 15 and remain in git history). Progress: [AGENTS.md](AGENTS.md). Readable usage guide and code reference: [docs/](docs/index.md) (MkDocs).
+> **Status (2026-11-13)**: Phases 1–5 below are implemented, refactoring phases 0–6 are done (AGENTS.md Revisions 7–14), and the features of Revisions 16–22 (queue, likes, albums, history, settings, crossfade, normalization, OBS widget, OS media controls) are described here in summary. Progress: [AGENTS.md](AGENTS.md). Readable usage guide and code reference: [docs/](docs/index.md) (MkDocs).
 
-> **Scope note**: Personal prototype. Not for distribution. Cookie-based YouTube extraction is against YouTube's ToS; accepted risk for this project. External tools (yt-dlp, Node.js) are allowed to break; tests pin two known-good video IDs and will be updated if they break.
+> **Scope note**: Independent project, not affiliated with YouTube or Google. Cookie-based YouTube extraction is against YouTube's ToS; accepted risk for this project. External tools (yt-dlp, Node.js) are allowed to break; tests pin two known-good video IDs and will be updated if they break.
 
 ---
 
@@ -101,6 +101,8 @@
 amp/
 ├── backend/
 │   ├── main.py                 # entry: argparse + uvicorn
+│   ├── lifecycle.py            # socket bind, backend.pid, parent watch (§8.1)
+│   ├── widget.py, widget.html  # OBS now-playing widget server (own port, §7)
 │   ├── config.py               # pydantic-settings, creates dirs on import
 │   ├── api/
 │   │   ├── server.py           # FastAPI app, CORS, token auth, DB init
@@ -113,7 +115,7 @@ amp/
 │   │   └── streaming/          # service.py (facade), registry.py, downloader.py,
 │   │                           # cache.py, serving.py, playback.py
 │   ├── database/
-│   │   ├── models.py           # Song, Playlist, PlaylistSong, LikedSong, Segment
+│   │   ├── models.py           # Song, LikedSong, SavedQueue, ListeningHistory, Segment
 │   │   └── session.py          # engine (WAL), session factory, init
 │   ├── utils/
 │   │   ├── logger.py           # app.log + streaming.log (rotated 5 MB × 3) + in-memory ring
@@ -124,9 +126,10 @@ amp/
 │   ├── src/
 │   │   ├── api.ts              # typed fetch wrapper, token header
 │   │   ├── sidecar.ts          # backend client: backend_info → port, health poll, log events
-│   │   ├── components/         # PlayerBar (incl. segment bar), SongList, ...
-│   │   ├── player/             # errors, queue persistence, prefetch threshold (pure, vitest)
-│   │   ├── pages/              # Search, Library, Playlists, Auth, Logs
+│   │   ├── components/         # PlayerBar (two <audio>, segment bar, media session), QueuePanel, SongList, SongMenu, ...
+│   │   ├── player/             # pure helpers (vitest): queue, errors, persistence, prefetch, fade, normalize, history, keyboard
+│   │   ├── pages/              # Now playing, Search, Library, Playlists, albums, saved queues, History, Settings, Auth, Developer, Logs
+│   │   ├── settings.ts         # theme, accent, crossfade, normalization (localStorage)
 │   │   └── state.ts            # queue + playback state (frontend-owned)
 │   ├── public/                 # favicons + site.webmanifest (AMP logo)
 │   ├── index.html              # CSP meta, favicon links
@@ -379,7 +382,7 @@ The epoch is a **priority**, not a cancellation: the new requests outrank everyt
 
 ## 7. API Specification
 
-All under `/api`. When a token is configured, all require it except `GET /` and `GET /api/health` (§5.2). All blocking handlers are plain `def`. Also implemented: `GET /api/stream/cache-info`.
+All under `/api`. When a token is configured, all require it except `GET /` and `GET /api/health` (§5.2). All blocking handlers are plain `def`. The full, current list with request/response details is in [docs/code/backend/api.md](docs/code/backend/api.md).
 
 **Rule**: declare specific routes (`/stream/logs`, `/stream/playback-state`) **before** parameterized ones (`/stream/{song_id}`).
 
@@ -388,9 +391,14 @@ All under `/api`. When a token is configured, all require it except `GET /` and 
 | GET | `/` , `/api/health` | app info / `{status, services}` |
 | GET | `/api/search?q=&type=&limit=` | `SongResponse[]` |
 | GET | `/api/song/{id}` | `SongResponse` |
-| GET | `/api/artist/{id}` , `/api/album/{id}` , `/api/playlist/{id}` | metadata dicts |
+| GET | `/api/song/{id}/album` , `/api/song/{id}/loudness` | the song's album (watch playlist) / `{loudness_db}` (YouTube's `loudnessDb`, `null` on error) |
+| GET | `/api/artist/{id}` | metadata dict |
+| GET | `/api/album/{id}` , `/api/playlist/{id}` | normalized `{…, songs: SongResponse[]}` |
 | GET | `/api/user/playlists` | user playlists (auth) |
 | GET | `/api/user/likes` | liked songs (auth) |
+| POST/DELETE | `/api/user/likes/{id}` | like / remove like (auth) |
+| GET/POST | `/api/queues` ; GET/PUT/DELETE `/api/queues/{id}` | saved queues (table `saved_queues`) |
+| GET/POST/DELETE | `/api/history` ; DELETE `/api/history/{id}` | listening history (table `listening_history`) |
 | GET | `/api/stream/info/{id}` | `StreamInfo` (segment table summary) |
 | GET | `/api/stream/{id}/audio` | **binary, full Range support (§6.7)** |
 | GET | `/api/stream/{id}/chunks` | segment status list (for visualization) |
@@ -401,6 +409,7 @@ All under `/api`. When a token is configured, all require it except `GET /` and 
 | POST | `/api/stream/buffer/{id}?mode=current\|prefetch` | `current`: force buffer-ahead; `prefetch`: resolve + init and 2 segments at LOW, session untouched |
 | GET | `/api/stream/playback-state` | `PlaybackInfo` |
 | GET | `/api/stream/logs` | recent streaming log lines |
+| GET | `/api/stream/cache-info` , `/api/stream/now-playing` | cache usage / what the OBS widget shows |
 | GET | `/api/auth/status?verify=` | `{state, is_authenticated, account, migrated_from_full_jar}` |
 | POST | `/api/auth/tauri-cookies` | `{cookies: [{name, value, domain}]}` from the sign-in webview; 400 if none is a youtube.com cookie |
 | POST | `/api/auth/cookies` , `/cookie-header` | `{cookie_header}` pasted from DevTools (domain `.youtube.com`) |
@@ -412,7 +421,9 @@ All under `/api`. When a token is configured, all require it except `GET /` and 
 
 Response shapes are consumed directly by the TypeScript client (`frontend/src/api.ts` defines the types). No v1-style bridge normalization layer — the frontend adapts.
 
-**Dropped from v1**: queue endpoints, `playdb`, legacy `/api/playback/*` (frontend owns the queue), dashboard HTML (logs endpoints suffice; a simple Logs page in the app replaces it).
+**Dropped from v1**: live queue endpoints, `playdb`, legacy `/api/playback/*` (the frontend owns the play queue; `/api/queues` only stores named copies), dashboard HTML (the Logs and Developer pages replace it).
+
+**OBS widget**: `backend/widget.py`, a stdlib HTTP server on `WIDGET_PORT` (default 8001, `0` = off), started only by `main.py`: `GET /` (page), `GET /now.json`. Loopback `Host` only. Fed by the optional `{title, artist, cover_url}` body of `/play`.
 
 ---
 
@@ -436,15 +447,13 @@ Response shapes are consumed directly by the TypeScript client (`frontend/src/ap
 
 | Component | Purpose |
 |---|---|
-| `PlayerBar` (persistent) | play/pause/stop, time, volume, thumbnail/title; segment bar (one cell per segment, colored by status, click-to-seek; `/chunks` polled at 500 ms **with an in-flight guard**, §10 P12). Load sequence: `/play` (abortable) → generation check → `audio.src`; error codes mapped to text (`player/errors.ts`); one reload after a mid-stream network error; TTFA logged to the API relay |
-| `Search` | query box, results list, play per result |
-| `Library` | liked songs list; "Sign in to see your library" when signed out / on 401 |
-| `Playlists` | user playlists as cards (no track view yet); same sign-in prompt |
-| `Auth` | three things: status (+ migration warning), "Sign in with YouTube" (Tauri webview), collapsed "Advanced" (paste Cookie header, Firefox import) |
+| `PlayerBar` (persistent) | transport, time, volume, cover/title (click → Now playing); segment bar (one cell per segment, colored by status, click-to-seek; `/chunks` polled **with an in-flight guard**, §10 P12). Two `<audio>` elements for the crossfade (§8.3). Load sequence: `/play` (abortable) → generation check → `audio.src`; error codes mapped to text (`player/errors.ts`); one reload after a mid-stream network error. OS media controls via the Media Session API |
+| `QueuePanel` | play queue: drag to reorder, ⋮ menu (`SongMenu` + "Display song info"), shuffle, repeat, save |
+| Pages | Now playing, Search, Library (liked songs), Playlists + playlist page, album page, saved queues, History, Settings, Auth, Developer, Logs. Full route table: [docs/code/frontend/index.md](docs/code/frontend/index.md) |
+| `Auth` | status (+ migration warning), "Sign in with YouTube" (Tauri webview), collapsed "Advanced" (paste Cookie header, Firefox import) |
 | Sidebar | session badge `Signed in` / `Signed out` / `Session expired — reconnect` → `/auth`; `/api/auth/status` polled every 60 s (in-flight guard) and after any 401 from `/api/user/*` (`authSession.ts`) |
-| `Logs` | backend stdout, streaming logs, API log relay |
 
-Queue state (list of songs, current index, next/previous) is **frontend-owned** in `state.ts` — no backend queue API. Songs, current index and volume persist in `localStorage` (`amp.queue.v1`, debounced 500 ms) and are restored paused. When < 20 s remain or past 80 % of the current song, the next song is prefetched once (`/buffer?mode=prefetch`).
+Queue state is **frontend-owned**: the pure model `player/queue.ts` (uids allow duplicates; insert next, append, move, remove, shuffle with restore, repeat off/all/one) applied by `state.ts`. Queue, repeat and volume persist in `localStorage` (`amp.queue.v1`, debounced 500 ms) and are restored paused. Listening history is recorded by `player/history.ts` (forward time only; finished / skipped / stopped / closed; plays under 5 s dropped). When < 20 s remain or past 80 % of the current song, the next song is prefetched once (`/buffer?mode=prefetch`).
 
 ### 8.3 Player
 
@@ -456,6 +465,8 @@ const audio = new Audio(`${baseUrl}/api/stream/${songId}/audio`); // baseUrl fro
 - `audio.currentTime` → seek slider; slider release → `audio.currentTime = t` + `POST /api/stream/seek`.
 - Position reported to backend every 2 s (drives buffer-ahead).
 - `onended` → next in queue.
+- **Crossfade** (setting, 0–10 s): in the last `fadeSec` seconds, with a next song (not repeat-one), the next song is loaded on the spare element and takes the backend session (`/play`); the old element fades out over its still-open `/audio` request. Next/previous/stop cut the fading song. Backend unchanged.
+- **Normalization** (setting, off by default): gain `min(1, 10^((−6 − loudnessDb)/20))` per element from `/api/song/{id}/loudness`. Web Audio was rejected: `MediaElementAudioSourceNode` needs CORS on `/audio`.
 
 ### 8.4 Optional upgrade: MSE
 
@@ -469,11 +480,11 @@ CSP in `index.html`:
 default-src 'self';
 connect-src 'self' http://127.0.0.1:*;
 media-src 'self' http://127.0.0.1:*;
-img-src 'self' https://i.ytimg.com https://*.ggpht.com https://lh3.googleusercontent.com data:;
+img-src 'self' https://*.ytimg.com https://*.ggpht.com https://*.googleusercontent.com data:;
 style-src 'self' 'unsafe-inline';
 ```
 
-The same policy is set in `tauri.conf.json → app.security.csp`. `media-src` is required for `<audio>` to load from the backend; `lh3.googleusercontent.com` serves YouTube Music thumbnails. Favicons and the web manifest are same-origin (`frontend/public/`), covered by `default-src 'self'`.
+The same policy is set in `tauri.conf.json → app.security.csp`. `media-src` is required for `<audio>` to load from the backend; `*.googleusercontent.com` (`lh3`, `yt3`) serves YouTube Music artwork. `index.html` also sets `<meta name="referrer" content="no-referrer">`: `googleusercontent.com` answers a `localhost` Referer with a 429 page. Favicons and the web manifest are same-origin (`frontend/public/`), covered by `default-src 'self'`.
 
 The port is chosen at launch, hence `127.0.0.1:*`. Tauri v2 capabilities: `core:default` only — no `shell:*` (the backend is spawned from Rust), no fs.
 
@@ -490,9 +501,9 @@ Single SQLite (`userdb.sqlite`), WAL mode, `busy_timeout=5000` (4 download worke
 | Table | Key columns | Purpose |
 |---|---|---|
 | `songs` | `id` PK, `title`, `artist`, `album`, `duration_ms`, `thumbnail_url`, `updated_at` | cached metadata |
-| `playlists` | `id` PK, `name`, `owner`, `thumbnail_url`, `song_count` | playlists |
-| `playlist_songs` | `playlist_id`+`song_id`+`position` PK | playlist tracks |
 | `liked_songs` | `song_id` PK, `liked_at` | liked-songs cache |
+| `saved_queues` | `id` PK, `name`, `songs_json`, `created_at`, `updated_at` | named copies of the play queue |
+| `listening_history` | `id` PK, `song_id`, metadata, `duration_ms`, `listened_ms`, `started_at`, `end_reason` | one row per play |
 | `segments` | `song_id`+`index` PK, `byte_start`, `byte_end`, `size_bytes`, `duration_ms`, `status`, `file_path`, `last_accessed` | segment cache metadata |
 
 Always close sessions (`try/finally` or FastAPI dependency). `echo=DEBUG`.
@@ -541,6 +552,10 @@ New from refactoring Phase 5 (AGENTS.md Revision 13):
 - **P29 — Open mode needs an Origin check.** CORS only stops a page from *reading* the response; a cross-site `fetch(..., {method: "POST"})` with no body is sent without a preflight and runs. Refuse non-safe methods whose `Origin` isn't allowed (§5.2).
 - **P30 — Keep cookie domains.** Flattening cookies to `{name: value}` loses which site they belong to and lets another site's `SID` overwrite YouTube's. Store `(name, value, domain)` (§5.4).
 
+New from Revision 21:
+
+- **P31 — No `Referer` on cover images.** `*.googleusercontent.com` answers a `http://localhost:1420/` Referer with a 429 HTML page, which WebView2 blocks (`ERR_BLOCKED_BY_ORB`): no artwork for the OS media controls in dev. `index.html` sets `<meta name="referrer" content="no-referrer">` (§8.5).
+
 ---
 
 ## 11. Testing
@@ -578,7 +593,7 @@ Logs page, MSE upgrade (optional, §8.4), error surfacing (expired session, unpl
 **Phase 5 — Packaging + tests**
 PyInstaller sidecar, `tauri build`, full test suite green, README.
 
-**Status**: Phases 1–5 are implemented, and refactoring phases 0–6 are done (AGENTS.md Revisions 7–14): exact segment tables from the sidx (Revision 10), G1 met for cached songs (Revision 12), the packaged sidecar starts, plays and stops with the app (Revision 14). Open items are listed under "Known Issues / TODO" in AGENTS.md.
+**Status**: Phases 1–5 are implemented, and refactoring phases 0–6 are done (AGENTS.md Revisions 7–14): exact segment tables from the sidx (Revision 10), G1 met for cached songs (Revision 12), the packaged sidecar starts, plays and stops with the app (Revision 14). Revisions 16–22 added the features listed in the status note at the top. Open items: "Known Issues" in AGENTS.md and [TASKS.md](TASKS.md).
 
 ---
 
