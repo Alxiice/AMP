@@ -4,7 +4,7 @@
 > **Spec**: `DESIGN_DOC.md` (authoritative; `DESIGN_DOC_2.md` before Revision 20)
 > **Docs**: `docs/` (MkDocs Material, `mkdocs.yml` at the root): usage guide + code reference. Update the matching page when behaviour changes; `mkdocs build --strict` must pass
 > **Open work**: `TASKS.md` (requested features, proposals) and [Known Issues](#known-issues) below
-> **Last updated**: 2026-11-13
+> **Last updated**: 2026-11-13 (Revision 24)
 
 This file was condensed in Revision 23. The full per-revision notes (measurements, verification
 steps, new tests) are in git history: `git show 3ae702a:AGENTS.md`.
@@ -21,6 +21,7 @@ steps, new tests) are in git history: `git show 3ae702a:AGENTS.md`.
 | Revisions 8, 15 | CI + logos; MkDocs documentation | **DONE** |
 | Revisions 16–22 | Covers, queue, likes, redesign; OBS widget; launcher redesign; Developer page, settings, history; 1.0 naming + docs site; OS media controls; crossfade, normalization, now playing, albums | **DONE** |
 | Revision 23 | Repo cleanup: dead code removed, markdown and docs brought up to date | **DONE** |
+| Revision 24 | Release prep: `build_release.py` → root `build/`, Release workflow (Windows, macOS, Linux deb + AppImage), MIT license, docs copy rewrite | **DONE** |
 
 Left from the refactoring plan: 5.6 (per-launch token), under Known Issues. The plan files
 (`improvement-plan/`, `amp/AUTH_AUTO_EXTRACTION_DESIGN.md`) were removed in Revision 15 (last at `cc4453d`).
@@ -55,6 +56,7 @@ Newest first. One entry per revision; details in git history.
 
 | Rev | Date | Summary |
 |---|---|---|
+| 24 | 11-13 | **Release prep.** `amp/scripts/build_release.py`: sidecar + `tauri build` (`--exe-only` = `--no-bundle`, `--bundles`), copies the portable executable (`AMP` + `amp-backend`, archived) and installers into `<repo>/build/` (gitignored). `.github/workflows/release.yml`: on `v*` tags, Windows (msi, nsis), macOS arm64 (app, dmg), ubuntu-22.04 (deb, AppImage) → draft release with `CHANGELOG.md` as notes. `LICENSE` (MIT + no-affiliation/liability notice), `CHANGELOG.md`. Docs home copy rewritten in plain language, "Independent project" box replaced by a license note, hero screenshot no longer tilted (hover lift instead). README/install/CI docs updated |
 | 23 | 11-13 | **Cleanup.** Removed dead code: DB models `Playlist` / `PlaylistSong` (never written; existing tables in old DBs are left alone), `AuthService.reset_expired` / `get_cookies_dict`, `StreamingService.refresh_stream_url`, `logger.clear_ring`; frontend `api.getSong` / `getArtist` / `getStreamInfo`, `getAuthToken` / `clearAuthToken`, `isTauriAvailable`. `DESIGN_DOC.md` (API, pages, player, CSP, DB), `TASKS.md` (done items removed), docs (layout, DB tables, tests, CI) and this file updated. 423 unit tests, ruff clean |
 | 22 | 11-13 | **Crossfade, normalization, now playing, albums.** Two `<audio>` elements: in the last `fadeSec` s the next song takes the backend session and the old element fades out over its open `/audio` request (backend unchanged). Normalization from YouTube's `loudnessDb` (`GET /api/song/{id}/loudness`, ytmusicapi `get_song`), gain `min(1, 10^((−6 − dB)/20))`, target −6 dB; Web Audio rejected (needs CORS on `/audio`). `/now-playing` page, `/albums/:id` (`GET /api/album/{id}`, `GET /api/song/{id}/album`), queue ⋮ menu, default volume 0.5. Verified in the real Tauri window over CDP |
 | 21 | 11-13 | **OS media controls** (Media Session API in `PlayerBar.tsx` → Windows SMTC / MPRIS / macOS). Fixed missing artwork: `googleusercontent.com` answers a `localhost` Referer with a 429 → `<meta name="referrer" content="no-referrer">` (pitfall P31). `AMP.bat` added |
@@ -119,7 +121,7 @@ P31 (no Referer on cover images).
 
 **Not verified by hand** (code paths and unit tests only):
 
-- Installers installed and run; Linux/macOS lifecycle (CI builds the Linux sidecar + `.deb` only)
+- Installers installed and run; Linux/macOS lifecycle. The Release workflow (macOS dmg, AppImage, Windows on CI) hasn't run yet
 - Webview sign-in with a real Google account → liked songs, liking a song, the user's own playlists list
 - Release build since Revision 22 (rebuild the sidecar first: new routes)
 - Crossfade: pause during the overlap; uncached next song (start delayed by `/play`, ~1.4 s)
@@ -166,6 +168,9 @@ cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend && npx tauri build   # → sr
 
 # Rust unit tests
 cd /e/Documents/TRAVAIL/packages/AMP2/amp/frontend/src-tauri && cargo test
+
+# Full build into <repo>/build/ (executable + installers; --exe-only for no installers)
+cd /e/Documents/TRAVAIL/packages/AMP2/amp && venv/Scripts/python.exe scripts/build_release.py
 
 # Docs
 cd /e/Documents/TRAVAIL/packages/AMP2 && mkdocs build --strict

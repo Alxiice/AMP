@@ -3,6 +3,8 @@
 ```
 (repo root)
 ├── README.md                    # what AMP is + how to launch it
+├── LICENSE                      # MIT + no-affiliation / liability notice
+├── CHANGELOG.md                 # release notes (used by the Release workflow)
 ├── mkdocs.yml, docs/            # this documentation
 ├── AGENTS.md                    # progress tracker: revisions, decisions, known issues
 ├── DESIGN_DOC.md                # design spec, incl. the pitfall list P1–P31
@@ -10,12 +12,14 @@
 ├── AMP.bat                      # Windows: starts the app in dev mode (npm run tauri dev)
 ├── overrides/home.html          # docs home page template (MkDocs Material)
 ├── icon/                        # logo-square.svg, logo-round.svg
-├── .github/workflows/           # python-ci.yml, tauri-build.yml, docs.yml
+├── .github/workflows/           # python-ci.yml, tauri-build.yml, docs.yml, release.yml
 ├── .ruff.toml                   # lint rules
+├── build/                       # build_release.py output (gitignored)
 └── amp/                         # the application
     ├── backend/                 # Python package (FastAPI)
     ├── frontend/                # React app + src-tauri/ (Rust shell)
     ├── scripts/
+    │   ├── build_release.py     # full build: sidecar + Tauri → <repo>/build/
     │   ├── build_sidecar.py     # PyInstaller → src-tauri/binaries/ (+ --smoke)
     │   ├── docs_screenshots.mjs # docs screenshots (headless Edge over CDP)
     │   └── dump_boxes.py        # dev tool: print the MP4 boxes of a stream's head
