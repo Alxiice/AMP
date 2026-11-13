@@ -4,7 +4,7 @@ This section is for people who want to run AMP and use it.
 
 | Page | Read it when you want to… |
 |---|---|
-| [Install & launch](install.md) | set up the prerequisites, run the app, build an installer |
+| [Install & launch](install.md) | download AMP, or run and build it from source |
 | [Using the app](using-the-app.md) | find your way around: search, the player bar, the queue, logs |
 | [Signing in](sign-in.md) | see your liked songs and playlists |
 | [Configuration](configuration.md) | change the cache size, the port, the audio format… |
@@ -14,6 +14,10 @@ This section is for people who want to run AMP and use it.
 | [Manual runs](debugging.md) | run the backend by hand, use the app in a browser |
 
 ## The short version
+
+The easiest way is to download a build from the
+[Releases page](https://github.com/Alxiice/AMP/releases) and install
+[Node.js](https://nodejs.org). To run it from the source code instead:
 
 ```bash
 cd amp
