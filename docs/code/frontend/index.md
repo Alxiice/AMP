@@ -46,7 +46,7 @@ routes, the `QueuePanel` and the always-visible `PlayerBar`, and loads the liked
 | `state.ts` | the queue and playback store (below) |
 | `authSession.ts` | shared sign-in status: 60 s poll, refresh on 401, badge labels |
 | `tauri_auth.ts` | `youtubeLogin()` → Tauri command `youtube_login`; `mightBeTauri()` |
-| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts`, `keyboard.ts` (space bar), `fade.ts` (fade gain), `history.ts` (listening tracker) |
+| `player/` | pure helpers covered by vitest: `errors.ts`, `persistence.ts`, `prefetch.ts`, `keyboard.ts` (space bar), `fade.ts` (fade gain), `history.ts` (listening tracker). OS media controls are wired in `PlayerBar.tsx` through `navigator.mediaSession` (metadata, playback state, action handlers calling the player bar's own handlers; position comes from the `<audio>` element) |
 | `settings.ts` | theme, accent, fade: `amp.settings.v1` in localStorage, validated by `parseSettings`, applied to `<html>` (`data-theme`, `--accent`, `--on-accent`) when the module loads, so before the first render |
 | `likes.ts`, `savedQueues.ts`, `ui.ts` | liked songs store; saved queue list and actions; toasts and dialogs |
 | `player/queue.ts` | the pure queue model |
