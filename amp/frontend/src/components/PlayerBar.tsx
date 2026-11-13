@@ -39,7 +39,8 @@ interface PlayerBarProps {
 export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBarProps) {
   const state = useQueueState();
   const navigate = useNavigate();
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null); // active element: the current song
+  const spareRef = useRef<HTMLAudioElement | null>(null);  // the other one: next song of a crossfade, or the fading one
   const handledTokenRef = useRef(0); // last playToken the load effect acted on
   // Load sequence (F13): a newer load() invalidates older ones
   const loadGen = useRef(0);
@@ -54,55 +55,69 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
   const [audioLoading, setAudioLoading] = useState(false);
   const segInFlightRef = useRef(false); // P12: in-flight guard
 
-  // Create the audio element once
+  // Create the two audio elements once (two so that songs can overlap in a crossfade)
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = "metadata";
-    audioRef.current = audio;
-    store.setAudioElement(audio);
+    const elements = [new Audio(), new Audio()];
+    for (const el of elements) el.preload = "metadata";
+    audioRef.current = elements[0];
+    spareRef.current = elements[1];
+    store.setAudioElement(elements[0]);
 
-    // Surface audio errors in the player bar
-    const onError = () => {
-      const songId = loadedIdRef.current;
-      if (!audio.getAttribute("src") || !songId) return; // source cleared by a newer load
-      const code = audio.error?.code;
-      if (code === MediaError.MEDIA_ERR_NETWORK && !retriedRef.current) {
-        // A segment that fails mid-stream aborts the response (Phase 3): reload once from here
-        retriedRef.current = true;
-        const at = audio.currentTime;
-        relayLog(`network error on ${songId} at ${at.toFixed(1)}s, reloading`);
-        audio.src = api.getStreamAudioUrl(songId);
-        audio.currentTime = at;
-        audio.play().catch(() => {});
-        return;
-      }
-      relayLog(`audio error on ${songId}: code=${code} ${audio.error?.message ?? ""}`);
-      setAudioLoading(false);
-      setAudioError(describeMediaError(code));
+    // Player bar feedback follows the active element only
+    const attach = (audio: HTMLAudioElement) => {
+      // Surface audio errors in the player bar
+      const onError = () => {
+        if (audio !== audioRef.current) return; // the fading song: the store cuts it
+        const songId = loadedIdRef.current;
+        if (!audio.getAttribute("src") || !songId) return; // source cleared by a newer load
+        const code = audio.error?.code;
+        if (code === MediaError.MEDIA_ERR_NETWORK && !retriedRef.current) {
+          // A segment that fails mid-stream aborts the response (Phase 3): reload once from here
+          retriedRef.current = true;
+          const at = audio.currentTime;
+          relayLog(`network error on ${songId} at ${at.toFixed(1)}s, reloading`);
+          audio.src = api.getStreamAudioUrl(songId);
+          audio.currentTime = at;
+          audio.play().catch(() => {});
+          return;
+        }
+        relayLog(`audio error on ${songId}: code=${code} ${audio.error?.message ?? ""}`);
+        setAudioLoading(false);
+        setAudioError(describeMediaError(code));
+      };
+      const onCanPlay = () => {
+        if (audio !== audioRef.current) return;
+        setAudioLoading(false);
+        setAudioError(null);
+      };
+      const onWaiting = () => {
+        // Audio is waiting for data - show loading
+        if (audio === audioRef.current && audio.readyState < 3) { // HAVE_FUTURE_DATA
+          setAudioLoading(true);
+        }
+      };
+      const onPlaying = () => {
+        if (audio !== audioRef.current) return;
+        setAudioLoading(false);
+        setAudioError(null);
+        const t = ttfaRef.current;
+        if (t && t.songId === loadedIdRef.current) {
+          ttfaRef.current = null;
+          relayLog(`TTFA ${t.songId} ${Math.round(performance.now() - t.start)} cached=${t.cached}`);
+        }
+      };
+      audio.addEventListener("error", onError);
+      audio.addEventListener("canplay", onCanPlay);
+      audio.addEventListener("waiting", onWaiting);
+      audio.addEventListener("playing", onPlaying);
+      return () => {
+        audio.removeEventListener("error", onError);
+        audio.removeEventListener("canplay", onCanPlay);
+        audio.removeEventListener("waiting", onWaiting);
+        audio.removeEventListener("playing", onPlaying);
+      };
     };
-    const onCanPlay = () => {
-      setAudioLoading(false);
-      setAudioError(null);
-    };
-    const onWaiting = () => {
-      // Audio is waiting for data - show loading
-      if (audio.readyState < 3) { // HAVE_FUTURE_DATA
-        setAudioLoading(true);
-      }
-    };
-    const onPlaying = () => {
-      setAudioLoading(false);
-      setAudioError(null);
-      const t = ttfaRef.current;
-      if (t && t.songId === loadedIdRef.current) {
-        ttfaRef.current = null;
-        relayLog(`TTFA ${t.songId} ${Math.round(performance.now() - t.start)} cached=${t.cached}`);
-      }
-    };
-    audio.addEventListener("error", onError);
-    audio.addEventListener("canplay", onCanPlay);
-    audio.addEventListener("waiting", onWaiting);
-    audio.addEventListener("playing", onPlaying);
+    const detach = elements.map(attach);
 
     // Start position reporting to backend every 2s
     store.startPositionReporting((ms) => {
@@ -110,23 +125,32 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     });
 
     return () => {
-      audio.removeEventListener("error", onError);
-      audio.removeEventListener("canplay", onCanPlay);
-      audio.removeEventListener("waiting", onWaiting);
-      audio.removeEventListener("playing", onPlaying);
+      detach.forEach((d) => d());
       store.stopPositionReporting();
+      store.stopFading();
       store.setAudioElement(null);
       loadAbort.current?.abort();
-      audio.pause();
-      audio.removeAttribute("src");
-      audio.load();
+      for (const audio of elements) {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      }
     };
   }, []);
 
-  /** Resolve the stream (/play), then point the audio element at it — unless a newer load started. */
-  const load = useCallback(async (song: Song) => {
+  /**
+   * Resolve the stream (/play), then point the audio element at it — unless a newer load started.
+   * `crossfade`: load on the spare element and let the playing one fade out (store.handOver).
+   */
+  const load = useCallback(async (song: Song, crossfade = false) => {
+    if (!audioRef.current || !spareRef.current) return;
+    if (crossfade && !audioRef.current.paused) {
+      [audioRef.current, spareRef.current] = [spareRef.current, audioRef.current];
+      store.handOver(audioRef.current);
+    } else {
+      store.stopFading(); // a skip during a crossfade cuts the fading song
+    }
     const audio = audioRef.current;
-    if (!audio) return;
     const gen = ++loadGen.current;
     loadAbort.current?.abort();
     const ctrl = new AbortController();
@@ -144,6 +168,8 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     setAudioError(null);
     setAudioLoading(true);
     store.setDurationMs(song.duration_ms || 0);
+    audio.dataset.songId = song.id;
+    const loudness = store.requestLoudness(song.id); // in parallel with /play
 
     try {
       const info = await api.playSong(song.id, ctrl.signal, {
@@ -152,6 +178,9 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
         cover_url: song.thumbnail_url ? coverUrl(song.thumbnail_url, 240) : "",
       });
       if (gen !== loadGen.current) return; // a newer song was chosen
+      // Normalization: start at the right volume rather than jump when the loudness arrives (≤ 1 s wait)
+      await Promise.race([loudness, new Promise((r) => setTimeout(r, 1000))]);
+      if (gen !== loadGen.current) return;
       store.setDurationMs(info.duration_ms);
       ttfaRef.current = { songId: song.id, start, cached: info.cached_ahead };
       loadedIdRef.current = song.id;
@@ -172,7 +201,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
   useEffect(() => {
     if (state.playToken === handledTokenRef.current) return;
     handledTokenRef.current = state.playToken;
-    if (state.currentSong) load(state.currentSong);
+    if (state.currentSong) load(state.currentSong, state.playToken === store.crossfadeToken);
   }, [state.playToken, state.currentSong, load]);
 
   // The queue was emptied: release the audio element
@@ -182,6 +211,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     const audio = audioRef.current;
     if (!audio || !audio.getAttribute("src")) return;
     store.endListening("stopped");
+    store.stopFading();
     loadGen.current++;
     loadAbort.current?.abort();
     loadedIdRef.current = "";
@@ -227,6 +257,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
       return;
     }
     if (state.isPlaying) {
+      store.stopFading(); // pausing mid-crossfade ends the previous song
       audio.pause();
       api.pause().catch(() => {});
       api.updatePosition(Math.floor(audio.currentTime * 1000)).catch(() => {}); // the widget freezes here
@@ -260,6 +291,7 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     const audio = audioRef.current;
     if (!audio) return;
     store.endListening("stopped");
+    store.stopFading();
     audio.pause();
     audio.currentTime = 0;
     api.stop().catch(() => {});

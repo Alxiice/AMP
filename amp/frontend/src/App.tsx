@@ -54,9 +54,10 @@ export default function App() {
   const [queueOpen, setQueueOpen] = useState(readQueueOpen);
   const authStatus = useAuthStatus();
   const navigate = useNavigate();
-  const { fadeSec } = useSettings();
+  const { fadeSec, normalize } = useSettings();
 
   useEffect(() => store.setFadeSec(fadeSec), [fadeSec]);
+  useEffect(() => store.setNormalize(normalize), [normalize]);
 
   useEffect(() => {
     // Follow the backend Tauri started (health, output); it is not spawned from here
