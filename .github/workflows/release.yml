@@ -1,0 +1,101 @@
+name: Release
+
+# Push a tag like v1.0.0 (or run it by hand) to build AMP on Windows, macOS and Linux and attach
+# everything to a draft GitHub release. Review the draft, then publish it.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            os: windows-latest
+            bundles: msi,nsis
+          - name: macOS Apple Silicon
+            os: macos-latest
+            bundles: app,dmg
+          - name: Linux x64
+            # The oldest supported runner, so the .deb and AppImage run on older distributions too
+            os: ubuntu-22.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev pkg-config libfuse2 file
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: amp/frontend/src-tauri
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: amp/requirements.lock
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: amp/frontend/package-lock.json
+
+      - name: Install Python dependencies
+        working-directory: amp
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.lock
+
+      - name: Install frontend dependencies
+        working-directory: amp/frontend
+        run: npm ci
+
+      - name: Build (sidecar + Tauri), collect into build/
+        working-directory: amp
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: python scripts/build_release.py --smoke --bundles ${{ matrix.bundles }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amp-${{ runner.os }}
+          path: |
+            build/*.zip
+            build/*.tar.gz
+            build/installers/*
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: AMP ${{ github.ref_name }}
+          body_path: CHANGELOG.md
+          files: dist/**/*
