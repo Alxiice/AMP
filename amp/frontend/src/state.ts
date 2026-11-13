@@ -11,7 +11,7 @@
 
 import { useSyncExternalStore } from "react";
 import { api, type Song } from "./api";
-import { loadQueue, saveQueue } from "./player/persistence";
+import { DEFAULT_VOLUME, loadQueue, saveQueue } from "./player/persistence";
 import { fadeGain } from "./player/fade";
 import { HistoryTracker, parsePending, PENDING_KEY, type EndReason, type HistoryEntryBody } from "./player/history";
 import { shouldPrefetch } from "./player/prefetch";
@@ -63,7 +63,7 @@ class StateStore {
     isPlaying: false,
     positionMs: 0,
     durationMs: 0,
-    volume: 1.0,
+    volume: DEFAULT_VOLUME,
   };
 
   private listeners: Set<Listener> = new Set();
