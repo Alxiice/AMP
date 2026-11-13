@@ -9,6 +9,8 @@ import type { Song } from "../api";
 import type { RepeatMode } from "./queue";
 
 export const QUEUE_STORAGE_KEY = "amp.queue.v1";
+/** Volume when nothing (or no valid volume) is stored. */
+export const DEFAULT_VOLUME = 0.5;
 
 export interface PersistedQueue {
   songs: Song[];
@@ -52,7 +54,7 @@ export function parseQueue(raw: string | null): PersistedQueue | null {
   const songs = d.songs.filter(isSong).map(normalizeSong);
   const idx = typeof d.currentIndex === "number" && Number.isInteger(d.currentIndex) ? d.currentIndex : -1;
   const currentIndex = idx >= 0 && idx < songs.length ? idx : songs.length > 0 ? 0 : -1;
-  const v = typeof d.volume === "number" && Number.isFinite(d.volume) ? d.volume : 1;
+  const v = typeof d.volume === "number" && Number.isFinite(d.volume) ? d.volume : DEFAULT_VOLUME;
   const repeat = d.repeat === "all" || d.repeat === "one" ? d.repeat : "off";
   return { songs, currentIndex, volume: Math.min(1, Math.max(0, v)), repeat };
 }

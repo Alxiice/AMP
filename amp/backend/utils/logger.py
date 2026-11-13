@@ -42,11 +42,6 @@ def get_ring_lines(n: int = 200) -> List[str]:
     return lines[-n:]
 
 
-def clear_ring() -> None:
-    with _ring_lock:
-        _ring.clear()
-
-
 def _rotating(path) -> RotatingFileHandler:
     # delay: the file is opened on the first record, so tests that never log create nothing
     return RotatingFileHandler(path, maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUP_COUNT,

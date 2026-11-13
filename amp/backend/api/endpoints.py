@@ -21,8 +21,9 @@ from backend.database.models import LikedSong, ListeningHistory, SavedQueue, Son
 from backend.database.session import get_db
 from backend.services.streaming import get_streaming_service, validate_song_id
 from backend.services.youtube import get_youtube_service
-from backend.utils.logger import get_ring_lines
+from backend.utils.logger import get_logger, get_ring_lines
 
+logger = get_logger("backend.api.endpoints")
 router = APIRouter(prefix="/api", tags=["api"])
 
 
@@ -84,6 +85,30 @@ def get_song(song_id: str, db: Session = Depends(get_db)):
         return SongResponse(**data)
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Failed to fetch song: {e}")
+
+
+@router.get("/song/{song_id}/album")
+def get_song_album(song_id: str):
+    """GET /api/song/{id}/album → {album_id} (null when the song has no album)."""
+    validate_song_id(song_id)
+    try:
+        return {"album_id": get_youtube_service().get_song_album_id(song_id)}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to find the album: {e}")
+
+
+@router.get("/song/{song_id}/loudness")
+def get_song_loudness(song_id: str):
+    """GET /api/song/{id}/loudness → {loudness_db}: YouTube's loudness for volume normalization.
+
+    Best effort: null when YouTube doesn't report it or the lookup fails (the player then leaves the volume alone).
+    """
+    validate_song_id(song_id)
+    try:
+        return {"loudness_db": get_youtube_service().get_loudness_db(song_id)}
+    except Exception as e:
+        logger.warning("Loudness lookup failed for %s: %s", song_id, e)
+        return {"loudness_db": None}
 
 
 @router.get("/artist/{artist_id}")

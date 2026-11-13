@@ -28,7 +28,7 @@ playback work without an account; signing in with YouTube adds your liked songs 
 - **Queue** with drag and drop, shuffle and restore, repeat, saved queues; restored on restart
 - **Your library**: liked songs and playlists after an optional YouTube sign-in
 - **Listening history** with the share of each song you actually heard
-- **Settings**: dark, light or system theme, any accent colour, fade between songs
+- **Settings**: dark, light or system theme, any accent colour, crossfade, volume normalization
 - **OBS now-playing widget** on its own local port, for streamers
 - **Developer tools**: a Developer page in the app and the `app.py` launcher
 

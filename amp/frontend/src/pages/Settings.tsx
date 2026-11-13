@@ -55,13 +55,28 @@ export function Settings() {
 
         <div className="settings-row">
           <div>
-            <div className="settings-label">Fade between songs</div>
-            <div className="settings-hint">The end of each song fades out and the next one fades in.</div>
+            <div className="settings-label">Crossfade</div>
+            <div className="settings-hint">The next song starts this long before the end of the current one: one fades out while the other fades in.</div>
           </div>
           <div className="settings-slider">
             <input type="range" min={0} max={MAX_FADE_SEC} step={0.5} value={s.fadeSec}
-              onChange={(e) => updateSettings({ fadeSec: parseFloat(e.target.value) })} aria-label="Fade duration" />
+              onChange={(e) => updateSettings({ fadeSec: parseFloat(e.target.value) })} aria-label="Crossfade duration" />
             <span className="settings-value">{s.fadeSec === 0 ? "Off" : `${s.fadeSec} s`}</span>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Volume normalization</div>
+            <div className="settings-hint">Plays songs at the same loudness, using YouTube's own measurement of each song: louder songs are turned down, so everything gets a bit quieter. Very quiet songs are not boosted.</div>
+          </div>
+          <div className="segmented" role="radiogroup" aria-label="Volume normalization">
+            {([[false, "Off"], [true, "On"]] as const).map(([value, label]) => (
+              <button key={label} role="radio" aria-checked={s.normalize === value}
+                className={s.normalize === value ? "on" : ""} onClick={() => updateSettings({ normalize: value })}>
+                {label}
+              </button>
+            ))}
           </div>
         </div>
 

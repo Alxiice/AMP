@@ -6,7 +6,7 @@ This folder holds the app itself:
 |---|---|
 | `backend/` | Python backend (FastAPI): search, YouTube sign-in, segment streaming and cache |
 | `frontend/` | React app + `src-tauri/` (the Rust desktop shell) |
-| `scripts/build_sidecar.py` | builds the backend executable that Tauri bundles |
+| `scripts/` | `build_sidecar.py` (backend executable that Tauri bundles), `docs_screenshots.mjs`, `dump_boxes.py` |
 | `app.py` | tkinter debug launcher |
 
 To launch the app, see the [root README](../README.md). Everything else is in the documentation:
@@ -26,4 +26,5 @@ python scripts/build_sidecar.py --smoke            # rebuild + smoke-test the si
 python app.py                                      # debug launcher
 ```
 
-> Personal prototype, not for distribution.
+> Independent project, not affiliated with YouTube or Google. See the ToS note in the
+> [root README](../README.md).

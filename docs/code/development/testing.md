@@ -2,7 +2,7 @@
 
 | Suite | Command (from) | Network | In CI |
 |---|---|---|---|
-| Backend unit (≈380 tests) | `python -m pytest -m "not integration"` (`amp/`) | no | yes |
+| Backend unit (≈420 tests) | `python -m pytest -m "not integration"` (`amp/`) | no | yes |
 | Backend coverage | add `--cov=backend --cov-report=term-missing` | no | yes, floor 60 % (currently ~87 %) |
 | Backend integration | `python -m pytest -m integration` (`amp/`) | **yes** | no |
 | Frontend unit | `npm test` (`amp/frontend/`) | no | yes (Tauri workflow) |
@@ -28,6 +28,9 @@
 | `test_streaming.py` | `StreamingService`: sidx tables, layout identity, `ensure_segment`, 403 refresh, buffer policy |
 | `test_play_api.py` | `/play` contract, error codes, superseded plays, prefetch |
 | `test_endpoints.py` | middleware (Host, Origin, token), route order, auth and log routes |
+| `test_library_api.py` | song/playlist/album normalization, song → album, loudness, likes, saved queues |
+| `test_history.py` | `/api/history`: add, list (days filter, percent), validation, delete / clear |
+| `test_widget.py` | OBS widget server: page, `now.json`, Host check, position extrapolation |
 | `test_auth.py` | SAPISIDHASH, credential store v2, v1 migration, cookie filtering, Netscape file |
 | `test_lifecycle.py` | CLI args, data dir, PID file, socket bind, parent watch (incl. a real subprocess that must exit < 3 s after stdin EOF), log rotation |
 
@@ -74,6 +77,11 @@ vitest, for the pure helpers that don't need a DOM:
 
 - `src/player/player.test.ts`: `describeError`, `describeMediaError`, queue persistence
   (round trip, junk input, clamping), `shouldPrefetch`.
+- `src/player/queue.test.ts`: queue edits, shuffle / restore, navigation and repeat.
+- `src/player/history.test.ts`: `HistoryTracker` (forward time only, end reasons), `parsePending`.
+- `src/player/keyboard.test.ts`: space bar outside text fields.
+- `src/settings.test.ts`: `parseSettings`, accent contrast (`onAccentColor`), `fadeGain`,
+  `crossfadeDue`, `normalizationGain`.
 - `src/authSession.test.ts`: badge labels, a 401 from `/api/user/*` refreshes the status.
 
 ## Documentation screenshots

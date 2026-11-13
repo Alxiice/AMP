@@ -55,6 +55,10 @@ describe("queue persistence", () => {
     expect(q.volume).toBe(1);
   });
 
+  it("defaults the volume to 0.5 when none is stored", () => {
+    expect(parseQueue(JSON.stringify({ songs: [], currentIndex: -1 }))?.volume).toBe(0.5);
+  });
+
   it("empty queue has no current song", () => {
     expect(parseQueue(JSON.stringify({ songs: [], currentIndex: 0, volume: 0.5 }))).toEqual(
       { songs: [], currentIndex: -1, volume: 0.5, repeat: "off" });
