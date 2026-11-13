@@ -13,20 +13,20 @@
   <div class="amp-hero__inner">
     <div class="amp-hero__text">
       <span class="amp-pill"><span class="amp-eq" aria-hidden="true"><i></i><i></i><i></i><i></i></span> Version 1.0 · desktop app</span>
-      <h1>Your YouTube Music library, <span class="amp-gradient">as a fast desktop player.</span></h1>
+      <h1>AMP is a desktop player <span class="amp-gradient">for YouTube Music.</span></h1>
       <p class="amp-lead">
-        AMP streams each song in small segments and keeps them on disk: playback starts right away,
-        you can seek anywhere, and songs you've played before start instantly.
-        No account needed to search and play.
+        It downloads songs in small pieces and keeps them on your disk, so a song starts playing
+        quickly and you can jump to any point in it. Songs you've already played start right away.
+        You can search and play without an account.
       </p>
       <div class="amp-actions">
-        <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">Get started</a>
-        <a class="amp-btn" href="#features">See the features</a>
+        <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">Install</a>
+        <a class="amp-btn" href="#features">Features</a>
         <a class="amp-btn amp-btn--ghost" href="{{ config.repo_url }}">GitHub</a>
       </div>
     </div>
     <div class="amp-hero__visual">
-      <div class="amp-window amp-float">
+      <div class="amp-window">
         <div class="amp-window__bar" aria-hidden="true"><span></span><span></span><span></span><em>AMP</em></div>
         <img src="{{ shots }}search.webp" width="1440" height="900"
              alt="AMP playing a song: search results, the queue panel and the player bar">
@@ -39,19 +39,19 @@
 
 <section class="amp-section" id="features">
   <div class="amp-section__head amp-reveal">
-    <h2>Everything a music player needs. <span class="amp-muted">Nothing it doesn't.</span></h2>
-    <p>A native window, a local backend, and your music: no browser tab, no ads.</p>
+    <h2>What it does</h2>
+    <p>AMP runs in its own window, with a small backend on your computer doing the downloading.</p>
   </div>
   <div class="amp-features">
     {% set features = [
-      ("lightning-bolt", "Starts in milliseconds", "Songs arrive in ~10 s segments. Playback starts with the first one; cached songs start in about 24 ms."),
-      ("skip-forward", "Seek anywhere, instantly", "An exact segment map from the song's own index: jumping ahead fetches just the piece you need."),
-      ("playlist-music", "A queue that sticks", "Play next, drag to reorder, shuffle and restore, repeat one or all. Restored when you reopen the app."),
-      ("heart", "Your library, optionally", "Search and play without an account. Sign in with YouTube to add your liked songs and playlists."),
-      ("history", "Listening history", "Every play, grouped by day, with how much of the song you actually heard and how it ended."),
-      ("broadcast", "Made for streamers", "A now-playing widget for OBS: cover, title, artist and a moving progress bar, on its own local port."),
-      ("palette", "Your colours", "Dark, light or follow Windows, any accent colour, a crossfade of up to 10 seconds and volume normalization."),
-      ("code-braces", "Built-in dev tools", "A Developer page in the app and a small launcher: backend status, live logs, an API tester."),
+      ("lightning-bolt", "Quick to start", "Songs come in pieces of about 10 seconds, and playback starts with the first one. A song you've played before starts in about 24 ms."),
+      ("skip-forward", "Jump anywhere", "When you skip ahead in a song, AMP downloads only the piece you jumped to."),
+      ("playlist-music", "Queue", "Play next, drag to reorder, shuffle, repeat one or all, save a queue for later. It's still there when you reopen the app."),
+      ("heart", "Your library", "No account needed to search and play. If you sign in with YouTube, you also get your liked songs and playlists."),
+      ("history", "History", "Everything you played, by day, with how much of each song you listened to."),
+      ("broadcast", "OBS widget", "If you stream, you can show the current song in OBS: cover, title, artist and progress."),
+      ("palette", "Settings", "Dark or light theme, an accent colour, crossfade between songs (up to 10 s) and volume normalization."),
+      ("code-braces", "Developer tools", "A Developer page in the app and a small launcher, to see what the backend is doing and read its logs."),
     ] %}
     {% for icon, title, text in features %}
     <article class="amp-card amp-reveal" style="--i: {{ loop.index0 }}">
@@ -65,8 +65,8 @@
 
 <section class="amp-section amp-showcase-wrap" id="tour">
   <div class="amp-section__head amp-reveal">
-    <h2>Take the tour</h2>
-    <p>Real screenshots of AMP 1.0.</p>
+    <h2>Screenshots</h2>
+    <p>AMP 1.0.</p>
   </div>
   <div class="amp-showcase amp-reveal" data-interval="5000">
     <div class="amp-showcase__tabs" role="tablist" aria-label="Screens">
@@ -98,24 +98,24 @@
 </section>
 
 <section class="amp-stats amp-reveal" aria-label="Numbers">
-  <div><strong data-count="24">24</strong><span class="amp-unit">ms</span><p>to first audio for a cached song</p></div>
-  <div><strong data-count="1.4" data-decimals="1">1.4</strong><span class="amp-unit">s</span><p>for a song you've never played</p></div>
-  <div><strong data-count="0">0</strong><p>accounts needed to search and play</p></div>
-  <div><strong data-count="10">10</strong><span class="amp-unit">s</span><p>segments, so a seek downloads just one</p></div>
+  <div><strong data-count="24">24</strong><span class="amp-unit">ms</span><p>to start a song you've played before</p></div>
+  <div><strong data-count="1.4" data-decimals="1">1.4</strong><span class="amp-unit">s</span><p>to start a new song</p></div>
+  <div><strong data-count="0">0</strong><p>accounts needed</p></div>
+  <div><strong data-count="10">10</strong><span class="amp-unit">s</span><p>per piece of song</p></div>
 </section>
-<p class="amp-footnote">Measured on the development machine; first audio for a new song mostly depends on YouTube.</p>
+<p class="amp-footnote">Measured on one computer. How long a new song takes mostly depends on YouTube.</p>
 
 <section class="amp-section" id="how">
   <div class="amp-section__head amp-reveal">
     <h2>How it works</h2>
-    <p>The window you see is a Tauri app; a small Python backend runs next to it and stops with it.</p>
+    <p>The window is a Tauri app. A small Python program runs alongside it and stops when you close AMP.</p>
   </div>
   <div class="amp-flow amp-reveal">
-    <div class="amp-flow__step"><span>1</span><h3>Find</h3><p>Search YouTube Music, or open your liked songs, playlists and saved queues.</p></div>
+    <div class="amp-flow__step"><span>1</span><h3>Find</h3><p>You search YouTube Music, or open your liked songs, playlists or a saved queue.</p></div>
     <div class="amp-flow__line" aria-hidden="true"><i></i></div>
-    <div class="amp-flow__step"><span>2</span><h3>Stream</h3><p>The backend resolves the audio, reads its index and fetches the segments around the playhead first.</p></div>
+    <div class="amp-flow__step"><span>2</span><h3>Stream</h3><p>The backend finds the song's audio and downloads the pieces around where you're listening first.</p></div>
     <div class="amp-flow__line" aria-hidden="true"><i></i></div>
-    <div class="amp-flow__step"><span>3</span><h3>Replay</h3><p>Segments stay on disk (500 MB by default, least recently played go first), so replays start at once.</p></div>
+    <div class="amp-flow__step"><span>3</span><h3>Replay</h3><p>Pieces stay on disk (up to 500 MB by default, oldest removed first), so playing a song again is instant.</p></div>
   </div>
 </section>
 
@@ -123,9 +123,9 @@
   <div class="amp-split__text amp-reveal">
     <h2>Show what's playing on stream</h2>
     <p>
-      Add one Browser source in OBS and AMP keeps it up to date: cover, title, artist and a gently
-      moving wave that freezes when you pause. Size it with <code>?w=</code> and <code>?h=</code>;
-      everything scales.
+      Add a Browser source in OBS pointing at AMP's widget and it shows the song that's playing:
+      cover, title, artist and progress. It stops moving when you pause. Set its size with
+      <code>?w=</code> and <code>?h=</code>.
     </p>
     <a class="amp-btn" href="{{ 'usage/obs-widget/' | url }}">Set up the widget</a>
   </div>
@@ -138,10 +138,10 @@
 </section>
 
 <section class="amp-cta amp-reveal">
-  <h2>Ready to listen?</h2>
-  <p>Install the prerequisites, build once, and AMP opens with its own backend.</p>
+  <h2>Install AMP</h2>
+  <p>Download a build for Windows, macOS or Linux, or build it from the source.</p>
   <div class="amp-actions">
-    <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">Install AMP</a>
+    <a class="amp-btn amp-btn--primary" href="{{ 'usage/install/' | url }}">How to install</a>
     <a class="amp-btn" href="{{ 'usage/using-the-app/' | url }}">Read the guide</a>
   </div>
 </section>
