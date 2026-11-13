@@ -94,6 +94,13 @@ see its songs. Tracks YouTube no longer offers are left out. Up to 1000 tracks a
 | ⏭ Next | next song in the queue. Also happens automatically when a song ends |
 | Volume slider | volume, remembered between launches |
 
+### System media controls
+
+AMP shows up in the operating system's media controls (the Windows volume flyout and lock screen,
+MPRIS on Linux, Now Playing on macOS) with the song's title, artist and cover. Play/pause,
+previous, next, stop, seeking and the keyboard media keys all work from there, as if you had
+clicked the player bar.
+
 ### The segment bar
 
 The progress bar is made of one cell per segment of the song (about 10 seconds each). Its colour

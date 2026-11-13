@@ -306,6 +306,55 @@ export function PlayerBar({ backendStatus, queueOpen, onToggleQueue }: PlayerBar
     [],
   );
 
+  // OS media controls (Windows SMTC, MPRIS, macOS Now Playing) via the Media Session API
+  const mediaActions = useRef({ handlePlayPause, handleNext, handlePrevious, handleStop, seekTo });
+  mediaActions.current = { handlePlayPause, handleNext, handlePrevious, handleStop, seekTo };
+  const isPlayingRef = useRef(state.isPlaying);
+  isPlayingRef.current = state.isPlaying;
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    const ms = navigator.mediaSession;
+    const a = () => mediaActions.current;
+    const handlers: [MediaSessionAction, MediaSessionActionHandler][] = [
+      ["play", () => { if (!isPlayingRef.current) a().handlePlayPause(); }],
+      ["pause", () => { if (isPlayingRef.current) a().handlePlayPause(); }],
+      ["nexttrack", () => a().handleNext()],
+      ["previoustrack", () => a().handlePrevious()],
+      ["stop", () => a().handleStop()],
+      ["seekto", (d) => { if (d.seekTime != null) a().seekTo(Math.floor(d.seekTime * 1000)); }],
+    ];
+    for (const [action, h] of handlers) {
+      try { ms.setActionHandler(action, h); } catch { /* action not supported here */ }
+    }
+    return () => {
+      for (const [action] of handlers) {
+        try { ms.setActionHandler(action, null); } catch { /* idem */ }
+      }
+    };
+  }, []);
+
+  const song = state.currentSong;
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.metadata = song
+      ? new MediaMetadata({
+          title: song.title,
+          artist: song.artist,
+          album: song.album,
+          artwork: [{
+            src: song.thumbnail_url ? coverUrl(song.thumbnail_url, 512) : `https://i.ytimg.com/vi/${song.id}/mqdefault.jpg`,
+            sizes: "512x512",
+          }],
+        })
+      : null;
+  }, [song]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    // Position/duration: Chromium reports the <audio> element's own, no setPositionState needed
+    navigator.mediaSession.playbackState = !song ? "none" : state.isPlaying ? "playing" : "paused";
+  }, [song, state.isPlaying]);
+
   // Segment bar click — map click position to time
   const handleSegmentClick = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
