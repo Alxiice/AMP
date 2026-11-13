@@ -2,7 +2,8 @@
 
 ## GitHub Actions
 
-Both workflows run on every push and pull request, on `ubuntu-latest`.
+All three run on `ubuntu-latest`. Python CI and Tauri Build run on every push and pull request;
+Docs runs when `docs/`, `overrides/` or `mkdocs.yml` change.
 
 === "Python CI (`python-ci.yml`)"
 
@@ -17,6 +18,12 @@ Both workflows run on every push and pull request, on `ubuntu-latest`.
     2. Python 3.13 + `requirements.lock`, then `python scripts/build_sidecar.py --smoke`
     3. Node 24, `npm ci`, `npm test` (vitest)
     4. `npx tauri build --bundles deb`, the `.deb` uploaded as an artifact
+
+=== "Docs (`docs.yml`)"
+
+    1. Python 3.13, `pip install -r docs/requirements.txt`
+    2. `mkdocs build --strict`
+    3. On `master` only: deploy the site to GitHub Pages
 
 Integration tests don't run in CI (they need YouTube). The smoke test's search does hit YouTube
 from the runner, which can behave differently from a home connection.
