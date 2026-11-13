@@ -2,9 +2,13 @@
  * Frontend-owned queue + playback state.
  *
  * The queue itself is the pure model in player/queue.ts; this store applies it
- * to the audio element. `playToken` goes up whenever the current song must
+ * to the active audio element. `playToken` goes up whenever the current song must
  * (re)load, which PlayerBar watches; a restored queue stays at 0, so it waits
- * for the play button. Playback position is reported to the backend every 2s
+ * for the play button. Crossfade: in the last `fadeSec` seconds the store moves
+ * to the next song with a playToken equal to `crossfadeToken`; PlayerBar loads it
+ * on its second element and hands it over (`handOver`), the old element keeps
+ * playing its end as the fading one. Only the active element drives history,
+ * position reports and the backend session. Playback position is reported to the backend every 2s
  * (drives buffer-ahead). Queue, current index, volume and repeat persist in
  * localStorage (amp.queue.v1); the next song is prefetched near the end of this one.
  */
@@ -12,7 +16,8 @@
 import { useSyncExternalStore } from "react";
 import { api, type Song } from "./api";
 import { DEFAULT_VOLUME, loadQueue, saveQueue } from "./player/persistence";
-import { fadeGain } from "./player/fade";
+import { crossfadeDue, fadeGain } from "./player/fade";
+import { normalizationGain } from "./player/normalize";
 import { HistoryTracker, parsePending, PENDING_KEY, type EndReason, type HistoryEntryBody } from "./player/history";
 import { shouldPrefetch } from "./player/prefetch";
 import * as Q from "./player/queue";
@@ -67,7 +72,15 @@ class StateStore {
   };
 
   private listeners: Set<Listener> = new Set();
-  private audio: HTMLAudioElement | null = null;
+  private audio: HTMLAudioElement | null = null; // active: the current song
+  private fading: HTMLAudioElement | null = null; // crossfade: the previous song's last seconds
+  private crossfadedUid: number | null = null; // queue item whose crossfade already started
+  /** playToken of a load that must crossfade (PlayerBar compares). */
+  crossfadeToken = -1;
+  private awaitingHandOver = false; // between the crossfade's goTo and PlayerBar's handOver: ignore the old element
+  private normalize = false; // settings: volume normalization
+  private loudness = new Map<string, Promise<number | null>>(); // song id → YouTube loudnessDb
+  private loudnessDb = new Map<string, number | null>();
   private positionTimer: ReturnType<typeof setInterval> | null = null;
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
   private prefetchedFor: string | null = null; // current song id whose successor was prefetched
@@ -107,7 +120,10 @@ class StateStore {
   private setState(partial: Partial<QueueState>): void {
     const prev = this.state;
     // A (re)load ends the play in progress; after "ended" it is already over (no-op)
-    if (partial.playToken !== undefined && partial.playToken !== prev.playToken) this.history.end("skipped");
+    if (partial.playToken !== undefined && partial.playToken !== prev.playToken) {
+      this.history.end("skipped");
+      if (partial.playToken !== this.crossfadeToken) this.awaitingHandOver = false;
+    }
     this.state = { ...prev, ...partial };
     if (this.state.items !== prev.items || this.state.currentIndex !== prev.currentIndex
         || this.state.volume !== prev.volume || this.state.repeat !== prev.repeat) {
@@ -158,6 +174,33 @@ class StateStore {
   getAudioElement(): HTMLAudioElement | null {
     return this.audio;
   }
+
+  /** Crossfade: `next` becomes the active element; the old one, if playing, fades out to its end. */
+  handOver(next: HTMLAudioElement): void {
+    const prev = this.audio;
+    this.awaitingHandOver = false;
+    this.stopFading();
+    this.setAudioElement(next);
+    if (prev && prev !== next && !prev.paused) {
+      this.fading = prev;
+      prev.addEventListener("ended", this._onFadingEnded);
+    }
+    this.updateFadeTimer();
+  }
+
+  /** Cut the fading song short (pause, stop, skip, or it ended). */
+  stopFading(): void {
+    const f = this.fading;
+    if (!f) return;
+    this.fading = null;
+    f.removeEventListener("ended", this._onFadingEnded);
+    f.pause();
+    f.removeAttribute("src");
+    f.load();
+    this.updateFadeTimer();
+  }
+
+  private _onFadingEnded = (): void => this.stopFading();
 
   // --- Queue operations ---
 
@@ -284,23 +327,47 @@ class StateStore {
     this.applyVolume();
   }
 
-  /** Seconds of fade-out at the end of a song and fade-in at the start of the next (0 = off). */
+  /** Crossfade length: the next song starts this many seconds before the end of the current one (0 = off). */
   setFadeSec(sec: number): void {
     this.fadeSec = sec;
     this.updateFadeTimer();
     this.applyVolume();
   }
 
-  /** The element's volume = user volume × fade gain at the current position. */
+  /** Volume normalization on/off; turning it on looks up the loudness of what is playing. */
+  setNormalize(on: boolean): void {
+    this.normalize = on;
+    for (const a of [this.audio, this.fading]) if (a?.dataset.songId) this.requestLoudness(a.dataset.songId);
+    this.applyVolume();
+  }
+
+  /** YouTube's loudness of a song, fetched once per song while normalization is on (null if unknown). */
+  requestLoudness(songId: string): Promise<number | null> {
+    if (!this.normalize) return Promise.resolve(null);
+    let p = this.loudness.get(songId);
+    if (!p) {
+      p = api.getSongLoudness(songId).then((r) => r.loudness_db, () => null).then((db) => {
+        this.loudnessDb.set(songId, db);
+        this.applyVolume();
+        return db;
+      });
+      this.loudness.set(songId, p);
+    }
+    return p;
+  }
+
+  /** Each element's volume = user volume × fade gain at its position × normalization gain of its song. */
   private applyVolume(): void {
-    const a = this.audio;
-    if (!a) return;
-    const durationSec = Number.isFinite(a.duration) ? a.duration : this.state.durationMs / 1000;
-    a.volume = this.state.volume * fadeGain(a.currentTime, durationSec, this.fadeSec);
+    for (const a of [this.audio, this.fading]) {
+      if (!a) continue;
+      const durationSec = Number.isFinite(a.duration) ? a.duration : a === this.audio ? this.state.durationMs / 1000 : NaN;
+      const norm = this.normalize ? normalizationGain(this.loudnessDb.get(a.dataset.songId ?? "")) : 1;
+      a.volume = this.state.volume * fadeGain(a.currentTime, durationSec, this.fadeSec) * norm;
+    }
   }
 
   private updateFadeTimer(): void {
-    const needed = this.fadeSec > 0 && !!this.audio && !this.audio.paused;
+    const needed = (this.fadeSec > 0 && !!this.audio && !this.audio.paused) || !!this.fading;
     if (needed && !this.fadeTimer) {
       this.fadeTimer = setInterval(() => this.applyVolume(), FADE_TICK_MS);
     } else if (!needed && this.fadeTimer) {
@@ -363,12 +430,30 @@ class StateStore {
   // --- Audio event handlers ---
 
   private _onTimeUpdate = (): void => {
-    if (!this.audio) return;
+    if (!this.audio || this.awaitingHandOver) return;
     const positionMs = Math.floor(this.audio.currentTime * 1000);
     this.history.tick(this.state.currentSong, this.audio.currentTime, !this.audio.paused, this.state.durationMs);
     this.setState({ positionMs });
     this.maybePrefetchNext(positionMs);
+    this.maybeCrossfade();
   };
+
+  /** Last `fadeSec` seconds of the current song: move to the next one, which PlayerBar crossfades in. */
+  private maybeCrossfade(): void {
+    const a = this.audio;
+    const uid = this.state.items[this.state.currentIndex]?.uid;
+    if (!a || a.paused || uid === undefined || uid === this.crossfadedUid) return;
+    const durationSec = Number.isFinite(a.duration) ? a.duration : this.state.durationMs / 1000;
+    if (!crossfadeDue(a.currentTime, durationSec, this.fadeSec)) return;
+    const index = Q.nextIndex(this.model(), false);
+    // End of the queue or repeat-one: the song just fades out and ends as before
+    if (index === null || index === this.state.currentIndex) return;
+    this.crossfadedUid = uid;
+    this.history.end("finished");
+    this.crossfadeToken = this.state.playToken + 1;
+    this.awaitingHandOver = true;
+    this.goTo(index);
+  }
 
   /** Once per current song: resolve the next song and queue its first segments (LOW). */
   private maybePrefetchNext(positionMs: number): void {
@@ -377,12 +462,14 @@ class StateStore {
     const next = items[currentIndex + 1]?.song;
     if (!next || !shouldPrefetch(positionMs, durationMs)) return;
     this.prefetchedFor = currentSong.id;
+    this.requestLoudness(next.id);
     api.bufferAhead(next.id, "prefetch").catch((e) => {
       console.warn(`Prefetch of ${next.id} failed:`, e);
     });
   }
 
   private _onEnded = (): void => {
+    if (this.awaitingHandOver) return; // the next song is already loading (crossfade)
     this.history.end("finished");
     this.setState({ isPlaying: false });
     // The audio src change is handled by the PlayerBar component (playToken)
