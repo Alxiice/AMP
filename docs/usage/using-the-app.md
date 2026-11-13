@@ -18,20 +18,35 @@ Each row has a heart (when signed in) and a **⋮** menu, also on right-click:
 
 | Action | What it does |
 |---|---|
+| Go to album | opens the song's album (looked up on YouTube Music; songs uploaded as plain videos have none) |
 | Play next | inserts the song right after the current one |
 | Add to queue | adds it at the end of the queue |
 | Add to / Remove from liked songs | changes the like **on your YouTube account** (signed in only) |
 | Add to saved queue | adds it to a saved queue, or a new one |
 
-Pages showing a list (liked songs, a playlist, a saved queue) have the same actions for the whole
+Pages showing a list (liked songs, a playlist, an album, a saved queue) have the same actions for the whole
 list in their header: **Play**, **Shuffle**, **Play next**, **Add to queue**, **Save as queue**.
+
+## Now playing
+
+**Now playing** (first in the sidebar, or click the song in the player bar) shows the current
+song: big cover, title, artist, album, duration, its place in the queue, the heart, **Go to album**,
+and the next five songs. It follows the queue: when the next song starts, the page switches to it.
+Clicking a song under *Up next* shows that one instead; **← Current song** goes back.
+
+## Albums
+
+**Go to album** opens the album page: cover, artist, year, all its tracks, and the usual
+**Play**, **Shuffle**, **Play next**, **Add to queue**, **Save as queue** buttons.
 
 ## The queue
 
 The queue panel opens and closes with the queue button in the player bar.
 
 - Click a song to jump to it. Songs already played are dimmed.
-- Drag a song, or use its arrows, to reorder. **×** removes it. The same song can be queued twice.
+- Drag a song to reorder. **×** removes it. The same song can be queued twice.
+- Its **⋮** menu has **Display song info** (shows that song on the [Now playing](#now-playing)
+  page), **Go to album**, and the usual [song actions](#song-actions).
 - **Save** stores the queue under a name. **Clear others** keeps only the current song; **Clear**
   empties the queue and stops playback.
 - **Shuffle** randomises the upcoming songs; switching it off restores the order.
@@ -73,7 +88,8 @@ Plays shorter than 5 seconds aren't recorded. The history is stored locally, not
 |---|---|
 | **Theme** | Dark, Light, or System (follows Windows) |
 | **Accent colour** | 8 presets or any colour (**+**). Text on it switches to dark when white would be hard to read |
-| **Fade between songs** | 0–10 s (Off by default): the end of each song fades out and the next one fades in |
+| **Crossfade** | 0–10 s (Off by default): the next song starts that long before the end of the current one; one fades out while the other fades in. Only when a song ends on its own: **Next**, pausing or stopping during the overlap cut the old song |
+| **Volume normalization** | Off by default. Plays songs at the same loudness from YouTube's own loudness measurement of each song: louder songs are turned down to a common level, so everything gets a little quieter (raise the volume to compensate). Songs quieter than that level are not boosted |
 
 Settings are kept on this computer and apply immediately.
 
@@ -92,7 +108,7 @@ see its songs. Tracks YouTube no longer offers are left out. Up to 1000 tracks a
 | Shuffle, Repeat | see [The queue](#the-queue) |
 | Heart | like the current song (signed in only) |
 | ⏭ Next | next song in the queue. Also happens automatically when a song ends |
-| Volume slider | volume, remembered between launches |
+| Volume slider | volume, remembered between launches (half volume the first time) |
 
 ### System media controls
 
