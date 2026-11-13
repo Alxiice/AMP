@@ -1,0 +1,36 @@
+MIT License
+
+Copyright (c) 2026 Alice Sonolet
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+-------------------------------------------------------------------------------
+
+Additional notice
+
+AMP is not affiliated with, endorsed by or connected to YouTube or Google.
+"YouTube" and "YouTube Music" are trademarks of Google LLC.
+
+AMP downloads audio from YouTube using yt-dlp. Doing so may go against
+YouTube's Terms of Service and may not be allowed where you live. You are
+solely responsible for how you use AMP and for complying with the terms of
+the services you access and the laws that apply to you. The authors provide
+no content, host no content, and accept no liability for any use of the
+Software, including any account restriction, data loss or legal claim that
+results from it.
