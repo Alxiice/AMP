@@ -68,6 +68,9 @@ npm install
 npm run tauri dev
 ```
 
+On Windows, double-clicking `AMP.bat` at the repository root does the same (it runs `npm install`
+first if `node_modules` is missing). The sidecar from step 2 is still needed.
+
 The first run compiles the Rust shell, which takes a few minutes. Then the AMP window opens and,
 behind the scenes:
 

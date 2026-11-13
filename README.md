@@ -68,6 +68,8 @@ cd amp/frontend
 npm run tauri dev
 ```
 
+On Windows you can also double-click `AMP.bat` at the repository root, which runs the same command.
+
 ## Build an installer
 
 ```bash
