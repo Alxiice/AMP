@@ -79,7 +79,7 @@
 | Packaging | PyInstaller (backend sidecar binary) + `tauri build` |
 | Dependencies | `requirements.txt` (major-version caps, yt-dlp uncapped) → `requirements.lock` (exact pins, used by CI) |
 | Tests | pytest (unit, mocked) + pytest integration (pinned songs) + pytest-cov |
-| Lint / CI | Ruff (`.ruff.toml`); GitHub Actions: Python CI (lint + unit tests + coverage → Codecov), Tauri Build (sidecar + `.deb`) |
+| Lint / CI | Ruff (`.ruff.toml`); GitHub Actions: Python CI (lint + unit tests + coverage → Codecov), Tauri Build (sidecar + `.deb`), Release (tags: Windows, macOS, Linux → draft release) |
 | External req. | Node.js on `PATH` (yt-dlp JS challenges), Python 3.13 (3.10+ supported), Rust toolchain (Tauri builds) |
 
 **Format choice**: default stream format **itag 140 (AAC 128 kbps, MP4)** — plays in every webview (Chrome/WebView2, WKWebKit, WebKitGTK). Itag 251 (Opus/WebM, ~160 kbps) is supported as a config option; prefer 140 unless Opus is verified on the target platform. Both are DASH on YouTube; both concatenate init+segments into a valid file.
@@ -94,7 +94,7 @@
 ├── DESIGN_DOC.md / AGENTS.md   # spec / progress tracker
 ├── mkdocs.yml, docs/           # documentation site (usage + code)
 ├── icon/                       # logo-square.svg, logo-round.svg
-├── .github/workflows/          # python-ci.yml, tauri-build.yml
+├── .github/workflows/          # python-ci.yml, tauri-build.yml, docs.yml, release.yml
 ├── .ruff.toml
 └── amp/                        # the application (below)
 
@@ -569,7 +569,7 @@ New from Revision 21:
 - Singletons reset between tests (`conftest.py` clears `_instance` globals); temp dirs for cache/DB via the `temp_dirs` fixture (`configure_paths` / `restore_paths`, §10 P27); integration tests copy cookies to `ytm_session.json` and clean up.
 - **Lint**: `ruff check amp/backend/` with `.ruff.toml` (pyflakes, pycodestyle errors, bugbear, bandit; tests excluded). Inline `noqa` must give a reason.
 - **Coverage**: `pytest -m "not integration" --cov=backend` (config in `amp/pyproject.toml`, tests omitted, branch coverage). `fail_under = 60` is a regression floor; raise it as coverage grows.
-- **CI** (GitHub Actions, every push and PR): *Python CI* installs `requirements.lock`, runs Ruff, unit tests with coverage, uploads to Codecov. *Tauri Build* builds the PyInstaller sidecar with `scripts/build_sidecar.py --smoke` (health + search + exit on stdin EOF), then `tauri build --bundles deb` on Ubuntu, and uploads the `.deb`. Integration tests are not run in CI (network).
+- **CI** (GitHub Actions, every push and PR): *Python CI* installs `requirements.lock`, runs Ruff, unit tests with coverage, uploads to Codecov. *Tauri Build* builds the PyInstaller sidecar with `scripts/build_sidecar.py --smoke` (health + search + exit on stdin EOF), then `tauri build --bundles deb` on Ubuntu, and uploads the `.deb`. *Release* (on `v*` tags) runs `scripts/build_release.py` on Windows (msi, nsis), macOS arm64 (dmg) and Ubuntu 22.04 (deb, AppImage) and creates a draft GitHub release; locally the same script collects the portable executable and installers into `<repo>/build/`. Integration tests are not run in CI (network).
 
 ---
 

@@ -4,7 +4,7 @@ While AMP runs, a small page shows the current song (cover, title, artist, progr
 
 ![The widget at 420 × 96](../assets/screenshots/widget.png){ width="420" }
 
-The wave on the progress bar moves while the song plays and freezes on pause.
+The wave covers the part of the song already played and moves while it plays; it freezes on pause. A thin line runs from the dot to the end of the song.
 
 ## Add it to OBS
 

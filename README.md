@@ -70,17 +70,47 @@ npm run tauri dev
 
 On Windows you can also double-click `AMP.bat` at the repository root, which runs the same command.
 
-## Build an installer
+## Download
+
+Ready-made builds for Windows, macOS and Linux are on the
+[Releases page](https://github.com/Alxiice/AMP/releases). You still need Node.js on your `PATH`
+to play songs.
+
+## Build it yourself
+
+All builds go through one script, run from `amp/` with the venv active. It builds the backend
+executable, then the Tauri app, and copies everything into a `build/` folder at the repository
+root:
 
 ```bash
 cd amp
-python scripts/build_sidecar.py
-cd frontend
-npx tauri build
+python scripts/build_release.py              # executable + every installer for this system
+python scripts/build_release.py --exe-only   # just the executable, no installer
 ```
 
-The installers are written to `amp/frontend/src-tauri/target/release/bundle/` (`.msi` and
-`.exe` on Windows, `.deb` on Linux).
+What you get in `build/`:
+
+| Path | What |
+|---|---|
+| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` and `amp-backend[.exe]`. Keep them together; run `AMP` to start. Nothing to install. |
+| `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
+| `installers/` | `.msi` and `-setup.exe` on Windows, `.dmg` on macOS, `.deb` and `.AppImage` on Linux |
+
+Pick installer types with `--bundles`, e.g. `--bundles deb,appimage` or `--bundles nsis`.
+Add `--smoke` to start the backend executable once and check that it works before packaging.
+
+Tauri only builds for the system it runs on, so a Windows machine makes Windows builds, and so on.
+
+### Making a release
+
+The [Release workflow](.github/workflows/release.yml) builds on Windows, macOS and Linux with the
+same script. To publish a version:
+
+1. Set the version in `amp/frontend/src-tauri/tauri.conf.json`, `Cargo.toml` and `package.json`,
+   and add an entry to [CHANGELOG.md](CHANGELOG.md) (it becomes the release notes).
+2. Commit, then tag and push: `git tag v1.0.0 && git push origin v1.0.0`.
+3. When the workflow is done, a draft release with all the files is waiting on GitHub. Check it
+   and publish it.
 
 ## Documentation
 
@@ -105,5 +135,9 @@ mkdocs serve                       # then open http://127.0.0.1:8000
 | [Troubleshooting](https://Alxiice.github.io/AMP/usage/troubleshooting/) | when a song won't play, the app won't start… |
 | [Code](https://Alxiice.github.io/AMP/code/) | architecture, backend, frontend, tests, CI |
 
-> **Independent project**, not affiliated with YouTube or Google. AMP fetches streams the way
-> yt-dlp does, which YouTube's Terms of Service don't allow.
+## License
+
+AMP is released under the [MIT License](LICENSE). It comes with no warranty, and the authors
+aren't liable for how it's used. AMP isn't affiliated with YouTube or Google, and downloading from
+YouTube with yt-dlp may go against YouTube's Terms of Service: using it is your responsibility.
+See [LICENSE](LICENSE) for the full text.

@@ -50,10 +50,10 @@
   .clip.scroll > span { padding-right: 3em; animation: slide var(--dur, 12s) linear infinite; }
   @keyframes slide { to { transform: translateX(-50%); } }
 
-  /* progress: a small wave over the played part, a thin line after it */
+  /* progress: a small wave over the played part, a thin line from the knob to the end (--p) */
   .bar { position: relative; height: calc(var(--h) * .13); margin-top: calc(var(--h) * .05); }
   .bar::before {
-    content: ""; position: absolute; left: 0; right: 0; top: 50%;
+    content: ""; position: absolute; left: var(--p, 0%); right: 0; top: 50%;
     height: max(1.5px, calc(var(--h) * .03)); transform: translateY(-50%);
     background: var(--line); border-radius: 9px;
   }
@@ -84,7 +84,7 @@
   <div class="meta">
     <div class="clip" id="titleClip"><span class="title" id="title"></span></div>
     <div class="clip" id="artistClip"><span class="artist" id="artist"></span></div>
-    <div class="bar"><div class="wave" id="wave"></div><div class="knob" id="knob"></div></div>
+    <div class="bar" id="bar"><div class="wave" id="wave"></div><div class="knob" id="knob"></div></div>
   </div>
 </div>
 <script>
@@ -136,6 +136,7 @@ function frame() {
     const pct = Math.min(100, Math.max(0, pos / now.duration_ms * 100)) + "%";
     $("wave").style.width = pct;
     $("knob").style.left = pct;
+    $("bar").style.setProperty("--p", pct);
   }
   requestAnimationFrame(frame);
 }

@@ -2,8 +2,9 @@
 
 ## GitHub Actions
 
-All three run on `ubuntu-latest`. Python CI and Tauri Build run on every push and pull request;
-Docs runs when `docs/`, `overrides/` or `mkdocs.yml` change.
+Python CI, Tauri Build and Docs run on `ubuntu-latest`. Python CI and Tauri Build run on every
+push and pull request; Docs runs when `docs/`, `overrides/` or `mkdocs.yml` change. Release runs
+on version tags (see [Releases](#releases)).
 
 === "Python CI (`python-ci.yml`)"
 
@@ -71,16 +72,41 @@ the old copy.
 
 Node.js isn't bundled: the installed app needs it on `PATH`.
 
-## Installers
+## Building the app
 
 ```bash
-cd amp && python scripts/build_sidecar.py --smoke
-cd frontend && npx tauri build
+cd amp
+python scripts/build_release.py [--exe-only] [--bundles LIST] [--skip-sidecar] [--smoke]
 ```
 
-Outputs in `frontend/src-tauri/target/release/bundle/`: `msi/` and `nsis/` on Windows, `deb/` on
-Linux. Installers aren't signed (SmartScreen warns), and antivirus tools may flag the one-file
-sidecar; switching the spec to one-folder mode is the fix if that becomes a problem.
+1. Runs `build_sidecar.py` (with `--smoke` if asked), and `npm ci` if `node_modules` is missing.
+2. `npx tauri build` (`--no-bundle` with `--exe-only`, `--bundles LIST` when given).
+3. Copies `target/release/amp[.exe]` (renamed `AMP`) and the `amp-backend[.exe]` Tauri put next
+   to it into `build/AMP-<version>-<os>-<arch>/`, archives that folder (`.zip` on Windows,
+   `.tar.gz` elsewhere), and copies the installers into `build/installers/`.
+
+The version comes from `tauri.conf.json`. `build/` at the repo root is gitignored (not to be
+confused with `amp/build/`, PyInstaller's work folder).
+
+Installers aren't signed (SmartScreen warns, macOS Gatekeeper asks), and antivirus tools may flag
+the one-file sidecar; switching the spec to one-folder mode is the fix if that becomes a problem.
+
+## Releases
+
+`.github/workflows/release.yml` runs on a `v*` tag push (or by hand). Each runner calls
+`build_release.py --smoke --bundles …`:
+
+| Runner | Bundles |
+|---|---|
+| `windows-latest` | `msi,nsis` |
+| `macos-latest` (Apple Silicon) | `app,dmg` |
+| `ubuntu-22.04` | `deb,appimage` (oldest runner, for older glibc) |
+
+On a tag, a last job downloads everything and creates a **draft** GitHub release with
+`CHANGELOG.md` as its notes. Run by hand, it only uploads the files as workflow artifacts.
+
+To release: bump the version in `tauri.conf.json`, `Cargo.toml` and `package.json`, add a
+`CHANGELOG.md` entry, commit, `git tag vX.Y.Z && git push origin vX.Y.Z`, then publish the draft.
 
 ## Dependency upgrades
 
