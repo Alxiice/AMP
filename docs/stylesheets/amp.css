@@ -170,7 +170,7 @@
   background: var(--amp-surface); border: 1px solid var(--amp-border); transition: color .2s, border-color .2s;
 }
 .amp-showcase__tab.is-active { color: var(--md-default-fg-color); border-color: var(--amp-accent); }
-.amp-showcase__tab.is-active .amp-showcase.is-paused .amp-showcase__frames { position: relative; aspect-ratio: 1440 / 900; }
+.amp-showcase__frames { position: relative; aspect-ratio: 1440 / 900; }
 .amp-showcase__frame { position: absolute; inset: 0; opacity: 0; transform: scale(1.015); transition: opacity .6s ease, transform .8s ease; }
 .amp-showcase__frame.is-active { opacity: 1; transform: none; }
 .amp-showcase__caption { text-align: center; color: var(--amp-text-2); font-size: .85rem; margin: 1rem 0 0; min-height: 1.4em; }
