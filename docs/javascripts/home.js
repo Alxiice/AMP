@@ -23,7 +23,6 @@
     const frames = [...tour.querySelectorAll(".amp-showcase__frame")];
     const caption = tour.querySelector(".amp-showcase__caption");
     const interval = Number(tour.dataset.interval) || 5000;
-    tour.style.setProperty("--amp-interval", `${interval}ms`);
     let current = 0;
     let timer = null;
 
@@ -32,11 +31,6 @@
       tabs.forEach((t, n) => {
         t.classList.toggle("is-active", n === current);
         t.setAttribute("aria-selected", String(n === current));
-        // restart the progress bar animation
-        const bar = t.querySelector(".amp-showcase__progress");
-        bar.style.animation = "none";
-        void bar.offsetWidth;
-        bar.style.animation = "";
       });
       frames.forEach((f, n) => f.classList.toggle("is-active", n === current));
       caption.textContent = tabs[current].dataset.caption;
@@ -62,6 +56,27 @@
 
     // only run while visible
     new IntersectionObserver(([e]) => (e.isIntersecting ? start() : stop()), { threshold: 0.3 }).observe(tour);
+  }
+
+  // Tilt screenshots towards the cursor, like a plane pressed where the mouse is (the idea of
+  // vanilla-tilt.js / Apple TV's parallax icons): rotation only, the centre doesn't move.
+  const MAX_TILT = 8; // degrees at the edges
+  if (!reduced && window.matchMedia("(hover: hover)").matches) {
+    document.querySelectorAll("[data-tilt]").forEach((el) => {
+      el.addEventListener("pointermove", (e) => {
+        const r = el.getBoundingClientRect();
+        const x = (e.clientX - r.left) / r.width - 0.5;  // -0.5 (left) … 0.5 (right)
+        const y = (e.clientY - r.top) / r.height - 0.5;  // -0.5 (top) … 0.5 (bottom)
+        el.classList.add("is-tilting");
+        el.style.setProperty("--rx", `${(-y * 2 * MAX_TILT).toFixed(2)}deg`);
+        el.style.setProperty("--ry", `${(x * 2 * MAX_TILT).toFixed(2)}deg`);
+      });
+      el.addEventListener("pointerleave", () => {
+        el.classList.remove("is-tilting");
+        el.style.setProperty("--rx", "0deg");
+        el.style.setProperty("--ry", "0deg");
+      });
+    });
   }
 
   // Count the numbers up once they are on screen

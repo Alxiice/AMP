@@ -1,5 +1,24 @@
 # Install & launch
 
+## The quick way: download a release
+
+Builds for Windows, macOS and Linux are on the
+[Releases page](https://github.com/Alxiice/AMP/releases):
+
+| System | Pick |
+|---|---|
+| Windows | `…-setup.exe` or `….msi` to install, or the `.zip` to run without installing |
+| macOS | the `.dmg` (Apple Silicon) |
+| Ubuntu / Debian | the `.deb` (`sudo apt install ./AMP_….deb`) |
+| Other Linux | the `.AppImage` (`chmod +x`, then run it) |
+
+You still need [Node.js](https://nodejs.org) 18+ on your `PATH` (see below). The builds aren't
+signed: on Windows, SmartScreen warns on first launch ("More info" → "Run anyway"); on macOS,
+right-click the app and choose Open the first time.
+
+The rest of this page is for running AMP from the source code.
+
+
 ## Prerequisites
 
 | Tool | Version | Why |
@@ -71,18 +90,30 @@ npm run tauri dev
 On Windows, double-clicking `AMP.bat` at the repository root does the same (it runs `npm install`
 first if `node_modules` is missing). The sidecar from step 2 is still needed.
 
-The first run compiles the Rust shell, which takes a few minutes. Then the AMP window opens and,
-behind the scenes:
+The f## 4. Build the app (optional)
 
-1. The app starts the backend on a free port, with its data in your per-user app data folder
-   ([where?](configuration.md#where-amp-keeps-its-data)).
-2. The sidebar shows **Backend: running** after a second or two.
-3. When you close the window, the backend stops too. It also stops if the app crashes or is killed.
+One script builds everything and puts the results in `build/` at the repository root:
 
-You can now [search and play](using-the-app.md). Signing in is [optional](sign-in.md).
+```bash
+cd amp
+python scripts/build_release.py              # executable + installers for this system
+python scripts/build_release.py --exe-only   # executable only
+```
 
-!!! info "Only one AMP at a time"
-    Starting AMP a second time brings the running window to the front instead of opening a
+| In `build/` | What |
+|---|---|
+| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` with `amp-backend[.exe]` next to it. Run `AMP` directly, nothing to install; keep both files together. |
+| `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
+| `installers/` | Windows: `.msi` and `-setup.exe` · macOS: `.dmg` · Linux: `.deb` and `.AppImage` |
+
+Options: `--bundles deb,appimage` (or `msi`, `nsis`, `dmg`…) picks installer types, `--smoke`
+tests the backend executable before packaging, `--skip-sidecar` reuses the one already built.
+
+A build runs the bundled backend, not your venv, so it works without Python installed. Tauri
+only builds for the system it runs on; the other systems are built by the
+[Release workflow](../code/development/ci-packaging.md#releases).
+
+e front instead of opening a
     second copy. Two backends sharing the same cache folder would delete each other's files.
 
 ## 4. Build an installer (optional)
