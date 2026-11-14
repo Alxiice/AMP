@@ -132,14 +132,15 @@
 .amp-window__bar span:first-child { background: #ff5f56; } .amp-window__bar span:nth-child(2) { background: #f0a500; } .amp-window__bar span:nth-child(3) { background: #2ecc71; }
 .amp-window__bar em { margin-left: auto; margin-right: auto; font-style: normal; font-size: .7rem; color: #6e6e7a; transform: translateX(-20px); }
 
-/* Screenshots sit straight; they lift slightly on hover */
-.amp-window, .amp-widget-float, .amp-stream img { transition: transform .35s ease, box-shadow .35s ease, filter .35s ease; }
-.amp-window:hover { transform: translateY(-6px) scale(1.01); box-shadow: 0 50px 110px rgba(0, 0, 0, .5), 0 0 0 1px rgba(255, 77, 103, .35); }
+/* Screenshots sit straight. On hover, home.js tilts them towards the cursor ([data-tilt]):
+   the corner under the mouse is pushed away, the centre stays put. */
+[data-tilt] { transform: perspective(1200px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform .5s ease; will-change: transform; }
+[data-tilt].is-tilting { transition: transform .08s linear; }
 .amp-widget-float {
-  position: absolute; width: 52%; left: -9%; bottom: -10%; border-radius: 0 !important;
+  position: absolute; width: 52%; height: auto; left: -9%; bottom: -10%; border-radius: 0 !important;
   filter: drop-shadow(0 18px 30px rgba(0, 0, 0, .45));
 }
-.amp-widget-float:hover, .amp-stream img:hover { transform: translateY(-6px) scale(1.03); filter: drop-shadow(0 26px 40px rgba(0, 0, 0, .55)); }
+
 
 .amp-section { max-width: 1200px; margin: 0 auto; padding: 5rem 1.2rem 1rem; }
 .amp-section__head { text-align: center; max-width: 720px; margin: 0 auto 2.6rem; }
@@ -169,11 +170,7 @@
   background: var(--amp-surface); border: 1px solid var(--amp-border); transition: color .2s, border-color .2s;
 }
 .amp-showcase__tab.is-active { color: var(--md-default-fg-color); border-color: var(--amp-accent); }
-.amp-showcase__progress { position: absolute; left: 0; bottom: 0; height: 2px; width: 0; background: var(--amp-accent); }
-.amp-showcase__tab.is-active .amp-showcase__progress { animation: amp-progress var(--amp-interval, 5s) linear forwards; }
-.amp-showcase.is-paused .amp-showcase__progress { animation-play-state: paused; }
-@keyframes amp-progress { to { width: 100%; } }
-.amp-showcase__frames { position: relative; aspect-ratio: 1440 / 900; }
+.amp-showcase__tab.is-active .amp-showcase.is-paused .amp-showcase__frames { position: relative; aspect-ratio: 1440 / 900; }
 .amp-showcase__frame { position: absolute; inset: 0; opacity: 0; transform: scale(1.015); transition: opacity .6s ease, transform .8s ease; }
 .amp-showcase__frame.is-active { opacity: 1; transform: none; }
 .amp-showcase__caption { text-align: center; color: var(--amp-text-2); font-size: .85rem; margin: 1rem 0 0; min-height: 1.4em; }
@@ -211,7 +208,7 @@
     linear-gradient(135deg, #2b1e4a, #13101f);
   animation: amp-drift 14s ease-in-out infinite alternate;
 }
-.amp-stream img { position: absolute; left: 6%; bottom: 8%; width: 58%; border-radius: 0 !important; filter: drop-shadow(0 12px 24px rgba(0, 0, 0, .35)); }
+.amp-stream img { position: absolute; left: 6%; bottom: 8%; width: 58%; height: auto; border-radius: 0 !important; filter: drop-shadow(0 12px 24px rgba(0, 0, 0, .35)); }
 
 .amp-cta {
   max-width: 1040px; margin: 5rem auto 3rem; padding: 3.2rem 1.5rem; text-align: center; border-radius: 22px;
@@ -244,6 +241,6 @@
 @media (prefers-reduced-motion: reduce) {
   .amp-hero__glow, .amp-eq i, .amp-flow__line i, .amp-stream__scene { animation: none; }
   .js .amp-reveal { opacity: 1; transform: none; transition: none; }
-  .amp-showcase__frame, .amp-window, .amp-widget-float, .amp-stream img { transition: none; }
-  .amp-window:hover, .amp-widget-float:hover, .amp-stream img:hover { transform: none; }
+  .amp-showcase__frame { transition: none; }
+  [data-tilt] { transform: none !important; }
 }

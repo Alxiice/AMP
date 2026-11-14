@@ -26,12 +26,12 @@
       </div>
     </div>
     <div class="amp-hero__visual">
-      <div class="amp-window">
+      <div class="amp-window" data-tilt>
         <div class="amp-window__bar" aria-hidden="true"><span></span><span></span><span></span><em>AMP</em></div>
         <img src="{{ shots }}search.webp" width="1440" height="900"
              alt="AMP playing a song: search results, the queue panel and the player bar">
       </div>
-      <img class="amp-widget-float" src="{{ shots }}widget.png" width="420" height="96"
+      <img class="amp-widget-float" data-tilt src="{{ shots }}widget.png" width="420" height="96"
            alt="The OBS now-playing widget">
     </div>
   </div>
@@ -45,12 +45,12 @@
   <div class="amp-features">
     {% set features = [
       ("lightning-bolt", "Quick to start", "Songs come in pieces of about 10 seconds, and playback starts with the first one. A song you've played before starts in about 24 ms."),
-      ("skip-forward", "Jump anywhere", "When you skip ahead in a song, AMP downloads only the piece you jumped to."),
+      ("youtube", "The whole YouTube Music catalogue", "Search songs, open albums, and play anything that's on YouTube Music, including covers, live versions and remixes you won't find elsewhere."),
       ("playlist-music", "Queue", "Play next, drag to reorder, shuffle, repeat one or all, save a queue for later. It's still there when you reopen the app."),
-      ("heart", "Your library", "No account needed to search and play. If you sign in with YouTube, you also get your liked songs and playlists."),
+      ("heart", "Your YouTube account", "Sign in with YouTube to get your liked songs and playlists, and like songs from AMP. Likes go back to your account. No account needed just to search and play."),
       ("history", "History", "Everything you played, by day, with how much of each song you listened to."),
       ("broadcast", "OBS widget", "If you stream, you can show the current song in OBS: cover, title, artist and progress."),
-      ("palette", "Settings", "Dark or light theme, an accent colour, crossfade between songs (up to 10 s) and volume normalization."),
+      ("volume-high", "Even volume", "Uses the loudness YouTube measures for each song, so a quiet track and a loud one play at about the same level."),
       ("code-braces", "Developer tools", "A Developer page in the app and a small launcher, to see what the backend is doing and read its logs."),
     ] %}
     {% for icon, title, text in features %}
@@ -80,11 +80,11 @@
       {% for file, label, caption in screens %}
       <button role="tab" class="amp-showcase__tab{% if loop.first %} is-active{% endif %}" aria-selected="{{ 'true' if loop.first else 'false' }}"
               data-index="{{ loop.index0 }}" data-caption="{{ caption }}">
-        {{ label }}<span class="amp-showcase__progress" aria-hidden="true"></span>
+        {{ label }}
       </button>
       {% endfor %}
     </div>
-    <div class="amp-window amp-showcase__stage">
+    <div class="amp-window amp-showcase__stage" data-tilt>
       <div class="amp-window__bar" aria-hidden="true"><span></span><span></span><span></span><em>AMP</em></div>
       <div class="amp-showcase__frames">
         {% for file, label, caption in screens %}
@@ -101,9 +101,9 @@
   <div><strong data-count="24">24</strong><span class="amp-unit">ms</span><p>to start a song you've played before</p></div>
   <div><strong data-count="1.4" data-decimals="1">1.4</strong><span class="amp-unit">s</span><p>to start a new song</p></div>
   <div><strong data-count="0">0</strong><p>accounts needed</p></div>
-  <div><strong data-count="10">10</strong><span class="amp-unit">s</span><p>per piece of song</p></div>
+  <div><strong data-count="400">400</strong><span class="amp-unit">MB</span><p>of RAM for the whole app, window and backend together</p></div>
 </section>
-<p class="amp-footnote">Measured on one computer. How long a new song takes mostly depends on YouTube.</p>
+<p class="amp-footnote">Measured on one computer. Memory: AMP 1.0 on Linux while streaming a song (about 150 MB for the page, 140 MB for the backend, the rest for the window). How long a new song takes mostly depends on YouTube.</p>
 
 <section class="amp-section" id="how">
   <div class="amp-section__head amp-reveal">
@@ -130,7 +130,7 @@
     <a class="amp-btn" href="{{ 'usage/obs-widget/' | url }}">Set up the widget</a>
   </div>
   <div class="amp-split__visual amp-reveal">
-    <div class="amp-stream">
+    <div class="amp-stream" data-tilt>
       <div class="amp-stream__scene" aria-hidden="true"></div>
       <img src="{{ shots }}widget.png" width="420" height="96" alt="The now-playing widget over a stream scene">
     </div>
