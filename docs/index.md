@@ -54,6 +54,7 @@ hide:
 | **Backend** | Local FastAPI server (Python), started and stopped by the app |
 | **Audio** | AAC 128 kbps (YouTube itag 140), cut into ~10 s segments |
 | **Cache** | Segments on disk, 500 MB by default, least recently played songs evicted first |
+| **Memory** | About 400 MB in total while playing (measured on Linux) |
 | **Account** | Optional: YouTube cookies, used only for liked songs and playlists |
 | **Platforms** | Windows (tested), Linux and macOS (built by CI, not tested by hand) |
 
