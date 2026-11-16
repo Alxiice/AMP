@@ -101,3 +101,45 @@ bite most often:
   attributes. The test client must send `Host: 127.0.0.1:8000`.
 - Cover images must be loaded without a Referer, or Google's image servers answer with a 429.
 - `chmod 0600` does nothing on Windows; tests check the platform.
+
+## Code organization
+
+<details>
+<summary>Where things live (click to expand)</summary>
+
+The full annotated tree is on the docs page [Repository layout](docs/code/layout.md).
+
+```
+(repo root)
+├── DESIGN_DOC.md, TASKS.md      # design spec, open work and known issues
+├── docs/, mkdocs.yml            # documentation site
+├── .github/workflows/           # CI, docs deploy, release builds
+└── amp/                         # the application
+    ├── app.py                   # tkinter debug launcher
+    ├── scripts/                 # build_sidecar.py, build_release.py, docs screenshots
+    ├── backend/                 # Python (FastAPI)
+    │   ├── main.py, lifecycle.py    # entry point, socket, pid file, parent watch
+    │   ├── config.py                # settings and data paths
+    │   ├── widget.py                # OBS now-playing widget
+    │   ├── api/                     # routes, middleware, error model
+    │   ├── services/
+    │   │   ├── auth.py              # cookies and sign-in
+    │   │   ├── youtube.py           # search, library, likes (ytmusicapi)
+    │   │   ├── extractor.py         # stream extraction (yt-dlp)
+    │   │   └── streaming/           # segment registry, downloader, cache, Range serving
+    │   ├── database/                # SQLite models and session
+    │   ├── utils/                   # MP4 index parser, byte-range math, logging
+    │   └── tests/                   # pytest (unit + integration)
+    └── frontend/
+        ├── src/                     # React app
+        │   ├── api.ts, sidecar.ts   # backend client
+        │   ├── state.ts             # queue and playback store
+        │   ├── player/              # pure helpers with vitest tests
+        │   ├── components/          # PlayerBar, QueuePanel, song lists, menus
+        │   └── pages/               # one file per page
+        └── src-tauri/               # Rust shell
+            └── src/                 # main.rs, backend.rs (starts/stops the backend),
+                                     # youtube_login.rs (sign-in webview)
+```
+
+</details>
