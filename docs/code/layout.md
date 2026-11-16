@@ -6,7 +6,6 @@
 ├── LICENSE                      # MIT + no-affiliation / liability notice
 ├── CHANGELOG.md                 # release notes (used by the Release workflow)
 ├── mkdocs.yml, docs/            # this documentation
-├── AGENTS.md                    # progress tracker: revisions, decisions, known issues
 ├── DESIGN_DOC.md                # design spec, incl. the pitfall list P1–P31
 ├── TASKS.md                     # open work and proposals
 ├── AMP.bat                      # Windows: starts the app in dev mode (npm run tauri dev)

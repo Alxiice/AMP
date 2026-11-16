@@ -43,7 +43,7 @@ omit = ["backend/tests/*"]
 branch = true
 
 [tool.coverage.report]
-fail_under = 60  # regression floor (63% at Revision 8); raise as coverage grows
+fail_under = 60  # regression floor (63% when CI was added); raise as coverage grows
 show_missing = true
 exclude_lines = [
     "pragma: no cover",

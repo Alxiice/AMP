@@ -1,11 +1,7 @@
 # AMP — Tasks
 
-Open work, in no particular order. When an item is done, remove it here and note it as a revision
-in `AGENTS.md`. Items marked **decide** need a choice before implementation.
-
-Done and removed from this list: space bar (Revision 19), Settings page with theme, accent and
-fade (19), listening history (19), Developer page (19), OS media controls (21), true crossfade and
-volume normalization (22).
+Open work, in no particular order. When an item is done, remove it here. Items marked **decide**
+need a choice before implementation.
 
 ## Requested
 
@@ -51,7 +47,7 @@ Suggestions, not yet agreed. Keep, drop or reword.
 - [ ] **P4 — Pre-warm yt-dlp at sidecar startup** (known issue: first extraction in a fresh sidecar
   takes ~3 s, later ones ~1.4 s): import it in a background thread at startup.
 - [ ] **P5 — Search albums, artists and playlists** (known issue): result tabs in Search. The album
-  page exists (Revision 22); artist pages and the search tabs don't.
+  page exists; artist pages and the search tabs don't.
 - [ ] **P7 — Pin songs for offline use**: mark songs/playlists to keep in the cache (excluded from
   LRU eviction) and fully download them in the background. Fits with local music.
 - [ ] **P8 — Widget options**: `?theme=dark`, `?accent=`, hide the cover or the progress bar, via the
@@ -60,3 +56,15 @@ Suggestions, not yet agreed. Keep, drop or reword.
   backend and the frontend, so other local programs can't drive the API.
 - [ ] **P10 — Ship-ready installers**: code signing (SmartScreen warning) and a one-folder
   PyInstaller build if antivirus tools flag the one-file sidecar.
+
+## Known issues
+
+- [ ] Liked state of songs beyond the first 2000 likes is unknown (hearts show empty).
+- [ ] Listened time of a crossfading song's last seconds isn't counted in the history.
+- [ ] `youtube_login.rs` user agent still says Chrome 125.
+- [ ] `CODECOV_TOKEN` repository secret needed for the coverage badge.
+- [ ] MSE upgrade (DESIGN_DOC §8.4), optional.
+
+Not tested by hand yet: installers on Linux/macOS, the Release workflow, webview sign-in with a
+real Google account, crossfade edge cases (pause during the overlap, uncached next song), media
+keys, the widget inside OBS.

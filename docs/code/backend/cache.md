@@ -93,4 +93,4 @@ belongs to the frontend.
 
 After a restart, a cached song still needs one extraction (~1 s) before it plays: the segment
 table is rebuilt from the stream URL, not from `layout.json`. Serving cached songs straight from
-`layout.json` is an open item in `AGENTS.md`.
+`layout.json` is an open item in `TASKS.md` (P2).
