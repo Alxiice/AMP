@@ -8,6 +8,7 @@
 ├── mkdocs.yml, docs/            # this documentation
 ├── DESIGN_DOC.md                # design spec, incl. the pitfall list P1–P31
 ├── TASKS.md                     # open work and proposals
+├── CONTRIBUTING.md              # setup, checks and rules for contributors
 ├── AMP.bat                      # Windows: starts the app in dev mode (npm run tauri dev)
 ├── overrides/home.html          # docs home page template (MkDocs Material)
 ├── icon/                        # logo-square.svg, logo-round.svg
