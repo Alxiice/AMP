@@ -64,7 +64,7 @@ def collect_portable(version: str) -> Path:
         if not src.exists():
             raise SystemExit(f"tauri build produced no {src}")
         shutil.copy2(src, folder / dest_name)
-    for doc in ("LICENSE", "README.md"):
+    for doc in ("LICENSE", "NOTICE", "README.md"):
         if (REPO / doc).exists():
             shutil.copy2(REPO / doc, folder / doc)
     archive = shutil.make_archive(str(folder), "zip" if sys.platform == "win32" else "gztar", OUT, name)
