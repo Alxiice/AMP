@@ -58,7 +58,7 @@ hide:
 | **Account** | Optional: YouTube cookies, used only for liked songs and playlists |
 | **Platforms** | Windows (tested), Linux and macOS (built by CI, not tested by hand) |
 
-AMP is free software under the [MIT License](https://github.com/Alxiice/AMP/blob/master/LICENSE),
+AMP is free software under the [Mozilla Public License 2.0](https://github.com/Alxiice/AMP/blob/master/LICENSE),
 with no warranty. It isn't affiliated with YouTube or Google. It gets songs the same way
 [yt-dlp](https://github.com/yt-dlp/yt-dlp) does, which YouTube's Terms of Service don't allow, so
 using it is your call. When YouTube changes something, playback can stop working until yt-dlp is

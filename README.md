@@ -137,7 +137,7 @@ mkdocs serve                       # then open http://127.0.0.1:8000
 
 ## License
 
-AMP is released under the [MIT License](LICENSE). It comes with no warranty, and the authors
+AMP is released under the [Mozilla Public License 2.0](LICENSE). It comes with no warranty, and the authors
 aren't liable for how it's used. AMP isn't affiliated with YouTube or Google, and downloading from
 YouTube with yt-dlp may go against YouTube's Terms of Service: using it is your responsibility.
-See [LICENSE](LICENSE) for the full text.
+See [LICENSE](LICENSE) for the full text and [NOTICE](NOTICE) for the disclaimer.

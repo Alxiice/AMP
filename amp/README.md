@@ -27,4 +27,4 @@ python scripts/build_release.py --exe-only          # build the app into ../buil
 python app.py                                      # debug launcher
 ```
 
-Released under the [MIT License](../LICENSE).
+Released under the [Mozilla Public License 2.0](../LICENSE).

@@ -3,7 +3,8 @@
 ```
 (repo root)
 ├── README.md                    # what AMP is + how to launch it
-├── LICENSE                      # MIT + no-affiliation / liability notice
+├── LICENSE                      # Mozilla Public License 2.0
+├── NOTICE                       # no-affiliation / liability notice
 ├── CHANGELOG.md                 # release notes (used by the Release workflow)
 ├── mkdocs.yml, docs/            # this documentation
 ├── DESIGN_DOC.md                # design spec, incl. the pitfall list P1–P31
