@@ -11,6 +11,7 @@
 ├── TASKS.md                     # open work and proposals
 ├── CONTRIBUTING.md              # setup, checks and rules for contributors
 ├── AMP.bat                      # Windows: starts the app in dev mode (npm run tauri dev)
+├── AMP-build-and-run.bat        # Windows: rebuilds build/ if the code changed, then starts it
 ├── overrides/home.html          # docs home page template (MkDocs Material)
 ├── icon/                        # logo-square.svg, logo-round.svg
 ├── .github/workflows/           # python-ci.yml, tauri-build.yml, docs.yml, release.yml

@@ -102,12 +102,15 @@ python scripts/build_release.py --exe-only   # executable only
 
 | In `build/` | What |
 |---|---|
-| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` with `amp-backend[.exe]` next to it. Run `AMP` directly, nothing to install; keep both files together. |
+| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` with `amp-backend[.exe]` (and `WebView2Loader.dll` on Windows) next to it. Run `AMP` directly, nothing to install; keep the files together. |
 | `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
 | `installers/` | Windows: `.msi` and `-setup.exe` · macOS: `.dmg` · Linux: `.deb` and `.AppImage` |
 
 Options: `--bundles deb,appimage` (or `msi`, `nsis`, `dmg`…) picks installer types, `--smoke`
 tests the backend executable before packaging, `--skip-sidecar` reuses the one already built.
+
+On Windows, `AMP-build-and-run.bat` at the repository root (or `--run`) rebuilds only what changed,
+without installers or archive, then starts the built app: the quick way to try a small change.
 
 A build runs the bundled backend, not your venv, so it works without Python installed. Tauri
 only builds for the system it runs on; the other systems are built by the

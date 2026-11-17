@@ -77,13 +77,22 @@ Node.js isn't bundled: the installed app needs it on `PATH`.
 ```bash
 cd amp
 python scripts/build_release.py [--exe-only] [--bundles LIST] [--skip-sidecar] [--smoke]
+python scripts/build_release.py --run    # AMP-build-and-run.bat at the repo root
 ```
 
 1. Runs `build_sidecar.py` (with `--smoke` if asked), and `npm ci` if `node_modules` is missing.
 2. `npx tauri build` (`--no-bundle` with `--exe-only`, `--bundles LIST` when given).
-3. Copies `target/release/amp[.exe]` (renamed `AMP`) and the `amp-backend[.exe]` Tauri put next
-   to it into `build/AMP-<version>-<os>-<arch>/`, archives that folder (`.zip` on Windows,
+3. Copies `target/release/amp[.exe]` (renamed `AMP`), the `amp-backend[.exe]` Tauri put next
+   to it and any `*.dll` there into `build/AMP-<version>-<os>-<arch>/`, archives that folder (`.zip` on Windows,
    `.tar.gz` elsewhere), and copies the installers into `build/installers/`.
+
+The Rust toolchain here is `x86_64-pc-windows-gnu`: that target loads `WebView2Loader.dll` at
+startup instead of linking it in (msvc does), so `AMP.exe` without the DLL next to it fails with
+"WebView2Loader.dll was not found".
+
+`--run` rebuilds the sidecar when a file under `backend/`, the spec or `requirements.lock` is newer
+than `binaries/amp-backend-*`, and the app when a frontend or `src-tauri` source (sidecar included)
+is newer than `build/AMP-…/AMP.exe`; then it starts that exe. No installer, no archive.
 
 The version comes from `tauri.conf.json`. `build/` at the repo root is gitignored (not to be
 confused with `amp/build/`, PyInstaller's work folder).

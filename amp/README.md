@@ -24,6 +24,7 @@ python -m pytest -m "not integration"              # unit tests
 python -m pytest -m integration                    # integration tests (network)
 python scripts/build_sidecar.py --smoke            # rebuild + smoke-test the sidecar
 python scripts/build_release.py --exe-only          # build the app into ../build/
+python scripts/build_release.py --run               # rebuild what changed, then start it
 python app.py                                      # debug launcher
 ```
 

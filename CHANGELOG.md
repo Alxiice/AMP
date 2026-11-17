@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **Widget page**: the OBS widget's default size, border / background / progress bar colours and
+  an opacity slider for border and background. The widget picks up changes within a second.
+- The widget's remaining-time line now starts at the knob in OBS too.
+- **Copy YouTube link** in every song's menu (a `youtube.com/watch` link).
+- Windows builds: `WebView2Loader.dll` is copied next to `AMP.exe`, which wouldn't start without it.
+- `AMP-build-and-run.bat` (`build_release.py --run`): rebuilds what changed and starts the built app.
+
 ## 1.0.0 — first release
 
 The first packaged release of AMP, a desktop player for the YouTube Music library.

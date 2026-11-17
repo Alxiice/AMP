@@ -29,7 +29,8 @@ playback work without an account; signing in with YouTube adds your liked songs 
 - **Your library**: liked songs and playlists after an optional YouTube sign-in
 - **Listening history** with the share of each song you actually heard
 - **Settings**: dark, light or system theme, any accent colour, crossfade, volume normalization
-- **OBS now-playing widget** on its own local port, for streamers
+- **OBS now-playing widget** on its own local port, for streamers, with its size, colours and opacity set in the app
+- **Copy YouTube link** from any song's menu
 - **Developer tools**: a Developer page in the app and the `app.py` launcher
 
 <p align="center">
@@ -69,6 +70,7 @@ npm run tauri dev
 ```
 
 On Windows you can also double-click `AMP.bat` at the repository root, which runs the same command.
+To run the built app instead of the dev mode, see [Rebuild and run](#rebuild-and-run-after-small-changes-windows).
 
 ## Download
 
@@ -92,7 +94,7 @@ What you get in `build/`:
 
 | Path | What |
 |---|---|
-| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` and `amp-backend[.exe]`. Keep them together; run `AMP` to start. Nothing to install. |
+| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]`, `amp-backend[.exe]` and, on Windows, `WebView2Loader.dll`. Keep them together; run `AMP` to start. Nothing to install. |
 | `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
 | `installers/` | `.msi` and `-setup.exe` on Windows, `.dmg` on macOS, `.deb` and `.AppImage` on Linux |
 
@@ -100,6 +102,14 @@ Pick installer types with `--bundles`, e.g. `--bundles deb,appimage` or `--bundl
 Add `--smoke` to start the backend executable once and check that it works before packaging.
 
 Tauri only builds for the system it runs on, so a Windows machine makes Windows builds, and so on.
+
+### Rebuild and run after small changes (Windows)
+
+Double-click `AMP-build-and-run.bat` at the repository root (or run
+`python scripts/build_release.py --run` from `amp/`). It rebuilds only what is older than its
+sources (the backend executable, then the app), skips the installers and the archive, and starts
+`build/AMP-1.0.0-windows-x64/AMP.exe`. When nothing changed it starts the app right away.
+It needs the venv in `amp/venv` from [Launch the app](#launch-the-app).
 
 ### Making a release
 

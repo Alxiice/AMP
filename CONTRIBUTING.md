@@ -55,6 +55,7 @@ before building the app, otherwise the app ships the old backend:
 ```bash
 cd amp && venv/Scripts/python.exe scripts/build_sidecar.py --smoke
 cd amp && venv/Scripts/python.exe scripts/build_release.py   # executable + installers in build/
+cd amp && venv/Scripts/python.exe scripts/build_release.py --run   # rebuild what changed, start it (AMP-build-and-run.bat)
 ```
 
 ## Commits and branches
