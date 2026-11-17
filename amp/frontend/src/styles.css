@@ -320,6 +320,7 @@ input[type="range"] { accent-color: var(--text); }
 .swatch.on { box-shadow: 0 0 0 2px var(--surface-2), 0 0 0 4px var(--text); }
 .swatch.custom { background: var(--surface-3); }
 .swatch.custom input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.widget-size { width: 100px; text-align: right; }
 .settings-slider { display: flex; align-items: center; gap: 12px; }
 .settings-slider input { width: 200px; accent-color: var(--accent); }
 .settings-value { min-width: 36px; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }

@@ -84,6 +84,15 @@ export interface HistoryPage {
   listened_ms: number;
 }
 
+/** OBS widget size (px) and colours (#rrggbb), saved by the backend. */
+export interface WidgetSettings {
+  width: number;
+  height: number;
+  border: string;
+  background: string;
+  progress: string;
+}
+
 /** What the OBS widget shows. */
 export interface NowPlaying {
   song_id: string | null;
@@ -300,6 +309,11 @@ export const api = {
   deleteHistoryEntry: (id: number) =>
     fetchApi<{ message: string }>(`/api/history/${id}`, { method: "DELETE" }),
   clearHistory: () => fetchApi<{ deleted: number }>("/api/history", { method: "DELETE" }),
+
+  // --- OBS widget ---
+  getWidgetSettings: () => fetchApi<WidgetSettings>("/api/widget/settings"),
+  saveWidgetSettings: (ws: WidgetSettings) =>
+    fetchApi<WidgetSettings>("/api/widget/settings", { method: "PUT", body: JSON.stringify(ws) }),
 
   // --- Streaming ---
   getStreamAudioUrl: (id: string) => `${BASE_URL}/api/stream/${id}/audio`,

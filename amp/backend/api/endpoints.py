@@ -22,6 +22,7 @@ from backend.database.session import get_db
 from backend.services.streaming import get_streaming_service, validate_song_id
 from backend.services.youtube import get_youtube_service
 from backend.utils.logger import get_logger, get_ring_lines
+from backend.widget import WidgetSettings, load_widget_settings, save_widget_settings
 
 logger = get_logger("backend.api.endpoints")
 router = APIRouter(prefix="/api", tags=["api"])
@@ -409,6 +410,19 @@ def get_playback_state():
 def get_now_playing():
     """GET /api/stream/now-playing — what the OBS widget shows ({song_id: null} when idle)."""
     return get_streaming_service().now_playing() or {"song_id": None}
+
+
+@router.get("/widget/settings")
+def get_widget_settings():
+    """GET /api/widget/settings — OBS widget size and colours."""
+    return load_widget_settings()
+
+
+@router.put("/widget/settings")
+def put_widget_settings(ws: WidgetSettings):
+    """PUT /api/widget/settings — save them; the widget picks them up within a second."""
+    save_widget_settings(ws)
+    return ws
 
 
 @router.get("/stream/logs")

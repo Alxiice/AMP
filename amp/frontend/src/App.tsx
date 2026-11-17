@@ -20,6 +20,7 @@ import { Auth } from "./pages/Auth";
 import { Logs } from "./pages/Logs";
 import { Developer } from "./pages/Developer";
 import { Settings } from "./pages/Settings";
+import { Widget } from "./pages/Widget";
 import { History } from "./pages/History";
 import { useSettings } from "./settings";
 import { store } from "./state";
@@ -35,6 +36,7 @@ const NAV_ITEMS = [
   { path: "/history", label: "History", icon: "history" },
   { path: "/auth", label: "Account", icon: "account" },
   { path: "/settings", label: "Settings", icon: "settings" },
+  { path: "/widget", label: "Widget", icon: "widget" },
   { path: "/logs", label: "Logs", icon: "logs" },
   { path: "/developer", label: "Developer", icon: "code" },
 ];
@@ -190,6 +192,7 @@ export default function App() {
             <Route path="/history" element={<History />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/widget" element={<Widget />} />
             <Route path="/logs" element={<Logs backendLogs={backendLogs} />} />
             <Route path="/developer" element={<Developer backendStatus={backendStatus} onRestart={handleRestart} />} />
           </Routes>

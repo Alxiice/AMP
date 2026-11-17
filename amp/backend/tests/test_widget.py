@@ -102,3 +102,22 @@ def test_widget_unknown_path_404(widget):
 def test_port_in_use_returns_none(widget):
     port = int(widget.rsplit(":", 1)[1])
     assert start_widget_server("127.0.0.1", port) is None
+
+
+def test_widget_settings_saved_and_served(widget, client_no_auth):
+    assert json.loads(_get(widget + "/settings.json")[2])["width"] == 320  # defaults before any save
+    ws = {"width": 500, "height": 120, "border": "#2266ff", "background": "#112233", "progress": "#33dd66"}
+    assert client_no_auth.put("/api/widget/settings", json=ws).status_code == 200
+    assert client_no_auth.get("/api/widget/settings").json() == ws
+    assert json.loads(_get(widget + "/settings.json")[2]) == ws
+
+
+@pytest.mark.parametrize("bad", [{"width": 0}, {"height": 5000}, {"border": "red"}, {"progress": "#12345"}])
+def test_widget_settings_invalid_rejected(client_no_auth, bad):
+    assert client_no_auth.put("/api/widget/settings", json=bad).status_code == 422
+
+
+def test_widget_settings_corrupt_file_gives_defaults(temp_dirs):
+    from backend.widget import WidgetSettings, _settings_file, load_widget_settings
+    _settings_file().write_text("{not json", encoding="utf-8")
+    assert load_widget_settings() == WidgetSettings()

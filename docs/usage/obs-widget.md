@@ -13,13 +13,20 @@ The wave covers the part of the song already played and moves while it plays; it
 3. Set the source's **Width** / **Height** to the same `w` and `h` (or a little larger).
 
 `w` and `h` are the card size in pixels. Text, cover and progress bar scale with `h`, so a short card stays readable.
-Without them the card is 320 × 72.
+Without them the card uses the size set on the app's **Widget** page (320 × 72 by default).
+
+## Widget page
+
+The **Widget** page in the app sets the card's default width and height and three colours: border, background
+(shown 90 % opaque) and progress bar. The widget picks up changes within a second, no OBS refresh needed.
+`w` / `h` in the source URL still win over the size set here.
 
 The card fades in when a song starts and hides when playback stops or AMP closes.
 The wave on the progress bar moves while the song plays and freezes on pause.
 
 ## Details
 
+- Size and colours are saved in `widget.json` in the AMP data folder and served on `GET /settings.json`.
 - The page polls `GET /now.json` every second: `{song_id, title, artist, cover_url, duration_ms, position_ms, is_playing}`, or `{"song_id": null}` when nothing plays.
 - The player sends title, artist and cover with `POST /api/stream/{id}/play`; the position comes from the usual position reports (every 2 s, and on pause). The page fills the gaps itself.
 - Port: `8001` by default, `WIDGET_PORT` or `--widget-port` to change it, `0` to turn it off. If the port is taken (for example a second backend started by `app.py`), the backend logs a warning and runs without the widget.
