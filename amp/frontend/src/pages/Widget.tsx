@@ -2,22 +2,33 @@ import { useEffect, useState } from "react";
 import { api, type WidgetSettings } from "../api";
 import { toast } from "../ui";
 
-const DEFAULTS: WidgetSettings = { width: 320, height: 72, border: "#f4c0d1", background: "#fff1f4", progress: "#d4537e" };
+const DEFAULTS: WidgetSettings = { width: 320, height: 72, border: "#f4c0d1", background: "#fff1f4", progress: "#d4537e", text: "#4b1528", opacity: 90 };
 const SIZES: Array<["width" | "height", string, number, number]> = [["width", "Width", 50, 4000], ["height", "Height", 20, 1000]];
 const COLOURS: Array<[keyof WidgetSettings, string, string]> = [
   ["border", "Border", "Card outline and the line for the rest of the song."],
-  ["background", "Background", "Shown 90 % opaque."],
+  ["background", "Background", "Its opacity is set below."],
   ["progress", "Progress bar", "The wave and the dot."],
+  ["text", "Text", "Title; the artist uses it at 75 %."],
 ];
 
 /** OBS widget settings, saved by the backend so the widget page can read them. */
 export function Widget() {
   const [ws, setWs] = useState<WidgetSettings | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({}); // size fields while out of range
+  const [port, setPort] = useState(0);
 
   useEffect(() => {
     api.getWidgetSettings().then(setWs, () => toast("Couldn't load the widget settings", true));
+    api.health().then((h) => setPort(h.widget_port ?? 0), () => {});
   }, []);
+
+  // No ?w=/?h=: the size set below applies
+  const copyUrl = () => {
+    navigator.clipboard.writeText(`http://127.0.0.1:${port}/`).then(
+      () => toast("Widget URL copied"),
+      () => toast("Couldn't copy the URL", true),
+    );
+  };
 
   if (!ws) return <div className="settings"><h1 className="page-title">Widget</h1></div>;
 
@@ -36,7 +47,13 @@ export function Widget() {
     <div className="settings">
       <div className="page-header">
         <h1 className="page-title">Widget</h1>
-        <button className="btn btn-secondary btn-small" onClick={() => { setDraft({}); save(DEFAULTS); }}>Reset to defaults</button>
+        <div className="btn-row" style={{ marginTop: 0 }}>
+          <button className="btn btn-small" onClick={copyUrl} disabled={!port}
+            title={port ? "Paste it as the URL of an OBS browser source" : "The widget is off or its port is taken"}>
+            Copy widget URL
+          </button>
+          <button className="btn btn-secondary btn-small" onClick={() => { setDraft({}); save(DEFAULTS); }}>Reset to defaults</button>
+        </div>
       </div>
 
       <section className="settings-section">
@@ -67,6 +84,18 @@ export function Widget() {
             </label>
           </div>
         ))}
+
+        <div className="settings-row">
+          <div>
+            <div className="settings-label">Opacity</div>
+            <div className="settings-hint">Border and background. The text, cover and progress bar stay opaque.</div>
+          </div>
+          <div className="settings-slider">
+            <input type="range" min={0} max={100} step={5} value={ws.opacity}
+              onChange={(e) => save({ ...ws, opacity: parseInt(e.target.value, 10) })} aria-label="Widget opacity" />
+            <span className="settings-value">{ws.opacity} %</span>
+          </div>
+        </div>
       </section>
     </div>
   );

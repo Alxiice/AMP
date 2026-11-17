@@ -17,8 +17,8 @@ Without them the card uses the size set on the app's **Widget** page (320 × 72 
 
 ## Widget page
 
-The **Widget** page in the app sets the card's default width and height and three colours: border, background
-(shown 90 % opaque) and progress bar. The widget picks up changes within a second, no OBS refresh needed.
+The **Widget** page in the app sets the card's default width and height and four colours: border, background,
+progress bar and text (the artist line uses it at 75 %), plus one opacity slider for border and background (90 % by default). **Copy widget URL** at the top copies the address to paste in OBS. The widget picks up changes within a second, no OBS refresh needed.
 `w` / `h` in the source URL still win over the size set here.
 
 The card fades in when a song starts and hides when playback stops or AMP closes.

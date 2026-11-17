@@ -35,6 +35,8 @@ class WidgetSettings(BaseModel):
     border: str = Field("#f4c0d1", pattern=HEX)
     background: str = Field("#fff1f4", pattern=HEX)
     progress: str = Field("#d4537e", pattern=HEX)
+    text: str = Field("#4b1528", pattern=HEX)  # title; the artist line uses it at 75 %
+    opacity: int = Field(90, ge=0, le=100)  # % for border and background
 
 
 def _settings_file() -> Path:

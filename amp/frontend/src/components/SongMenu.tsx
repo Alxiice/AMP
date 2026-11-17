@@ -71,6 +71,12 @@ export function SongMenu({ song, x, y, onClose, onRemove, onShowInfo }: SongMenu
       {item("Go to album", () => goToAlbum(song, navigate))}
       {item("Play next", () => { store.playNext([song]); toast("Playing next"); })}
       {item("Add to queue", () => { store.addToQueue([song]); toast("Added to queue"); })}
+      {item("Copy YouTube link", () => {
+        navigator.clipboard.writeText(`https://www.youtube.com/watch?v=${song.id}`).then(
+          () => toast("Link copied"),
+          () => toast("Couldn't copy the link", true),
+        );
+      })}
       {auth?.is_authenticated &&
         item(ids.has(song.id) ? "Remove from liked songs" : "Add to liked songs", () => toggleLike(song))}
       {onRemove && item("Remove from this queue", onRemove)}

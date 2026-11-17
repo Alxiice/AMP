@@ -16,7 +16,7 @@
     --line: #f4c0d1;
     --pink: #d4537e;
     --ink: #4b1528;
-    --ink-dim: #993556;
+    --ink-dim: #4b1528bf;
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { background: transparent; overflow: hidden; }
@@ -28,7 +28,7 @@
     width: var(--w); height: var(--h);
     padding: calc(var(--h) * .07) calc(var(--h) * .18) calc(var(--h) * .07) calc(var(--h) * .07);
     background: var(--cream);
-    border: max(1.5px, calc(var(--h) * .025)) solid var(--line);
+    border: max(1.5px, calc(var(--h) * .025)) solid var(--edge, var(--line));
     border-radius: calc(var(--h) * .24);
     opacity: 0; transform: translateY(8px);
     transition: opacity .5s ease, transform .5s cubic-bezier(.2,.8,.2,1);
@@ -105,9 +105,13 @@ async function loadSettings() {
   styleKey = key;
   css("--w", px("w", s.width) + "px");
   css("--h", px("h", s.height) + "px");
+  const alpha = Math.round(s.opacity * 2.55).toString(16).padStart(2, "0");  // #rrggbbaa
   css("--line", s.border);
-  css("--cream", s.background + "e6");  // 90 % opaque, as before
+  css("--edge", s.border + alpha);
+  css("--cream", s.background + alpha);
   css("--pink", s.progress);
+  css("--ink", s.text);
+  css("--ink-dim", s.text + "bf");
   $("wave").style.backgroundImage = wave(s.progress);
   if (songId) render(now);  // marquees depend on the size
 }

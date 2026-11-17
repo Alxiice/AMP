@@ -91,6 +91,9 @@ export interface WidgetSettings {
   border: string;
   background: string;
   progress: string;
+  text: string;
+  /** 0–100 %, for border and background. */
+  opacity: number;
 }
 
 /** What the OBS widget shows. */

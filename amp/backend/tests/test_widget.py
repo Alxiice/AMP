@@ -106,13 +106,13 @@ def test_port_in_use_returns_none(widget):
 
 def test_widget_settings_saved_and_served(widget, client_no_auth):
     assert json.loads(_get(widget + "/settings.json")[2])["width"] == 320  # defaults before any save
-    ws = {"width": 500, "height": 120, "border": "#2266ff", "background": "#112233", "progress": "#33dd66"}
+    ws = {"width": 500, "height": 120, "border": "#2266ff", "background": "#112233", "progress": "#33dd66", "text": "#ffffff", "opacity": 40}
     assert client_no_auth.put("/api/widget/settings", json=ws).status_code == 200
     assert client_no_auth.get("/api/widget/settings").json() == ws
     assert json.loads(_get(widget + "/settings.json")[2]) == ws
 
 
-@pytest.mark.parametrize("bad", [{"width": 0}, {"height": 5000}, {"border": "red"}, {"progress": "#12345"}])
+@pytest.mark.parametrize("bad", [{"width": 0}, {"height": 5000}, {"border": "red"}, {"progress": "#12345"}, {"opacity": 101}])
 def test_widget_settings_invalid_rejected(client_no_auth, bad):
     assert client_no_auth.put("/api/widget/settings", json=bad).status_code == 422
 
