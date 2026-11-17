@@ -102,8 +102,8 @@ python scripts/build_release.py --exe-only   # executable only
 
 | In `build/` | What |
 |---|---|
-| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]` with `amp-backend[.exe]` (and `WebView2Loader.dll` on Windows) next to it. Run `AMP` directly, nothing to install; keep the files together. |
-| `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
+| `AMP-1.1.0-<os>-<arch>/` | `AMP[.exe]` with `amp-backend[.exe]` (and `WebView2Loader.dll` on Windows) next to it. Run `AMP` directly, nothing to install; keep the files together. |
+| `AMP-1.1.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
 | `installers/` | Windows: `.msi` and `-setup.exe` · macOS: `.dmg` · Linux: `.deb` and `.AppImage` |
 
 Options: `--bundles deb,appimage` (or `msi`, `nsis`, `dmg`…) picks installer types, `--smoke`

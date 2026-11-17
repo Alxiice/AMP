@@ -94,8 +94,8 @@ What you get in `build/`:
 
 | Path | What |
 |---|---|
-| `AMP-1.0.0-<os>-<arch>/` | `AMP[.exe]`, `amp-backend[.exe]` and, on Windows, `WebView2Loader.dll`. Keep them together; run `AMP` to start. Nothing to install. |
-| `AMP-1.0.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
+| `AMP-1.1.0-<os>-<arch>/` | `AMP[.exe]`, `amp-backend[.exe]` and, on Windows, `WebView2Loader.dll`. Keep them together; run `AMP` to start. Nothing to install. |
+| `AMP-1.1.0-<os>-<arch>.zip` / `.tar.gz` | the same folder, archived |
 | `installers/` | `.msi` and `-setup.exe` on Windows, `.dmg` on macOS, `.deb` and `.AppImage` on Linux |
 
 Pick installer types with `--bundles`, e.g. `--bundles deb,appimage` or `--bundles nsis`.
@@ -108,7 +108,7 @@ Tauri only builds for the system it runs on, so a Windows machine makes Windows 
 Double-click `AMP-build-and-run.bat` at the repository root (or run
 `python scripts/build_release.py --run` from `amp/`). It rebuilds only what is older than its
 sources (the backend executable, then the app), skips the installers and the archive, and starts
-`build/AMP-1.0.0-windows-x64/AMP.exe`. When nothing changed it starts the app right away.
+`build/AMP-1.1.0-windows-x64/AMP.exe`. When nothing changed it starts the app right away.
 It needs the venv in `amp/venv` from [Launch the app](#launch-the-app).
 
 ### Making a release

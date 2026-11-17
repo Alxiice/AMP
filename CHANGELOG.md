@@ -1,13 +1,35 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — OBS widget settings
 
-- **Widget page**: the OBS widget's default size, border / background / progress bar colours and
-  an opacity slider for border and background. The widget picks up changes within a second.
-- The widget's remaining-time line now starts at the knob in OBS too.
+**Downloads**
+
+| System | File |
+|---|---|
+| Windows (x64) | `AMP_1.1.0_x64-setup.exe` or `AMP_1.1.0_x64_en-US.msi` (installers), `AMP-1.1.0-windows-x64.zip` (no install) |
+| macOS (Apple Silicon) | `AMP_1.1.0_aarch64.dmg`, `AMP-1.1.0-macos-arm64.tar.gz` (no install) |
+| Linux (x64) | `AMP_1.1.0_amd64.deb` (Debian, Ubuntu), `AMP_1.1.0_amd64.AppImage` (most distributions), `AMP-1.1.0-linux-x64.tar.gz` |
+
+Same requirements as 1.0.0: Node.js 18 or newer on your `PATH`, and the builds aren't signed.
+
+**New**
+
+- **Widget page** in the sidebar for the OBS widget: default width and height, border, background,
+  progress bar and text colours, and one opacity slider for border and background. The widget
+  picks up changes within a second; `?w=` / `?h=` in the OBS URL still override the size.
+  **Copy widget URL** at the top of the page.
 - **Copy YouTube link** in every song's menu (a `youtube.com/watch` link).
-- Windows builds: `WebView2Loader.dll` is copied next to `AMP.exe`, which wouldn't start without it.
-- `AMP-build-and-run.bat` (`build_release.py --run`): rebuilds what changed and starts the built app.
+
+**Fixed**
+
+- The widget's remaining-time line now starts at the knob in OBS too, instead of under the whole bar.
+- Windows builds made with the GNU Rust toolchain copy `WebView2Loader.dll` next to `AMP.exe`,
+  which wouldn't start without it.
+
+**For developers**
+
+- `AMP-build-and-run.bat` at the repository root (`build_release.py --run`): rebuilds only what
+  changed into `build/`, then starts the built app.
 
 ## 1.0.0 — first release
 

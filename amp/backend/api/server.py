@@ -91,7 +91,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
             get_streaming_service().stop()
             logger.info("AMP backend shut down")
 
-    app = FastAPI(title="AMP Backend", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="AMP Backend", version="1.1.0", lifespan=lifespan)
 
     # --- Auth + Host middleware (P17) ---
     class AuthMiddleware(BaseHTTPMiddleware):
@@ -143,7 +143,7 @@ def create_app(auth_token: Optional[str] = None) -> FastAPI:
     # --- Root + Health (no auth required) ---
     @app.get("/")
     def root():
-        return {"app": "AMP", "version": "1.0.0", "status": "running"}
+        return {"app": "AMP", "version": "1.1.0", "status": "running"}
 
     started = time.time()
 
